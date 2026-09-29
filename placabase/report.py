@@ -32,7 +32,7 @@ def ck_vals(us: UnitSet, ch):
 # =================================================================== imagenes
 def input_rows(prj: Project, us: UnitSet) -> list[tuple[str, str]]:
     """Tabla de datos de entrada, convertida a las unidades elegidas."""
-    p, b, c, L = prj.plate, prj.bolts, prj.conc, prj.loads
+    p, b, c, L = prj.plate, prj.bolts, prj.conc, prj.eloads
     q = us.q
     geo = (f"Ø{q('L', p.Dp)}" if p.shape == "Circular"
            else f"{q('L', p.N)} × {q('L', p.B)}")
@@ -66,9 +66,15 @@ def input_rows(prj: Project, us: UnitSet) -> list[tuple[str, str]]:
         ("Soldadura perimetral", f"{prj.welds.perimeter.wtype} "
                                  f"{q('L', prj.welds.perimeter.size)}, "
                                  f"{prj.welds.perimeter.electrode}"),
-        ("Cargas (LRFD)", f"Pu = {q('F', L.Pu)}, Mux = {q('M', L.Mux)}, "
-                          f"Muy = {q('M', L.Muy)}, Vux = {q('F', L.Vux)}, "
-                          f"Vuy = {q('F', L.Vuy)}"),
+        ("Cargas (LRFD)" + (" en ejes de la placa" if prj.loads.tilted else ""),
+         f"Pu = {q('F', L.Pu)}, Mux = {q('M', L.Mux)}, "
+         f"Muy = {q('M', L.Muy)}, Vux = {q('F', L.Vux)}, "
+         f"Vuy = {q('F', L.Vuy)}"),
+        ("Columna inclinada", (f"giro X = {prj.loads.tilt_x:g}°, giro Y = {prj.loads.tilt_y:g}°; "
+                               f"cargas en el eje: Pu = {q('F', prj.loads.Pu)}, "
+                               f"Vux = {q('F', prj.loads.Vux)}, Vuy = {q('F', prj.loads.Vuy)}, "
+                               f"Mux = {q('M', prj.loads.Mux)}, Muy = {q('M', prj.loads.Muy)}")
+                              if prj.loads.tilted else "no (perpendicular a la placa)"),
     ]
 
 
@@ -157,7 +163,7 @@ def export_xlsx(prj: Project, res: Results, path: str,
 
     r = 4
     band(r, "1.  DATOS PRINCIPALES"); r += 1
-    p, b, c, L = prj.plate, prj.bolts, prj.conc, prj.loads
+    p, b, c, L = prj.plate, prj.bolts, prj.conc, prj.eloads
     geo = (f"Ø{u.l(p.Dp):.4g}" if p.shape == "Circular"
            else f"{u.l(p.N):.4g} × {u.l(p.B):.4g}")
     datos = [
@@ -176,7 +182,11 @@ def export_xlsx(prj: Project, res: Results, path: str,
         ("Soldadura", f"ala: {prj.welds.flange.wtype} {float_to_frac(prj.welds.flange.size)}\" · "
                       f"alma: {prj.welds.web.wtype} {float_to_frac(prj.welds.web.size)}\" · "
                       f"perim.: {prj.welds.perimeter.wtype} {float_to_frac(prj.welds.perimeter.size)}\""),
-        ("Cargas factorizadas", f"Pu = {u.f(L.Pu):.4g} {u.F};  Mux = {u.m(L.Mux):.4g} {u.M};  "
+        ("Columna inclinada", (f"giro X = {prj.loads.tilt_x:g}°, giro Y = {prj.loads.tilt_y:g}° "
+                               f"(cargas ingresadas en el eje de la columna)"
+                               if prj.loads.tilted else "no")),
+        ("Cargas factorizadas" + (" (ejes de la placa)" if prj.loads.tilted else ""),
+         f"Pu = {u.f(L.Pu):.4g} {u.F};  Mux = {u.m(L.Mux):.4g} {u.M};  "
                                 f"Muy = {u.m(L.Muy):.4g} {u.M};  Vu = {u.f(L.Vu):.4g} {u.F}"),
     ]
     for k, v in datos:
@@ -352,7 +362,7 @@ def export_docx(prj: Project, res: Results, path: str,
     p0.add_run("Normas: AISC 360-22, AISC Design Guide 1 (2ª Ed.), ACI 318-19 Cap. 17.")
 
     doc.add_heading("1. Datos de entrada", level=1)
-    p, b, c, L = prj.plate, prj.bolts, prj.conc, prj.loads
+    p, b, c, L = prj.plate, prj.bolts, prj.conc, prj.eloads
     rows = input_rows(prj, us)
     t = doc.add_table(rows=0, cols=2)
     t.style = "Light Grid Accent 1"
@@ -559,7 +569,7 @@ def export_pdf(prj: Project, res: Results, path: str,
 
     # ------------------------------------------------------- 1. entrada
     story.append(Paragraph("1. Datos de entrada", H1))
-    p, b, c, L = prj.plate, prj.bolts, prj.conc, prj.loads
+    p, b, c, L = prj.plate, prj.bolts, prj.conc, prj.eloads
     geo = (f"Ø{us.q('L', p.Dp)}" if p.shape == "Circular"
            else f"{us.q('L', p.N)} × {us.q('L', p.B)}")
     rows = [["Concepto", "Descripcion"]]

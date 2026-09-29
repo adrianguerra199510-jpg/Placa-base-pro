@@ -57,12 +57,22 @@ def solve(prj: Project, with_fea: bool = True, detail: bool = True) -> Results:
                           if prj.plate.shape == "Circular"
                           else f"{rec.n('L', prj.plate.N)} × {rec.n('L', prj.plate.B)}")
                 + f" × {rec.n('L', prj.plate.tp)} {u.L}", prj.plate.steel, None)
-        rec.add("Pu", "axial factorizado (compresion +)", "", prj.loads.Pu, "F")
-        rec.add("Mux", "momento respecto al eje fuerte", "", prj.loads.Mux, "M")
-        rec.add("Muy", "momento respecto al eje debil", "", prj.loads.Muy, "M")
+        if prj.loads.tilted:
+            l0 = prj.loads
+            rec.add("Columna inclinada",
+                    f"giro X = {l0.tilt_x:g}°, giro Y = {l0.tilt_y:g}° respecto a la normal de la placa",
+                    "cargas ingresadas en el eje de la columna; a continuacion las "
+                    "componentes proyectadas a los ejes de la placa", None)
+            rec.add("Pu,col", "axial en el eje de la columna", "", l0.Pu, "F")
+            rec.add("Vu,col", "cortante transversal a la columna",
+                    f"√({rec.n('F', l0.Vux)}² + {rec.n('F', l0.Vuy)}²)", l0.Vu, "F")
+        rec.add("Pu", "axial factorizado (compresion +)"
+                + (" — normal a la placa" if prj.loads.tilted else ""), "", prj.eloads.Pu, "F")
+        rec.add("Mux", "momento respecto al eje fuerte", "", prj.eloads.Mux, "M")
+        rec.add("Muy", "momento respecto al eje debil", "", prj.eloads.Muy, "M")
         rec.add("Vu", "cortante resultante",
-                f"√({rec.n('F', prj.loads.Vux)}² + {rec.n('F', prj.loads.Vuy)}²)",
-                prj.loads.Vu, "F")
+                f"√({rec.n('F', prj.eloads.Vux)}² + {rec.n('F', prj.eloads.Vuy)}²)",
+                prj.eloads.Vu, "F")
         rec.add("f'c", "resistencia del concreto", "", prj.conc.fc, "S")
         rec.add("Fy placa", "", prj.plate.steel, prj.plate.mat().Fy, "S")
         rec.add("Anclajes", f"{prj.bolts.n_total} × Ø{prj.bolts.size} in",
@@ -70,9 +80,19 @@ def solve(prj: Project, with_fea: bool = True, detail: bool = True) -> Results:
                 f"{rec.f('L', prj.bolts.hef)}", None)
     R.br = D.bearing(prj, rec)
     br = R.br
-    p, b, c, L = prj.plate, prj.bolts, prj.conc, prj.loads
+    p, b, c, L = prj.plate, prj.bolts, prj.conc, prj.eloads
 
     # ------------------------------------------------------------ avisos
+    if prj.loads.tilted:
+        if abs(prj.loads.tilt_x) > 60 or abs(prj.loads.tilt_y) > 60:
+            R.warnings.append("Inclinacion de columna mayor a 60°: verifique que las formulas de "
+                              "DG1 (columna cuasi-perpendicular a la placa) sigan siendo aplicables.")
+        if abs(L.Tz) > 1e-6:
+            R.warnings.append("La inclinacion genera un momento torsor alrededor de la normal de la "
+                              f"placa (Tz = {L.Tz:.1f} kip·in) que NO se verifica en los pernos "
+                              "ni en la soldadura.")
+        if L.Pu < 0 and prj.loads.Pu > 0:
+            R.warnings.append("La inclinacion convierte la compresion en traccion normal a la placa.")
     if not br.feasible:
         R.warnings.append("** El discriminante del equilibrio es negativo: la placa no puede "
                           "equilibrar Pu y Mu. Aumente N, B o f'c, o acerque los pernos al borde. **")

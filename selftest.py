@@ -160,6 +160,20 @@ print(f"{'2L4X4X1/2 s=3/8 contra AISC':34} Iy={_e.Iy:.2f} (25.1)  Ix={_e.Ix:.2f}
 if abs(_e.Iy - 25.1) > 0.5:
     FAIL.append("seccion doble: Iy no coincide con AISC")
 
+# columna inclinada: la proyeccion conserva la magnitud de fuerza y momento
+_t = Project(); _t.loads.tilt_x = 15.0; _t.loads.tilt_y = 20.0
+_e = _t.eloads
+_f0 = math.hypot(_t.loads.Pu, _t.loads.Vux, _t.loads.Vuy)
+_f1 = math.hypot(_e.Pu, _e.Vux, _e.Vuy)
+_m1 = math.hypot(_e.Mux, _e.Muy, _e.Tz)
+print(f"{'columna inclinada (15°, 20°)':34} |F| {_f0:.3f} -> {_f1:.3f}   |M| 1800 -> {_m1:.3f}")
+if abs(_f0 - _f1) > 1e-6 or abs(_m1 - 1800.0) > 1e-6:
+    FAIL.append("columna inclinada: la rotacion de cargas no conserva la magnitud")
+_t = Project(); _t.loads.tilt_x = 30.0; _t.loads.Vux = 0.0
+if abs(_t.eloads.Pu - 400 * math.cos(math.radians(30))) > 1e-6 or abs(_t.eloads.Vuy - 400 * 0.5) > 1e-6:
+    FAIL.append("columna inclinada: componentes normal/tangencial incorrectas")
+case("columna inclinada 20°", **{"loads.tilt_y": 20.0})
+
 print()
 print("CASOS LIMITE")
 case("placa insuficiente", **{"loads.Mux": 26000.0})

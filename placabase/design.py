@@ -69,7 +69,7 @@ class Bearing:
 
 # ============================================================ A. APLASTAMIENTO
 def bearing(prj: Project, rec: Recorder | None = None) -> Bearing:
-    p, c, L = prj.plate, prj.conc, prj.loads
+    p, c, L = prj.plate, prj.conc, prj.eloads
     u = prj.units()
     r = Bearing()
     Nc, Bc = p.Nc, p.Bc
@@ -221,8 +221,8 @@ def plate_thickness(prj: Project, br: Bearing, rec: Recorder | None = None):
         mx = min(mx, max(0.0, mx_r))
 
     X = 0.0
-    if br.phiPp > 0 and prj.loads.Pu > 0:
-        X = min(1.0, (4 * bh * bw / (bh + bw) ** 2) * (prj.loads.Pu / br.phiPp))
+    if br.phiPp > 0 and prj.eloads.Pu > 0:
+        X = min(1.0, (4 * bh * bw / (bh + bw) ** 2) * (prj.eloads.Pu / br.phiPp))
     lam = 1.0 if X <= 0 else min(1.0, 2 * math.sqrt(X) / (1 + math.sqrt(max(0.0, 1 - X))))
     ln = lam * n_prime
 
@@ -264,7 +264,7 @@ def plate_thickness(prj: Project, br: Bearing, rec: Recorder | None = None):
         rec.add("X", "[4·d·bf/(d+bf)²] · (Pu/φcPp)",
                 f"[4·{rec.n('L', bh)}·{rec.n('L', bw)}/"
                 f"({rec.n('L', bh)}+{rec.n('L', bw)})²] · "
-                f"({rec.n('F', prj.loads.Pu)}/{rec.n('F', br.phiPp)})",
+                f"({rec.n('F', prj.eloads.Pu)}/{rec.n('F', br.phiPp)})",
                 X, "-", "DG1 Ec. 3.3.2")
         rec.add("λ", "min( 1 ; 2·√X / (1+√(1−X)) )",
                 f"min( 1 ; 2·√{X:.3f} / (1+√(1−{X:.3f})) )", lam, "-",
@@ -374,7 +374,7 @@ def weld_group(prj: Project, polys, spec, P=0.0, Mx=0.0, My=0.0, Vx=0.0, Vy=0.0,
 def _welds_generic(prj: Project, rec: Recorder | None):
     """Soldadura perfil-placa para angulos, canales, tes, pletinas y secciones
     dobles: grupo de soldadura en todo el contorno (especificacion 'perimetral')."""
-    L = prj.loads
+    L = prj.eloads
     u = prj.units()
     W = prj.welds.perimeter
     out: list[Check] = []
@@ -420,7 +420,7 @@ def welds(prj: Project, br: Bearing, rec: Recorder | None = None) -> list[Check]
         return _welds_generic(prj, rec)
     s = prj.section.shape()
     W = prj.welds
-    L = prj.loads
+    L = prj.eloads
     u = prj.units()
     out: list[Check] = []
     if rec:
@@ -566,7 +566,7 @@ def _lug_section(prj: Project, rec: Recorder | None) -> list[Check]:
     Se verifica en cada direccion de cortante con la proyeccion del perfil."""
     from .model import WeldSpec
     from .shapes import rect_props
-    L, c, p, ld = prj.lug, prj.conc, prj.plate, prj.loads
+    L, c, p, ld = prj.lug, prj.conc, prj.plate, prj.eloads
     u = prj.units()
     out: list[Check] = []
     sh = L.shape()
@@ -685,7 +685,7 @@ def shear_lug(prj: Project, rec: Recorder | None = None) -> list[Check]:
         return _lug_section(prj, rec)
     if rec:
         rec.section("G.  LLAVE DE CORTE  (ACI 318-19 §17.11 / AISC DG1 §3.5)")
-    V = prj.loads.Vu
+    V = prj.eloads.Vu
     n_lug = 2 if L.direction.startswith("Ambos") else 1
     Vlug = V / n_lug
 
@@ -890,7 +890,7 @@ def stiffeners(prj: Project, br: Bearing, rec: Recorder | None = None) -> list[C
 def column_base(prj: Project) -> list[Check]:
     """Esfuerzos en la seccion del perfil inmediatamente sobre la placa."""
     s = prj.section.eff()
-    L = prj.loads
+    L = prj.eloads
     Fy = prj.section.mat().Fy
     out = []
     sig = L.Pu / s.A + abs(L.Mux) / max(s.Sx, 1e-9) + abs(L.Muy) / max(s.Sy, 1e-9)

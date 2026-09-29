@@ -511,6 +511,12 @@ class MainWindow(QMainWindow):
                "si su momento tracciona el lado opuesto, cambie el signo o gire la "
                "placa 180°.  Vux y Vuy son las componentes del cortante en los ejes "
                "de la placa.  Todos son valores YA FACTORIZADOS (LRFD).")
+        f.group("Inclinacion de la columna")
+        f.num("Giro alrededor de X", "loads.tilt_x", -85, 85, 1.0, 2, "°", help="Inclinacion de la columna respecto a la normal de la placa, girando alrededor del eje X (la columna se inclina hacia +Y/-Y). 0° = perpendicular. Con inclinacion, Pu, Vux, Vuy, Mux y Muy se ingresan en los ejes de la COLUMNA (Pu = axial, V = transversal) y el programa los proyecta a los ejes de la placa para todas las verificaciones.")
+        f.num("Giro alrededor de Y", "loads.tilt_y", -85, 85, 1.0, 2, "°", help="Inclinacion de la columna respecto a la normal de la placa, girando alrededor del eje Y (la columna se inclina hacia +X/-X). 0° = perpendicular. Puede combinarse con el giro alrededor de X.")
+        self.lbl_tilt = QLabel("")
+        self.lbl_tilt.setStyleSheet("color:#595959; font-size:8pt;")
+        f._lay.addRow("En ejes de la placa", self.lbl_tilt)
         f.group("Friccion")
         f.check("Descontar friccion placa-mortero del cortante en pernos", "loads.friction", help="Permite restar el producto del coeficiente de friccion por Pu del cortante que llega a los anclajes. Uselo solo si puede garantizar la compresion permanente y el estado de la interfaz.")
         f.num("Coeficiente μ", "loads.mu_fric", 0.2, 0.9, 0.05, 2, help="Coeficiente de friccion entre la placa y el mortero. Valores habituales de 0.40 a 0.55.")
@@ -1038,7 +1044,11 @@ class MainWindow(QMainWindow):
                               f"Ase={u.q('A', g.Ase)}  agujero {u.q('L', g.dh)}  "
                               f"Abrg={u.q('A', g.Abrg)}")
         self.lbl_count.setText(f"{self.prj.bolts.n_total} pernos")
-        L = self.prj.loads
+        L = self.prj.eloads
+        self.lbl_tilt.setText(
+            (f"Pu={L.Pu:.1f}  Vux={L.Vux:.1f}  Vuy={L.Vuy:.1f} kip;  "
+             f"Mux={L.Mux:.0f}  Muy={L.Muy:.0f} kip·in") if self.prj.loads.tilted
+            else "(columna perpendicular: sin cambios)")
         self.lbl_si.setText(f"Pu={L.Pu*KIP_TO_KN:.1f} kN   Mux={L.Mux*KIPIN_TO_KNM:.1f} kN·m   "
                             f"Muy={L.Muy*KIPIN_TO_KNM:.1f} kN·m   Vu={L.Vu*KIP_TO_KN:.1f} kN"
                             f"      |      Pu={L.Pu:.1f} kip   Mux={L.Mux:.0f} kip·in")

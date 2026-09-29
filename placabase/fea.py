@@ -139,7 +139,7 @@ def run_fea(prj: Project) -> FEAResult:
         r.msg = "SciPy no disponible: el modulo de elementos finitos requiere scipy."
         return r
 
-    p, c, L = prj.plate, prj.conc, prj.loads
+    p, c, L = prj.plate, prj.conc, prj.eloads
     circ = (p.shape == "Circular")
     Bx = p.Dp if circ else p.B
     Ny = p.Dp if circ else p.N
@@ -411,7 +411,7 @@ def run_fea(prj: Project) -> FEAResult:
         per = s.perimeter_weld_len() if s.is_hollow else 2 * s.bf * 2 + 2 * (s.d - 2 * s.tf)
         if per > 0:
             Ften = max(0.0, r.R_bolts)
-            r.weld_line_max = (abs(prj.loads.Mux) / max(s.Sx, 1e-9) * s.A / 2.0 + Ften) / per
+            r.weld_line_max = (abs(prj.eloads.Mux) / max(s.Sx, 1e-9) * s.A / 2.0 + Ften) / per
     except Exception:
         r.weld_line_max = 0.0
 

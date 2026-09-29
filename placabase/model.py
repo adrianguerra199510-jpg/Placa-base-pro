@@ -307,6 +307,33 @@ class Loads:
     Vuy: float = 0.0             # kip
     friction: bool = False       # considerar friccion placa-mortero (mu=0.4/0.55)
     mu_fric: float = 0.40
+    # Inclinacion de la columna respecto a la normal de la placa (0 = perpendicular).
+    # Las cargas de arriba se ingresan en el eje de la columna (axial / transversal).
+    tilt_x: float = 0.0          # grados, giro alrededor de X (inclina la columna hacia Y)
+    tilt_y: float = 0.0          # grados, giro alrededor de Y (inclina la columna hacia X)
+    Tz: float = 0.0              # kip*in, torsion resultante en ejes de la placa (informativo)
+
+    @property
+    def tilted(self) -> bool:
+        return abs(self.tilt_x) > 1e-9 or abs(self.tilt_y) > 1e-9
+
+    def eff(self) -> "Loads":
+        """Cargas proyectadas a los ejes de la placa (X, Y en el plano; Z normal).
+        Fuerza y momento se rotan como vectores: R = Ry(tilt_y)·Rx(tilt_x)."""
+        if not self.tilted:
+            return self
+        import math
+        cx, sx = math.cos(math.radians(self.tilt_x)), math.sin(math.radians(self.tilt_x))
+        cy, sy = math.cos(math.radians(self.tilt_y)), math.sin(math.radians(self.tilt_y))
+        R = [[cy, sy * sx, sy * cx],
+             [0.0, cx, -sx],
+             [-sy, cy * sx, cy * cx]]
+        rot = lambda v: [sum(R[i][j] * v[j] for j in range(3)) for i in range(3)]
+        F = rot([self.Vux, self.Vuy, -self.Pu])
+        M = rot([self.Mux, self.Muy, 0.0])
+        return dataclasses.replace(self, Pu=-F[2], Vux=F[0], Vuy=F[1],
+                                   Mux=M[0], Muy=M[1], Tz=M[2],
+                                   tilt_x=0.0, tilt_y=0.0)
 
     @property
     def Vu(self) -> float:
@@ -349,6 +376,11 @@ class Project:
     conc: Concrete = field(default_factory=Concrete)
     loads: Loads = field(default_factory=Loads)
     fea: FEAOpts = field(default_factory=FEAOpts)
+
+    @property
+    def eloads(self) -> Loads:
+        """Cargas en ejes de la placa (proyectadas si la columna esta inclinada)."""
+        return self.loads.eff()
 
     # --------------------------------------------------------- unidades
     def units(self):

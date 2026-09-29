@@ -20,7 +20,7 @@ def _sqrt_fc_psi(fc_ksi: float) -> float:
 
 def anchor_checks(prj: Project, br: Bearing,
                   rec: Recorder | None = None) -> list[Check]:
-    b, c, L = prj.bolts, prj.conc, prj.loads
+    b, c, L = prj.bolts, prj.conc, prj.eloads
     g = b.geom()
     mat = b.mat()
     u = prj.units()
@@ -50,9 +50,9 @@ def anchor_checks(prj: Project, br: Bearing,
         xs_ = [q[0] for q in grp]; ys_ = [q[1] for q in grp]
         xtmin, xtmax, ytmin, ytmax = min(xs_), max(xs_), min(ys_), max(ys_)
         elastic = True
-    Vua = 0.0 if prj.lug.enabled else prj.loads.Vu
-    if prj.loads.friction and not prj.lug.enabled and L.Pu > 0:
-        Vfric = prj.loads.mu_fric * L.Pu
+    Vua = 0.0 if prj.lug.enabled else prj.eloads.Vu
+    if prj.eloads.friction and not prj.lug.enabled and L.Pu > 0:
+        Vfric = prj.eloads.mu_fric * L.Pu
         Vua = max(0.0, Vua - Vfric)
     Vua_b = Vua / n_tot
 
@@ -93,7 +93,7 @@ def anchor_checks(prj: Project, br: Bearing,
         else:
             rec.add("Nua,perno", "Nua / n_t",
                     f"{rec.n('F', Nua)} / {n_t}", Nua_b, "F")
-        rec.add("Vua", "Vu" + (" − μ·Pu (friccion)" if prj.loads.friction
+        rec.add("Vua", "Vu" + (" − μ·Pu (friccion)" if prj.eloads.friction
                                and not prj.lug.enabled else ""),
                 ("cortante tomado por la llave de corte" if prj.lug.enabled else ""),
                 Vua, "F")

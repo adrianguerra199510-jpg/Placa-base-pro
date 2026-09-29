@@ -21,6 +21,16 @@ que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
 | **Todo** sale en las unidades elegidas: también la columna de observaciones, los ejes de los dibujos y los títulos | Toda la aplicación |
 | **Descripción de cada dato de entrada** en un panel al pie de cada pestaña, más la convención de signos de las cargas | Los 65 campos de entrada |
 
+## Novedades: columna inclinada
+
+Pestaña **Cargas → Inclinacion de la columna**: giro alrededor de X y/o de Y (grados,
+respecto a la normal de la placa; 0° = perpendicular). Con inclinacion, Pu, Vux, Vuy,
+Mux y Muy se ingresan en los ejes de la **columna** (Pu axial, V transversal) y el
+programa los proyecta a los ejes de la placa con R = Ry·Rx antes de TODAS las
+verificaciones (aplastamiento, pernos, soldadura, llave, FEA, CalculiX, informes).
+Ejemplo: giro X = 30° → Pu,placa = Pu·cos30°, Vuy,placa = Vuy·cos30° + Pu·sin30°.
+El torsor Tz que aparece por la inclinacion no se verifica (se emite un aviso).
+
 ## Novedades de la 1.5
 
 | Cambio | Donde |

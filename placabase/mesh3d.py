@@ -437,8 +437,8 @@ def write_driver(prj: Project, folder: str, stem: str) -> str:
     txt = DRIVER.format(
         stem=stem, gmsh=prj.fea.gmsh_path or "gmsh", ccx=prj.fea.ccx_path or "ccx",
         E=ES_KSI, NU=NU_STEEL, ks=ks, kb=kb,
-        Pu=prj.loads.Pu, Mux=prj.loads.Mux, Muy=prj.loads.Muy,
-        Vux=prj.loads.Vux, Vuy=prj.loads.Vuy,
+        Pu=prj.eloads.Pu, Mux=prj.eloads.Mux, Muy=prj.eloads.Muy,
+        Vux=prj.eloads.Vux, Vuy=prj.eloads.Vuy,
         ztop=p.tp + H, A1=p.Nc * p.Bc, tp=p.tp,
         rhole=g.dh / 2.0, rwash=max(g.Fhex, 2.2 * g.db) / 2.0,
         bolts=repr([(round(x, 6), round(y, 6)) for x, y in G.bolt_positions(prj)]))
@@ -672,7 +672,7 @@ def build_inp(prj: Project, mesh_inp: str, out_inp: str, height: float = 0.0) ->
             eid += 1
         L += [f"*SPRING, ELSET=EFRIC{dof}", str(dof), f"{kfric:.8f}"]
 
-    ld = prj.loads
+    ld = prj.eloads
     # En CalculiX los giros de un cuerpo rigido viven en un nodo aparte
     # (ROT NODE): sus grados 1, 2, 3 son las rotaciones y ahi van los momentos.
     rot = ref + 1

@@ -266,7 +266,7 @@ def postprocess(prj: Project, res, meta_path: str) -> Post3D:
     out.Fz_weld = Fz_total
     out.weld_ratio = max((z.ratio for z in out.zones), default=0.0)
 
-    L = prj.loads
+    L = prj.eloads
     out.msg = (f"Concreto {u.q('F', out.R_conc)}  −  pernos {u.q('F', out.T_bolts)}  =  "
                f"{u.q('F', out.R_conc - out.T_bolts)}  (Pu = {u.q('F', L.Pu)})")
     return out

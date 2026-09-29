@@ -171,7 +171,7 @@ def export_inp(prj: Project, path: str, height: float | None = None) -> str:
     L.append(f"{ref}, 6, 6")
 
     # --- paso de carga
-    ld = prj.loads
+    ld = prj.eloads
     L.append("*STEP")
     L.append("*STATIC")
     L.append("*CLOAD")
