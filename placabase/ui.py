@@ -436,7 +436,12 @@ class MainWindow(QMainWindow):
         # ---- rigidizadores
         f = new_form("Rigidizadores")
         f.group("Pletinas rigidizadoras")
-        f.check("Usar rigidizadores", "stiff.enabled", help="Las pletinas reducen el voladizo de la placa y por tanto el espesor requerido, a cambio de soldadura adicional.")
+        self.lbl_stiff_lock = QLabel("Rigidizadores NO disponibles: la columna esta inclinada "
+                                     "(pestaña Cargas). Ponga el giro en 0° para usarlos.")
+        self.lbl_stiff_lock.setStyleSheet("color:#9c0006; font-size:8pt;")
+        self.lbl_stiff_lock.setWordWrap(True)
+        f._lay.addRow("", self.lbl_stiff_lock)
+        self.chk_stiff = f.check("Usar rigidizadores", "stiff.enabled", help="Las pletinas reducen el voladizo de la placa y por tanto el espesor requerido, a cambio de soldadura adicional.")
         f.combo("Posicion", "stiff.position", STIFF_POSITIONS, help="Cara del perfil a la que se sueldan las pletinas. En HSS lo habitual es Perimetro de 4 caras; en perfiles W, Alas o Ambos.")
         f.int_("Cantidad total", "stiff.count", 1, 16, help="Numero total de pletinas del conjunto; el programa las reparte entre las caras segun la posicion elegida.")
         f.num("L (proyeccion desde el perfil)", "stiff.L", 0.5, 40, uk="L", help="Cuanto sobresale la pletina desde la cara del perfil hacia el borde de la placa. Si excede el voladizo disponible el programa la recorta y lo avisa.")
@@ -711,6 +716,8 @@ class MainWindow(QMainWindow):
         self.fill_table()
 
     def load_ui(self):
+        for msg in self.prj.normalize():
+            self.statusBar().showMessage(msg, 10000)
         self._loading = True
         try:
             self.apply_units()
@@ -1016,6 +1023,10 @@ class MainWindow(QMainWindow):
                   self.prj.u_moment)
         # los campos numericos se leen con las unidades ANTERIORES
         self.store_ui()
+        changes = self.prj.normalize()
+        if changes:
+            self.load_ui()                  # refleja el cambio en la casilla
+            QMessageBox.information(self, "Columna inclinada", "\n".join(changes))
         after = (self.prj.u_len, self.prj.u_force, self.prj.u_stress,
                  self.prj.u_moment)
         if before != after:
@@ -1025,6 +1036,10 @@ class MainWindow(QMainWindow):
         self.timer.start(350)
 
     def _update_labels(self):
+        tilted = self.prj.loads.tilted
+        self.chk_stiff.setEnabled(not tilted)
+        self.chk_stiff.setToolTip("No disponible con la columna inclinada." if tilted else "")
+        self.lbl_stiff_lock.setVisible(tilted)
         s = self.prj.section.shape()
         e = self.prj.section.eff()
         uu = self.us

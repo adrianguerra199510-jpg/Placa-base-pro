@@ -382,6 +382,16 @@ class Project:
         """Cargas en ejes de la placa (proyectadas si la columna esta inclinada)."""
         return self.loads.eff()
 
+    def normalize(self) -> list:
+        """Aplica las restricciones entre datos. Devuelve la lista de cambios hechos.
+        Columna inclinada: no se permiten rigidizadores (su geometria y las formulas
+        de DG1 suponen columna perpendicular a la placa)."""
+        changes = []
+        if self.loads.tilted and self.stiff.enabled:
+            self.stiff.enabled = False
+            changes.append("Rigidizadores desactivados: no se permiten con la columna inclinada.")
+        return changes
+
     # --------------------------------------------------------- unidades
     def units(self):
         from .units import UnitSet

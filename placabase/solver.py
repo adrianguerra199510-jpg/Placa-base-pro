@@ -45,6 +45,7 @@ class Results:
 
 def solve(prj: Project, with_fea: bool = True, detail: bool = True) -> Results:
     R = Results()
+    notes = prj.normalize()
     R.rec = Recorder(prj.units()) if detail else None
     rec = R.rec
     if rec:
@@ -83,6 +84,7 @@ def solve(prj: Project, with_fea: bool = True, detail: bool = True) -> Results:
     p, b, c, L = prj.plate, prj.bolts, prj.conc, prj.eloads
 
     # ------------------------------------------------------------ avisos
+    R.warnings += notes
     if prj.loads.tilted:
         if abs(prj.loads.tilt_x) > 60 or abs(prj.loads.tilt_y) > 60:
             R.warnings.append("Inclinacion de columna mayor a 60°: verifique que las formulas de "

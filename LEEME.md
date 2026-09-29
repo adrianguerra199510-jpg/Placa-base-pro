@@ -37,6 +37,8 @@ Mux y Muy se ingresan en los ejes de la **columna** (Pu axial, V transversal) y 
 programa los proyecta a los ejes de la placa con R = Ry·Rx antes de TODAS las
 verificaciones (aplastamiento, pernos, soldadura, llave, FEA, CalculiX, informes).
 Ejemplo: giro X = 30° → Pu,placa = Pu·cos30°, Vuy,placa = Vuy·cos30° + Pu·sin30°.
+Con la columna inclinada **no se permiten rigidizadores**: la casilla se bloquea y, si el
+proyecto ya los tenia, se desactivan al inclinar (o al abrir el archivo).
 El torsor Tz que aparece por la inclinacion no se verifica (se emite un aviso).
 
 ## Novedades de la 1.5
