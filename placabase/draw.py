@@ -1,0 +1,275 @@
+# -*- coding: utf-8 -*-
+"""Dibujo en planta y elevacion de la placa base (matplotlib)."""
+from __future__ import annotations
+import math
+import warnings
+import logging
+logging.getLogger("matplotlib.axes._base").setLevel(logging.ERROR)
+import numpy as np
+from matplotlib.patches import Circle, Rectangle, Polygon
+
+from .model import Project
+from . import geometry as G
+from .units import float_to_frac, UnitSet
+
+C_PLATE = "#1f3864"
+C_PROF = "#c00000"
+C_HOLE = "#0070c0"
+C_LUG = "#00843d"
+C_STIF = "#b26b00"
+C_DIM = "#555555"
+
+
+warnings.filterwarnings(
+    "ignore", message="Ignoring fixed .* limits to fulfill fixed data aspect")
+
+
+def plan_view(ax, prj: Project, show_dims=True, labels=True):
+    ax.clear()
+    p, b = prj.plate, prj.bolts
+    u = prj.units()
+    k = u.fl                      # factor interno -> unidad mostrada
+
+    # --- placa
+    out = G.plate_outline(prj)
+    ax.plot([q[0] / k for q in out], [q[1] / k for q in out], color=C_PLATE,
+            lw=2.4, zorder=3, label="Placa base")
+
+    # --- perfil
+    for i, poly in enumerate(G.section_polys(prj)):
+        ax.plot([q[0] / k for q in poly], [q[1] / k for q in poly], color=C_PROF,
+                lw=2.0 if i == 0 or prj.section.generic else 1.2, zorder=4,
+                label="Perfil" if i == 0 else None)
+
+    # --- rigidizadores
+    for idx, (x1, y1, x2, y2) in enumerate(G.stiffener_lines(prj)):
+        ax.plot([x1 / k, x2 / k], [y1 / k, y2 / k], color=C_STIF, lw=3.0,
+                solid_capstyle="butt", zorder=5,
+                label="Rigidizador" if idx == 0 else None)
+
+    # --- llave de corte
+    for idx, poly in enumerate(G.lug_outline(prj)):
+        ax.add_patch(Polygon([(a / k, b_ / k) for a, b_ in poly], closed=True,
+                             fill=True, facecolor=C_LUG, alpha=0.30,
+                             edgecolor=C_LUG, lw=1.8, zorder=2,
+                             label="Llave de corte" if idx == 0 else None))
+
+    # --- agujeros
+    g = b.geom()
+    pos = G.bolt_positions(prj)
+    for idx, (x, y) in enumerate(pos):
+        ax.add_patch(Circle((x / k, y / k), g.dh / 2 / k, fill=False, color=C_HOLE,
+                            lw=1.4, zorder=6, label="Agujero" if idx == 0 else None))
+        ax.plot([x / k], [y / k], marker="+", color=C_HOLE, ms=5, mew=1.0, zorder=6)
+        if labels:
+            ax.annotate(f"P{idx + 1}", (x / k, y / k),
+                        textcoords="offset points", xytext=(0, -3),
+                        ha="center", va="top", fontsize=7.5, fontweight="bold",
+                        color="#00407a", zorder=8,
+                        bbox=dict(boxstyle="round,pad=0.12", fc="white",
+                                  ec="none", alpha=0.75))
+
+    # --- escala y ejes
+    if p.shape == "Circular":
+        Lm = p.Dp
+    else:
+        Lm = max(p.N, p.B)
+    Lm = 1.16 * max(Lm, 1.0) / k
+    ax.set_xlim(-Lm / 2, Lm / 2)
+    ax.set_ylim(-Lm / 2, Lm / 2)
+    ax.set_aspect("equal", adjustable="datalim")
+    ax.axhline(0, color=C_DIM, lw=0.5, ls=(0, (6, 3, 1, 3)), zorder=1)
+    ax.axvline(0, color=C_DIM, lw=0.5, ls=(0, (6, 3, 1, 3)), zorder=1)
+    ax.grid(True, ls=":", lw=0.4, color="#cccccc")
+    ax.set_xlabel(f"X — direccion B  ({u.L})")
+    ax.set_ylabel(f"Y — direccion N  ({u.L})   ↑ lado traccionado por Mux")
+
+    if show_dims:
+        txt = []
+        if p.shape == "Circular":
+            txt.append(f"Ø{u.fmt('L', p.Dp)} × {u.q('L', p.tp)}")
+        else:
+            txt.append(f"{u.fmt('L', p.N)} × {u.fmt('L', p.B)} × {u.q('L', p.tp)}")
+        txt.append(f"{prj.section.describe(u, short=True)}  (rot {prj.section.rotation:g}°)")
+        txt.append(f"{len(pos)} pernos Ø{b.size}\"  {b.atype.split('(')[0].strip()}")
+        if prj.stiff.enabled:
+            txt.append(f"{prj.stiff.count} rigidizadores {u.q('L', prj.stiff.t)}")
+        if prj.lug.enabled:
+            txt.append(f"Llave {u.fmt('L', prj.lug.W)}×{u.fmt('L', prj.lug.H)}×"
+                       f"{u.q('L', prj.lug.t)}")
+        ax.set_title("PLANTA — " + "   |   ".join(txt), fontsize=9, loc="left")
+    ax.legend(loc="upper right", fontsize=7, framealpha=0.9)
+
+
+def elevation_view(ax, prj: Project):
+    """Corte vertical: perfil, placa, mortero, pedestal y anclajes."""
+    ax.clear()
+    p, b, c = prj.plate, prj.bolts, prj.conc
+    g = b.geom()
+    u = prj.units()
+    k = u.fl                      # interno (in) -> unidad mostrada
+    Bx = (p.Dp if p.shape == "Circular" else p.B) / k
+    hef = b.hef / k
+    tp = p.tp / k
+    B2 = c.B2 / k
+    gr = p.grout / k
+    m = 1.0 / k                   # una pulgada, en unidades de dibujo
+
+    ax.add_patch(Rectangle((-B2 / 2, -hef - 6 * m), B2, hef + 6 * m,
+                           facecolor="#e8e8e8", edgecolor="#999999", lw=1.0, zorder=1))
+    ax.add_patch(Rectangle((-Bx / 2, -gr), Bx, gr,
+                           facecolor="#d9d2c5", edgecolor="#8a8172", lw=0.8,
+                           hatch="//", zorder=2))
+    ax.add_patch(Rectangle((-Bx / 2, 0), Bx, tp,
+                           facecolor="#b9c6de", edgecolor=C_PLATE, lw=1.8, zorder=4))
+
+    bw, bh = G.profile_bbox(prj)
+    bw, bh = bw / k, max(bh, 10.0) / k
+    ax.add_patch(Rectangle((-bw / 2, tp), bw, bh,
+                           facecolor="#f2c3c3", edgecolor=C_PROF, lw=1.8, zorder=3))
+
+    if prj.stiff.enabled:
+        st = prj.stiff
+        for sgn in (1, -1):
+            pts = [(sgn * (bw / 2 + x / k), tp + y / k) for x, y in st.outline()]
+            ax.add_patch(Polygon(pts, closed=True, facecolor="#ffe0b0",
+                                 edgecolor=C_STIF, lw=1.4, zorder=5))
+
+    if prj.lug.enabled:
+        Lg = prj.lug
+        _lx = [q[0] for P in G.lug_outline(prj) for q in P] or [-Lg.t / 2, Lg.t / 2]
+        _x0, _w = min(_lx), max(_lx) - min(_lx)
+        ax.add_patch(Rectangle((_x0 / k, -Lg.H / k), _w / k, Lg.H / k,
+                               facecolor="#bfe3cd", edgecolor=C_LUG, lw=1.6, zorder=5))
+
+    # --- anclajes
+    Fh = g.Fhex / k
+    xs_b = sorted({round(x / k, 4) for x, _ in G.bolt_positions(prj)})
+    for x in xs_b:
+        ax.plot([x, x], [tp + 2 * m, -hef], color="#333333", lw=2.0, zorder=6)
+        ax.plot([x - Fh / 2, x + Fh / 2], [tp + 0.9 * m, tp + 0.9 * m],
+                color="#333333", lw=3.5, solid_capstyle="butt", zorder=7)   # tuerca
+        t = b.atype
+        if t.startswith("Con cabeza"):
+            ax.plot([x - Fh / 2, x + Fh / 2], [-hef, -hef],
+                    color="#333333", lw=4.0, solid_capstyle="butt", zorder=7)
+        elif t.startswith("Gancho en L"):
+            eh = (b.eh if b.eh > 0 else 3 * g.db) / k
+            ax.plot([x, x + eh], [-hef, -hef], color="#333333", lw=2.0, zorder=7)
+        elif t.startswith("Gancho en J"):
+            eh = (b.eh if b.eh > 0 else 3 * g.db) / k
+            th = np.linspace(-math.pi, 0, 24)
+            ax.plot(x + eh / 2 + eh / 2 * np.cos(th), -hef + eh / 2 + eh / 2 * np.sin(th),
+                    color="#333333", lw=2.0, zorder=7)
+
+    ax.annotate("", xy=(Bx / 2 + 2 * m, 0), xytext=(Bx / 2 + 2 * m, -hef),
+                arrowprops=dict(arrowstyle="<->", color=C_DIM, lw=0.9))
+    ax.text(Bx / 2 + 2.6 * m, -hef / 2, f"hef = {u.q('L', b.hef)}", fontsize=8,
+            color=C_DIM, rotation=90, va="center")
+
+    ax.set_aspect("equal", adjustable="datalim")
+    ax.set_xlim(-B2 / 2 - 2 * m, B2 / 2 + 8 * m)
+    ax.set_ylim(-hef - 8 * m, tp + bh + 2 * m)
+    ax.set_xlabel(f"X  ({u.L})")
+    ax.set_ylabel(f"Z  ({u.L})")
+    ax.set_title("ELEVACION (esquematica)", fontsize=9, loc="left")
+    ax.grid(True, ls=":", lw=0.4, color="#cccccc")
+
+
+def fea_view(ax, prj: Project, fr, field="vm"):
+    ax.clear()
+    if fr is None or not fr.ok:
+        ax.text(0.5, 0.5, "Ejecute el analisis de elementos finitos",
+                ha="center", va="center", transform=ax.transAxes, fontsize=10)
+        ax.set_xticks([]); ax.set_yticks([])
+        return None
+    _u = prj.units()
+    Z, title, cmap = {
+        "vm": (fr.vm_top / _u.fs, f"Esfuerzo de von Mises en la placa  ({_u.S})",
+               "inferno"),
+        "w": (fr.w / _u.fl, f"Deflexion  ({_u.L}, + hacia el concreto)", "viridis"),
+        "p": (fr.press / _u.fs, f"Presion de contacto  ({_u.S})", "YlOrRd"),
+        "mx": (fr.Mx / (_u.ff), f"Momento Mx  ({_u.F}·{_u.L}/{_u.L})", "coolwarm"),
+        "my": (fr.My / (_u.ff), f"Momento My  ({_u.F}·{_u.L}/{_u.L})", "coolwarm"),
+    }[field]
+    # los agujeros de perno y el recorte circular se dejan en blanco
+    Zm = np.array(Z, dtype=float)
+    if getattr(fr, "used", None) is not None:
+        Zm = np.where(fr.used, Zm, np.nan)
+    kk = _u.fl
+    cs = ax.contourf(fr.X / kk, fr.Y / kk, np.ma.masked_invalid(Zm),
+                     levels=24, cmap=cmap)
+    if getattr(fr, "holes_meshed", False):
+        g = prj.bolts.geom()
+        for (bx, by) in G.bolt_positions(prj):
+            ax.add_patch(Circle((bx / kk, by / kk), g.dh / 2 / kk, facecolor="white",
+                                edgecolor="#333333", lw=0.9, zorder=4))
+    out = G.plate_outline(prj)
+    ax.plot([q[0] / kk for q in out], [q[1] / kk for q in out], color="k", lw=1.5)
+    for poly in G.section_polys(prj):
+        ax.plot([q[0] / kk for q in poly], [q[1] / kk for q in poly], color="k",
+                lw=1.2, ls="--")
+    u = prj.units()
+    for i, ((x, y), T) in enumerate(zip(fr.bolt_xy, fr.bolt_T), start=1):
+        ax.plot([x / kk], [y / kk], "o", ms=6, mfc="none", mec="k", mew=1.2)
+        lab = f"P{i}"
+        if T > 1e-3:
+            lab += f"\n{u.fmt('F', T)}"
+        ax.annotate(lab, (x / kk, y / kk), textcoords="offset points", xytext=(0, 8),
+                    ha="center", fontsize=7, fontweight="bold", color="#00407a",
+                    bbox=dict(boxstyle="round,pad=0.12", fc="white", ec="none",
+                              alpha=0.8), zorder=9)
+    ax.set_aspect("equal", adjustable="datalim")
+    ax.set_title(title, fontsize=9, loc="left")
+    ax.set_xlabel(f"X ({u.L})"); ax.set_ylabel(f"Y ({u.L})")
+    return cs
+
+
+def stiffener_detail(ax, prj):
+    """Detalle a escala de una pletina rigidizadora."""
+    ax.clear()
+    st = prj.stiff
+    if not st.enabled:
+        ax.text(0.5, 0.5, "Rigidizadores desactivados", ha="center", va="center",
+                transform=ax.transAxes, fontsize=10, color="#777777")
+        ax.set_xticks([]); ax.set_yticks([])
+        return
+    u = prj.units()
+    k = u.fl
+    L, h, tp = st.L / k, st.h / k, prj.plate.tp / k
+    root = st.clip_root / k
+
+    pts = [(x / k, y / k) for x, y in st.outline()[:-1]]
+    ax.add_patch(Polygon(pts, closed=True, facecolor="#ffe0b0",
+                         edgecolor=C_STIF, lw=2.0, zorder=3))
+
+    # columna y placa de referencia
+    ax.add_patch(Rectangle((-0.30 * L, 0), 0.30 * L, h * 1.15,
+                           facecolor="#f2c3c3", edgecolor=C_PROF, lw=1.5, zorder=2))
+    ax.add_patch(Rectangle((-0.30 * L, -tp), L * 1.45, tp,
+                           facecolor="#b9c6de", edgecolor=C_PLATE, lw=1.5, zorder=2))
+
+    # soldaduras
+    ax.plot([root, st.weld_len_plate / k + root], [0, 0],
+            color="#0070c0", lw=4.0, solid_capstyle="butt", zorder=5)
+    ax.plot([0, 0], [root, st.weld_len_col / k + root],
+            color="#0070c0", lw=4.0, solid_capstyle="butt", zorder=5)
+
+    d = 0.09 * max(L, h)          # separacion de las cotas, a escala del dibujo
+    ax.annotate("", xy=(0, -tp - d), xytext=(L, -tp - d),
+                arrowprops=dict(arrowstyle="<->", color=C_DIM, lw=0.9))
+    ax.text(L / 2, -tp - 1.7 * d, f"L = {u.q('L', st.L)}", ha="center",
+            fontsize=8, color=C_DIM)
+    ax.annotate("", xy=(L * 1.18, 0), xytext=(L * 1.18, h),
+                arrowprops=dict(arrowstyle="<->", color=C_DIM, lw=0.9))
+    ax.text(L * 1.24, h / 2, f"h = {u.q('L', st.h)}", rotation=90, va="center",
+            fontsize=8, color=C_DIM)
+
+    ax.set_aspect("equal", adjustable="datalim")
+    ax.set_xlim(-0.45 * L, L * 1.55)
+    ax.set_ylim(-tp - 2.6 * d, h * 1.25)
+    ax.set_title(f"DETALLE DEL RIGIDIZADOR — {st.shape}, t = {u.q('L', st.t)}, "
+                 f"destaje {u.q('L', st.clip_root)}", fontsize=9, loc="left")
+    ax.set_xlabel(f"Proyeccion desde la cara del perfil  ({u.L})")
+    ax.set_ylabel(f"Altura sobre la placa  ({u.L})")
+    ax.grid(True, ls=":", lw=0.4, color="#cccccc")

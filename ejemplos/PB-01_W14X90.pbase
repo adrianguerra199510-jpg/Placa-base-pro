@@ -1,0 +1,106 @@
+{
+ "name": "Ejemplo AISC DG1",
+ "element": "PB-01",
+ "author": "",
+ "date": "2026-09-26",
+ "metric": false,
+ "section": {
+  "label": "W14X90",
+  "steel": "ASTM A992",
+  "rotation": 0.0
+ },
+ "plate": {
+  "shape": "Rectangular",
+  "N": 22.0,
+  "B": 22.0,
+  "Dp": 26.0,
+  "tp": 2.0,
+  "steel": "ASTM A572 Gr.50",
+  "grout": 1.5
+ },
+ "bolts": {
+  "size": "1-1/4",
+  "steel": "ASTM F1554 Gr.55",
+  "atype": "Con cabeza (hex pesada)",
+  "pattern": "Perimetral (4 lados)",
+  "n_major": 3,
+  "n_minor": 3,
+  "n_circ": 8,
+  "ex": 2.5,
+  "ey": 2.5,
+  "hef": 24.0,
+  "eh": 0.0,
+  "Abrg_user": 0.0
+ },
+ "lug": {
+  "enabled": true,
+  "direction": "Eje X (paralelo a B)",
+  "W": 10.0,
+  "H": 6.0,
+  "t": 1.25,
+  "steel": "ASTM A572 Gr.50",
+  "weld_size": 0.375,
+  "electrode": "E70XX"
+ },
+ "stiff": {
+  "enabled": false,
+  "position": "Alas (paralelo a Y)",
+  "count": 4,
+  "L": 3.5,
+  "h": 8.0,
+  "t": 0.625,
+  "steel": "ASTM A572 Gr.50",
+  "weld_size": 0.5,
+  "electrode": "E70XX"
+ },
+ "welds": {
+  "flange": {
+   "wtype": "Filete",
+   "size": 0.5,
+   "electrode": "E70XX",
+   "both_sides": true
+  },
+  "web": {
+   "wtype": "Filete",
+   "size": 0.3125,
+   "electrode": "E70XX",
+   "both_sides": true
+  },
+  "perimeter": {
+   "wtype": "Filete",
+   "size": 0.375,
+   "electrode": "E70XX",
+   "both_sides": false
+  },
+  "directional": true
+ },
+ "conc": {
+  "fc": 4.0,
+  "N2": 48.0,
+  "B2": 48.0,
+  "ha": 48.0,
+  "cracked": true,
+  "lam": 1.0,
+  "cond_A": false,
+  "seismic": false
+ },
+ "loads": {
+  "Pu": 400.0,
+  "Mux": 1800.0,
+  "Muy": 0.0,
+  "Vux": 30.0,
+  "Vuy": 0.0,
+  "friction": false,
+  "mu_fric": 0.4
+ },
+ "fea": {
+  "enabled": true,
+  "nx": 26,
+  "ny": 26,
+  "ks_mode": "Ec/hped",
+  "ks_manual": 1000.0,
+  "max_iter": 40,
+  "export_ccx": false,
+  "ccx_path": "ccx"
+ }
+}
