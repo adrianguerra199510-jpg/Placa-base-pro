@@ -464,6 +464,7 @@ class MainWindow(QMainWindow):
         f.group("Ubicacion a lo largo de la cara")
         f.combo("Criterio", "stiff.spacing_mode", STIFF_SPACING, help="Como se ubican las pletinas a lo largo de la cara: repartidas automaticamente, con una separacion que usted fija, o alineadas con los pernos que caen dentro de la cara del perfil.")
         f.num("Separacion centro a centro", "stiff.spacing", 0.5, 100, uk="L", help="Distancia entre pletinas contiguas de una misma cara. Solo se usa con el criterio de separacion fija. Es el parametro para acomodarlas respecto a los anclajes.")
+        f.num("Angulo de arranque (columna circular)", "stiff.offset_angle", -180, 180, 5.0, 1, "°", help="Solo columna circular: los rigidizadores se disponen en forma RADIAL, repartidos por igual en 360°. Este es el angulo de la primera pletina medido desde +X. Con columna circular 'Posicion' y 'Criterio' no se usan; la cantidad es el numero total de pletinas radiales.")
         f.num("Corrimiento del grupo", "stiff.offset", -50, 50, uk="L", help="Desplaza todo el grupo de pletinas a lo largo de la cara. Util para esquivar un perno o para centrar el conjunto.")
         f.note("'Separacion fija' reparte las pletinas simetricamente con esa "
                "distancia entre ellas; el corrimiento desplaza todo el grupo. "

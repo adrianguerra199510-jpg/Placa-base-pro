@@ -788,7 +788,12 @@ def stiffeners(prj: Project, br: Bearing, rec: Recorder | None = None) -> list[C
     E = 29000.0
     bw, bh = G.profile_bbox(prj)
 
-    if st.position.startswith("Alma"):
+    s_ = prj.section.shape()
+    if s_.is_round:                      # radiales: proyeccion medida desde el cilindro
+        avail = max(0.0, min(prj.plate.Nc, prj.plate.Bc) / 2.0 - s_.d / 2.0)
+        width = math.pi * (s_.d + 2 * min(st.L, avail))   # perimetro exterior
+        axis = "x"
+    elif st.position.startswith("Alma"):
         avail = max(0.0, (prj.plate.Bc - bw) / 2.0)
         width = prj.plate.Nc
         axis = "y"
@@ -810,7 +815,10 @@ def stiffeners(prj: Project, br: Bearing, rec: Recorder | None = None) -> list[C
 
     # ------- ubicacion real de las pletinas -> ancho tributario verdadero
     offs = sorted(G._face_offsets(prj, bw if axis == "x" else bh, axis))
-    if len(offs) > 1:
+    if s_.is_round:
+        trib = 2 * math.pi * (s_.d / 2.0 + Le / 2.0) / max(1, st.count)
+        offs = []
+    elif len(offs) > 1:
         gaps = [offs[i + 1] - offs[i] for i in range(len(offs) - 1)]
         trib = max(gaps)
     else:

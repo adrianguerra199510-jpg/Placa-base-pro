@@ -468,7 +468,7 @@ def geometry_faces(prj):
     # ---- pedestal de concreto (transparente)
     c = prj.conc
     ped = [(-c.B2 / 2, -c.N2 / 2), (c.B2 / 2, -c.N2 / 2), (c.B2 / 2, c.N2 / 2), (-c.B2 / 2, c.N2 / 2)]
-    parts.append(("conc", _prism(ped, -min(c.ha, max(b.hef * 1.15, 12.0)), 0.0), "#b8b8b0", 0.10))
+    parts.append(("conc", _prism(ped, -min(c.ha, max(b.hef * 1.15, 12.0)), 0.0), "#b8b8b0", 1.0))
     return parts
 
 
@@ -489,7 +489,8 @@ def update_order(ax):
         coll.set_zorder(z)
 
 
-def plot_geometry(ax, prj, show_concrete=True):
+def plot_geometry(ax, prj, show_concrete=False):
+    # el pedestal no se dibuja por defecto: sin transparencias taparia los anclajes
     """Dibuja el conjunto de la conexion (solo geometria) en un eje 3D."""
     from mpl_toolkits.mplot3d.art3d import Poly3DCollection
     from matplotlib.colors import to_rgb
@@ -513,7 +514,7 @@ def plot_geometry(ax, prj, show_concrete=True):
             allp += [pt for f in v for pt in f]
         rgb = to_rgb(color)
         # los triangulos de la malla de la placa no llevan aristas
-        edge = (*rgb, 1.0) if flat else (0, 0, 0, 0.35 if alpha > 0.5 else 0.12)
+        edge = (*rgb, 1.0) if flat else (0, 0, 0, 0.35)
         coll = Poly3DCollection(v, facecolors=(*rgb, alpha), edgecolors=edge,
                                 linewidths=0.35)
         ax.add_collection3d(coll)

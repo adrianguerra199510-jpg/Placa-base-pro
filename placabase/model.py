@@ -212,6 +212,7 @@ class Stiffener:
     spacing_mode: str = "Automatico (repartido)"
     spacing: float = 6.0         # separacion centro a centro (modo fijo)
     offset: float = 0.0          # corrimiento del grupo a lo largo de la cara
+    offset_angle: float = 0.0    # columna circular: angulo de la primera pletina radial, grados
     # --- forma
     shape: str = "Rectangular"
     clip_h: float = 1.5          # recorte horizontal de la esquina exterior

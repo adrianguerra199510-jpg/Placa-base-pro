@@ -21,6 +21,14 @@ que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
 | **Todo** sale en las unidades elegidas: también la columna de observaciones, los ejes de los dibujos y los títulos | Toda la aplicación |
 | **Descripción de cada dato de entrada** en un panel al pie de cada pestaña, más la convención de signos de las cargas | Los 65 campos de entrada |
 
+## Novedades: rigidizadores radiales
+
+Con columna circular (HSS redondo o tubo) los rigidizadores se disponen en forma
+RADIAL, repartidos por igual en 360° (cantidad = numero total de pletinas; angulo de la
+primera en "Angulo de arranque"). El ancho tributario y la reduccion de voladizo usan la
+separacion en arco a media proyeccion. La vista 3D ya no usa transparencias (el pedestal
+de concreto no se dibuja).
+
 ## Novedades: vista 3D de geometria
 
 La pestaña **Modelo 3D** muestra siempre la geometria de la conexion (placa, perfil,

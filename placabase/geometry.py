@@ -292,6 +292,15 @@ def stiffener_lines(prj: Project):
     if not st.enabled or st.count <= 0:
         return []
     s = prj.section.shape()
+    if s.is_round:                       # columna circular: disposicion RADIAL
+        n = max(1, st.count)
+        r0 = s.d / 2.0
+        res = []
+        for k in range(n):
+            a = 2 * math.pi * k / n + math.radians(st.offset_angle)
+            c, sn = math.cos(a), math.sin(a)
+            res.append(_clip_to_plate(prj, r0 * c, r0 * sn, (r0 + st.L) * c, (r0 + st.L) * sn))
+        return [r for r in res if r is not None]
     bw, bh = (s.d, s.d) if s.is_round else (s.bf, s.d)     # dimensiones locales
     out = []
     pos = st.position
@@ -369,6 +378,10 @@ def cantilever_reduction(prj: Project):
     mx = (Bc - 0.95 * bw) / 2.0
     if not st.enabled or st.count <= 0:
         return mx, my
+    if s.is_round:                       # radiales: separacion en arco a media proyeccion
+        sp = 2 * math.pi * (s.d / 2.0 + st.L / 2.0) / max(1, st.count)
+        m_ef = lambda m: max(m - st.L, min(m, sp / 2.0), 0.0)
+        return m_ef(mx), m_ef(my)
 
     def eff(m, span, axis):
         offs = sorted(_face_offsets(prj, span, axis))

@@ -9,7 +9,7 @@
  "u_stress": "MPa",
  "u_moment": "kN·m",
  "section": {
-  "label": "HSS16X0.5",
+  "label": "HSS16.000X0.500",
   "steel": "ASTM A500 Gr.C (HSS red.)",
   "rotation": 0.0
  },
