@@ -354,9 +354,6 @@ class FEAOpts:
     holes: bool = True           # modelar los agujeros de perno en la malla
     gmsh_path: str = "gmsh"
     mesh3d: float = 0.0          # tamano de malla 3D (0 = automatico)
-    ks_factor: float = 1.0       # calibracion 2D: multiplica el modulo de balasto
-    bolt_factor: float = 1.0     # calibracion 2D: multiplica la rigidez axial del perno
-    fp_factor: float = 1.0       # calibracion 2D: multiplica el espesor de la placa bajo la huella del perfil
 
 
 @dataclass

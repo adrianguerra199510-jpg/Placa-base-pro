@@ -21,6 +21,24 @@ que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
 | **Todo** sale en las unidades elegidas: también la columna de observaciones, los ejes de los dibujos y los títulos | Toda la aplicación |
 | **Descripción de cada dato de entrada** en un panel al pie de cada pestaña, más la convención de signos de las cargas | Los 65 campos de entrada |
 
+## Validacion cruzada 2D vs 3D (PB-01, W14X90, placa 22×22×2 in)
+
+Se corrio el modelo solido (Gmsh + CalculiX) y el 2D (Mindlin + Winkler) con las mismas
+cargas. Maximo de la placa en el 3D medido a ≥ 1 espesor del perfil y de los agujeros
+(las aristas vivas son singularidades de malla). Relacion 3D/2D:
+
+| Caso | von Mises | presion | deflexion | traccion en pernos |
+|---|---|---|---|---|
+| A: Mux 1800, V 30 | 0.81 | 0.77 | 0.79 | (sin traccion) |
+| B: Mux 4200, V 0 | 0.85 | 0.82 | 0.83 | 0.77 |
+
+El 2D resulta 15-25 % mas exigente que el 3D en todas las magnitudes (del lado seguro).
+Se probaron ajustes del 2D (modulo de balasto, rigidez del perno, espesor bajo la huella,
+reparto de la carga por area de metal): ninguno acerco a la vez presion, deflexion y
+traccion sin dejar el von Mises por debajo del 3D, asi que el 2D se mantiene sin calibrar.
+En el 3D la rigidez del concreto se reparte ahora por area tributaria de cada nodo
+(antes uniforme por nodo); el efecto fue menor al 1 %.
+
 ## Novedades: resultados 3D en la memoria y soldadura parcial
 
 - Tras un analisis 3D, la memoria (PDF y Word) agrega una seccion con las imagenes de von Mises

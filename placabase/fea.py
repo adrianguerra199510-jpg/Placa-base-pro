@@ -208,19 +208,6 @@ def run_fea(prj: Project) -> FEAResult:
                 jj = int(np.clip(math.floor((yy + Ny / 2) / dy), 0, ny - 1))
                 t_el[ii, jj] = max(t_el[ii, jj], t_eq)
 
-    # ---- calibracion: la pared del perfil rigidiza la placa bajo su huella
-    fpf = float(getattr(prj.fea, "fp_factor", 1.0))
-    if fpf > 1.0 + 1e-9:
-        from .geometry import _seg_dist
-        polys = G.section_polys(prj)
-        segs = [(a, b) for poly in polys for a, b in zip(poly[:-1], poly[1:])]
-        tol = 0.75 * max(dx, dy)
-        for i in range(nx):
-            for j in range(ny):
-                cx = 0.5 * (xs[i] + xs[i + 1]); cy = 0.5 * (ys[j] + ys[j + 1])
-                if any(_seg_dist(cx, cy, a[0], a[1], b[0], b[1]) <= tol for a, b in segs):
-                    t_el[i, j] = max(t_el[i, j], p.tp * fpf)
-
     # ---- rigidez global
     ndof = 3 * nnod
     rows, cols, vals = [], [], []
@@ -257,7 +244,6 @@ def run_fea(prj: Project) -> FEAResult:
     else:
         Ec = Ec_ksi(c.fc)
         ks = Ec / max(6.0, c.ha)                        # kip/in^3
-    ks *= float(getattr(prj.fea, "ks_factor", 1.0))
     kf_node = ks * trib                                  # kip/in
 
     # ---- resortes de perno
@@ -266,7 +252,7 @@ def run_fea(prj: Project) -> FEAResult:
     #      ese anillo.  Asi el modelo sigue siendo valido con el agujero
     #      recortado de la malla.
     Lb = prj.bolts.hef + p.tp + p.grout
-    kb = ES_KSI * g.Ase / max(Lb, 1.0) * float(getattr(prj.fea, "bolt_factor", 1.0))
+    kb = ES_KSI * g.Ase / max(Lb, 1.0)
     bolt_groups = []                     # [(lista_nodos, x, y)]
     for (bx, by) in bolts:
         ring = []
