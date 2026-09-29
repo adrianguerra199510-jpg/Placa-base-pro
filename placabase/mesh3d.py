@@ -504,6 +504,44 @@ def run_gmsh(geo_path: str, gmsh_exe: str = "", timeout: int = 1800):
 
 
 # ============================================ pipeline 3D desde la aplicacion
+def bottom_weights(nodes: dict, elems: list, z0: float = 0.0, tol: float = 1e-4) -> dict:
+    """Area tributaria de cada nodo de la cara libre inferior (z = z0).
+    Es lo que hace falta para que el resorte de Winkler del concreto (ks·A) no dependa
+    de que la malla sea mas fina en una zona que en otra.
+      C3D10 : regla de los puntos medios (exacta para cuadraticas): A/3 en cada nodo
+              de lado del triangulo, 0 en los vertices.
+      C3D4  : A/3 en cada vertice.
+    Solo cuenta las caras exteriores (las que pertenecen a un solo tetraedro)."""
+    faces = {}
+    for e in elems:
+        c = e[:4]
+        for f, opp in (((0, 1, 2), 3), ((0, 1, 3), 2), ((0, 2, 3), 1), ((1, 2, 3), 0)):
+            key = tuple(sorted((c[f[0]], c[f[1]], c[f[2]])))
+            faces.setdefault(key, []).append((e, f))
+    w = {}
+    for key, lst in faces.items():
+        if len(lst) != 1:
+            continue
+        if not all(abs(nodes[n][2] - z0) < tol for n in key):
+            continue
+        e, f = lst[0]
+        a, b, c = (nodes[e[f[0]]], nodes[e[f[1]]], nodes[e[f[2]]])
+        ux, uy = b[0] - a[0], b[1] - a[1]
+        vx, vy = c[0] - a[0], c[1] - a[1]
+        area = 0.5 * abs(ux * vy - uy * vx)
+        if len(e) >= 10:
+            mids = e[4:10]
+            for (i, j) in ((f[0], f[1]), (f[1], f[2]), (f[2], f[0])):
+                pi, pj = nodes[e[i]], nodes[e[j]]
+                mx_, my_ = 0.5 * (pi[0] + pj[0]), 0.5 * (pi[1] + pj[1])
+                best = min(mids, key=lambda n: (nodes[n][0] - mx_) ** 2 + (nodes[n][1] - my_) ** 2)
+                w[best] = w.get(best, 0.0) + area / 3.0
+        else:
+            for n in key:
+                w[n] = w.get(n, 0.0) + area / 3.0
+    return w
+
+
 def build_inp(prj: Project, mesh_inp: str, out_inp: str, height: float = 0.0) -> str:
     """Toma la malla que escribio Gmsh y arma el .inp de CalculiX: material,
     apoyo del concreto, resortes de perno, acople de carga y paso estatico."""
@@ -605,7 +643,12 @@ def build_inp(prj: Project, mesh_inp: str, out_inp: str, height: float = 0.0) ->
 
     # --- concreto: SOLO COMPRESION.  Curva fuerza-desplazamiento con rigidez
     #     ks·A_trib al bajar y practicamente cero al subir (la placa se despega).
-    kn = ks * (p.Nc * p.Bc) / max(len(base), 1)
+    # rigidez por nodo = ks · area tributaria del nodo (no un valor uniforme: la malla es
+    # mas fina cerca del perfil y un reparto por nodo cargaria de rigidez esa zona)
+    wts = bottom_weights(nodes, elems)
+    if not wts:                                   # respaldo: reparto uniforme
+        wts = {n: (p.Nc * p.Bc) / max(len(base), 1) for n in base}
+    kn = ks * sum(wts.values()) / max(len(wts), 1)          # valor medio (informativo)
     D = 50.0                                      # rango de la curva, in
     # Los resortes unilaterales se modelan como SPRINGA (entre dos nodos) contra
     # un nodo de tierra fijo situado 1 in por debajo: acortarse = compresion.
@@ -616,18 +659,24 @@ def build_inp(prj: Project, mesh_inp: str, out_inp: str, height: float = 0.0) ->
         gnodes.append((gid, x, y, z - 1.0))
         gid += 1
         return gid - 1
-    conc_pairs = [(n, ground(n)) for n in base]
+    conc_pairs = [(n, ground(n)) for n in base if n in wts]
     ring_pairs = {k: [(n, ground(n)) for n in ring] for k, ring in rings.items()}
     L.append("*NODE, NSET=NTIERRA")
     for (i, x, y, z) in gnodes:
         L.append(f"{i}, {x:.6f}, {y:.6f}, {z:.6f}")
     eid = max(eid, gid + 1)
-    L.append("*ELEMENT, TYPE=SPRINGA, ELSET=ECONC")
+    # los pesos se agrupan en clases de ~8 % (un ELSET de resorte por clase)
+    classes = {}
     for (n, gn) in conc_pairs:
-        L.append(f"{eid}, {n}, {gn}")
-        eid += 1
-    L += ["*SPRING, ELSET=ECONC, NONLINEAR",
-          f"{-kn*D:.6e}, {-D:.1f}", "0.0, 0.0", f"{kn*1e-5*D:.6e}, {D:.1f}"]
+        classes.setdefault(int(round(math.log(max(wts[n], 1e-9)) / math.log(1.08))), []).append((n, gn))
+    for ci, lst in sorted(classes.items()):
+        kc = ks * sum(wts[n] for n, _ in lst) / len(lst)
+        L.append(f"*ELEMENT, TYPE=SPRINGA, ELSET=ECONC{ci + 200}")
+        for (n, gn) in lst:
+            L.append(f"{eid}, {n}, {gn}")
+            eid += 1
+        L += [f"*SPRING, ELSET=ECONC{ci + 200}, NONLINEAR",
+              f"{-kc*D:.6e}, {-D:.1f}", "0.0, 0.0", f"{kc*1e-5*D:.6e}, {D:.1f}"]
 
     # --- pernos: resorte vertical (traccion/compresion) y horizontales, que son
     #     los que equilibran el cortante e impiden el movimiento de cuerpo rigido
