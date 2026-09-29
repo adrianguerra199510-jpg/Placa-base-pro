@@ -31,8 +31,9 @@ from .model import LUG_TYPES, save_book, load_book
 from .dialogs import SectionDialog, MaterialsDialog
 from PySide6.QtWidgets import QListWidget, QInputDialog
 from .solver import solve
+from .units import parse_xy_clipboard
 from . import draw, report, ccx, mesh3d, view3d
-from .ui_widgets import Form, scroll
+from .ui_widgets import Form, scroll, PasteTable
 from .units import (UnitSet, LEN_UNITS, FORCE_UNITS, STRESS_UNITS, MOMENT_UNITS,
                     DEFAULT_SETS, KIP_TO_KN, IN_TO_MM, KIPIN_TO_KNM)
 
@@ -410,7 +411,8 @@ class MainWindow(QMainWindow):
         f.note("Perimetral: 2·mayor + 2·menor − 4.   2 lados (eje mayor): 2·mayor.   "
                "2 lados (eje menor): 2·menor.")
         f.group("Coordenadas manuales")
-        self.tbl_xy = QTableWidget(0, 2)
+        self.tbl_xy = PasteTable(0, 2)
+        self.tbl_xy.pasted.connect(self._xy_paste)
         self.tbl_xy.setMinimumHeight(170)
         self.tbl_xy.verticalHeader().setDefaultSectionSize(22)
         self.tbl_xy.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
@@ -418,9 +420,15 @@ class MainWindow(QMainWindow):
         f._lay.addRow(self.tbl_xy)
         row = QWidget(); hl = QHBoxLayout(row); hl.setContentsMargins(0, 0, 0, 0)
         for txt, fn in (("Agregar", self._xy_add), ("Quitar", self._xy_del),
+                        ("Pegar desde Excel", self._xy_paste_btn),
                         ("Copiar del patron actual", self._xy_copy)):
             bt = QPushButton(txt); bt.clicked.connect(fn); hl.addWidget(bt)
         f._lay.addRow(row)
+        f.note("PEGAR DESDE EXCEL: copie dos columnas (x, y) en Excel y use el boton "
+               "'Pegar desde Excel' (reemplaza toda la lista) o seleccione una celda y "
+               "presione Ctrl+V (sobrescribe desde esa celda y agrega filas si hace falta). "
+               "Los valores se leen en las unidades actuales; se aceptan coma o punto "
+               "decimal, y los encabezados se ignoran.")
         f.note("Origen en el centro de la placa; +Y es el lado traccionado por Mux. "
                "Las filas se numeran P1, P2... igual que en los dibujos y en la tabla del FEA.")
         f.finish()
@@ -768,7 +776,7 @@ class MainWindow(QMainWindow):
             t.insertRow(i)
             t.setVerticalHeaderItem(i, QTableWidgetItem(f"P{i + 1}"))
             for j, v in enumerate((x, y)):
-                t.setItem(i, j, QTableWidgetItem(u.fmt("L", v)))
+                t.setItem(i, j, QTableWidgetItem(f"{u.out('L', v):.6g}"))
         t.blockSignals(False)
 
     def _xy_store(self):
@@ -787,6 +795,42 @@ class MainWindow(QMainWindow):
     def _xy_changed(self):
         if self._loading:
             return
+        self._xy_store()
+        self.on_change()
+
+    def _xy_paste_btn(self):
+        rows = parse_xy_clipboard(QApplication.clipboard().text())
+        if not rows:
+            QMessageBox.information(self, "Pegar coordenadas",
+                                    "El portapapeles no contiene dos columnas numericas (x, y).")
+            return
+        self._xy_paste(rows, 0, True)
+
+    def _xy_paste(self, rows, start, replace=False):
+        """Escribe las filas pegadas en la tabla (en unidades del usuario)."""
+        self._xy_store()
+        u = self.us
+        t = self.tbl_xy
+        data = [] if replace else [
+            [float(t.item(i, j).text().replace(",", "")) if t.item(i, j) and t.item(i, j).text()
+             else 0.0 for j in (0, 1)] for i in range(t.rowCount())]
+        for k, (x, y) in enumerate(rows):
+            i = (0 if replace else start) + k
+            while len(data) <= i:
+                data.append([0.0, 0.0])
+            data[i] = [x, y]
+        self._loading = True
+        try:
+            t.blockSignals(True)
+            t.setRowCount(0)
+            for i, (x, y) in enumerate(data):
+                t.insertRow(i)
+                t.setVerticalHeaderItem(i, QTableWidgetItem(f"P{i + 1}"))
+                for j, v in enumerate((x, y)):
+                    t.setItem(i, j, QTableWidgetItem(f"{v:.6g}"))
+            t.blockSignals(False)
+        finally:
+            self._loading = False
         self._xy_store()
         self.on_change()
 

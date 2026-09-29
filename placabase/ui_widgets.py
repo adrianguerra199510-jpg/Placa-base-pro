@@ -3,10 +3,11 @@
 from __future__ import annotations
 from PySide6.QtWidgets import (QWidget, QFormLayout, QDoubleSpinBox, QSpinBox,
                                QComboBox, QCheckBox, QLineEdit, QLabel, QGroupBox,
-                               QVBoxLayout, QScrollArea, QFrame)
+                               QVBoxLayout, QScrollArea, QFrame, QTableWidget, QApplication)
+from PySide6.QtGui import QKeySequence
 from PySide6.QtCore import Qt, Signal, QEvent, QObject
 
-from .units import UnitSet
+from .units import UnitSet, parse_xy_clipboard
 
 
 def _get(obj, path):
@@ -201,3 +202,27 @@ def scroll(widget):
     sa.setWidgetResizable(True)
     sa.setFrameShape(QScrollArea.NoFrame)
     return sa
+
+
+class PasteTable(QTableWidget):
+    """Tabla de coordenadas que acepta Ctrl+V desde Excel y Ctrl+C hacia Excel."""
+    pasted = Signal(list, int)          # filas [(x, y)], fila de inicio
+
+    def keyPressEvent(self, ev):
+        if ev.matches(QKeySequence.Paste):
+            rows = parse_xy_clipboard(QApplication.clipboard().text())
+            if rows:
+                r = self.currentRow()
+                self.pasted.emit(rows, max(0, r))
+            return
+        if ev.matches(QKeySequence.Copy):
+            sel = sorted({(i.row(), i.column()) for i in self.selectedIndexes()})
+            if sel:
+                r0, r1 = sel[0][0], sel[-1][0]
+                lines = []
+                for r in range(r0, r1 + 1):
+                    lines.append("\t".join(
+                        (self.item(r, c).text() if self.item(r, c) else "") for c in (0, 1)))
+                QApplication.clipboard().setText("\n".join(lines))
+            return
+        super().keyPressEvent(ev)

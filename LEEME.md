@@ -21,6 +21,13 @@ que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
 | **Todo** sale en las unidades elegidas: también la columna de observaciones, los ejes de los dibujos y los títulos | Toda la aplicación |
 | **Descripción de cada dato de entrada** en un panel al pie de cada pestaña, más la convención de signos de las cargas | Los 65 campos de entrada |
 
+## Novedades: pegar coordenadas desde Excel
+
+Pernos → Coordenadas manuales: boton **Pegar desde Excel** (reemplaza la lista con las
+dos columnas x, y del portapapeles) o **Ctrl+V** sobre una celda (sobrescribe desde ella y
+agrega filas). **Ctrl+C** copia las filas seleccionadas hacia Excel. Se aceptan coma o
+punto decimal; encabezados y rotulos se ignoran; valores en las unidades actuales.
+
 ## Novedades: rigidizadores radiales
 
 Con columna circular (HSS redondo o tubo) los rigidizadores se disponen en forma
