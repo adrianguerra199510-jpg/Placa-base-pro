@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QTabWidget, Q
                                QVBoxLayout, QHBoxLayout, QLabel, QTableWidget,
                                QTableWidgetItem, QHeaderView, QFileDialog, QMessageBox,
                                QComboBox, QPushButton, QTextEdit, QToolBar, QCheckBox,
-                               QStatusBar, QDoubleSpinBox, QProgressDialog)
+                               QStatusBar, QDoubleSpinBox, QProgressDialog, QSizePolicy)
 
 from . import __version__
 from .model import (INSTALL_TYPES, ADH_ENV, ADH_CATEGORY)
@@ -123,6 +123,15 @@ class Canvas3D(QWidget):
         self.cbar = None
         _wheel_zoom(self.cv, lambda: self.ax, three_d=True)
         self.cv.mpl_connect("motion_notify_event", self._on_rotate)
+        self.cv.mpl_connect("resize_event", self._on_resize)
+        self.cv.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+    def _on_resize(self, ev):
+        # el modelo se re-ajusta al ancho/alto disponibles
+        from . import view3d as _v
+        if getattr(self.ax, "_pb_aspect", None) is not None:
+            _v.fit_to_axes(self.ax)
+            self.cv.draw_idle()
 
     def _on_rotate(self, ev):
         # al girar la camara, reordena el dibujo (arriba/abajo de la placa)
@@ -130,11 +139,11 @@ class Canvas3D(QWidget):
             from . import view3d as _v
             _v.update_order(self.ax)
 
-    def reset(self):
+    def reset(self, cbar=True):
         self.fig.clf()
-        # el eje ocupa todo el lienzo (menos la franja de la barra de colores),
+        # el eje ocupa todo el lienzo (menos la franja de la barra de colores si la hay),
         # asi el modelo queda centrado
-        self.ax = self.fig.add_axes([0.0, 0.0, 0.88, 0.95], projection="3d")
+        self.ax = self.fig.add_axes([0.0, 0.0, 0.88 if cbar else 1.0, 0.95], projection="3d")
         self.cbar = None
 
 
@@ -165,6 +174,8 @@ class MainWindow(QMainWindow):
         self.book = [self.prj]
         self.cur = 0
         self.cache3d = {}            # id(conexion) -> (firma, post3d)
+        self.rep3d = None            # imagenes/resumen 3D para el reporte
+        self.rep3d_cache = {}        # id(conexion) -> (firma, rep3d)
         self.res = None
         self.res3d = None
         self.post3d = None
@@ -986,6 +997,8 @@ class MainWindow(QMainWindow):
         self.res3d = None
         c = self.cache3d.get(id(self.prj))
         self.post3d, self._sig3d = (c[1], c[0]) if c else (None, None)
+        rc = self.rep3d_cache.get(id(self.prj))
+        self.rep3d = rc[1] if rc else None
         self.fill_3d_tables()
         self.load_ui()
         self._refresh_list()
@@ -1055,6 +1068,8 @@ class MainWindow(QMainWindow):
                 r = solve(p, with_fea=True)
                 c = self.cache3d.get(id(p))
                 r.post3d = c[1] if c and c[0] == p.to_json() else None
+                rc = self.rep3d_cache.get(id(p))
+                r.rep3d = rc[1] if rc and rc[0] == p.to_json() else None
                 tmp = tempfile.mkdtemp(prefix="pbase_")
                 figs = report.save_figures(p, r, tmp)
                 safe = "".join(ch if ch.isalnum() or ch in "-_ ." else "_"
@@ -1192,8 +1207,8 @@ class MainWindow(QMainWindow):
             elev, azim = self.cv_3d.ax.elev, self.cv_3d.ax.azim
         except Exception:
             elev = azim = None
-        self.cv_3d.reset()
         k = self.cb_f3.currentIndex()
+        self.cv_3d.reset(cbar=not (k == 0 or self.res3d is None or not self.res3d.ok))
         if k == 0 or self.res3d is None or not self.res3d.ok:
             try:
                 view3d.plot_geometry(self.cv_3d.ax, self.prj)
@@ -1209,6 +1224,7 @@ class MainWindow(QMainWindow):
                 traceback.print_exc()
             if elev is not None:
                 self.cv_3d.ax.view_init(elev=elev, azim=azim)
+            view3d.fit_to_axes(self.cv_3d.ax)
             self.cv_3d.cv.draw_idle()
             return
         fld = ["vm", "u", "uz"][k - 1]
@@ -1217,6 +1233,9 @@ class MainWindow(QMainWindow):
         if m is not None:
             cax = self.cv_3d.fig.add_axes([0.90, 0.18, 0.018, 0.64])
             self.cv_3d.fig.colorbar(m, cax=cax)
+        if elev is not None:
+            self.cv_3d.ax.view_init(elev=elev, azim=azim)
+        view3d.fit_to_axes(self.cv_3d.ax)
         self.cv_3d.cv.draw_idle()
 
     def run_3d(self):
@@ -1252,6 +1271,8 @@ class MainWindow(QMainWindow):
         self.post3d = getattr(res, "post", None)
         if self.post3d is not None:
             self.cache3d[id(self.prj)] = (self._sig3d, self.post3d)
+        self.rep3d = self._make_rep3d(res)
+        self.rep3d_cache[id(self.prj)] = (self._sig3d, self.rep3d)
         self.fill_3d_tables()
         u = self.us
         self.lbl_3d.setText(
@@ -1268,6 +1289,26 @@ class MainWindow(QMainWindow):
         self.cb_f3.blockSignals(False)
         self.draw_3d()
         self.tabs_out.setCurrentIndex(4)
+
+    def _make_rep3d(self, res):
+        """Imagenes de von Mises y deformada (con etiqueta del maximo) para la memoria."""
+        try:
+            folder = Path(getattr(res, "folder", "") or tempfile.mkdtemp())
+            folder.mkdir(parents=True, exist_ok=True)
+            xs = [p for p in res.nodes.values()]
+            dim = max(max(q[i] for q in xs) - min(q[i] for q in xs) for i in range(3))
+            sc = 0.05 * dim / res.umax if res.umax > 0 else 0.0
+            sc = 0.0 if sc <= 0 else max(1.0, float(f"{min(sc, 5000.0):.1g}"))
+            vm = view3d.render_result_png(res, self.prj, "vm", str(folder / "reporte_vonmises.png"))
+            de = view3d.render_result_png(res, self.prj, "u", str(folder / "reporte_deformada.png"), sc)
+            if not vm and not de:
+                return None
+            nvm = max(res.vm, key=res.vm.get) if res.vm else None
+            return dict(vm=vm, u=de, scale=sc, n_nodes=res.n_nodes, n_elems=res.n_elems,
+                        umax=res.umax, vmmax=res.vmmax, vm_node=nvm)
+        except Exception:
+            traceback.print_exc()
+            return None
 
     def fill_3d_tables(self):
         from .weld3d import summary_rows
@@ -1379,7 +1420,7 @@ class MainWindow(QMainWindow):
         self.prj.date = datetime.date.today().isoformat()
         self.book = [self.prj]
         self.cur = 0
-        self.cache3d = {}
+        self.cache3d = {}; self.rep3d_cache = {}; self.rep3d = None
         self.path = None
         self._switch(0)
 
@@ -1390,7 +1431,7 @@ class MainWindow(QMainWindow):
             return
         try:
             self.book = load_book(fn)
-            self.cache3d = {}
+            self.cache3d = {}; self.rep3d_cache = {}; self.rep3d = None
             self.path = fn
             self._refresh_material_combos()
             self._switch(0)
@@ -1439,6 +1480,8 @@ class MainWindow(QMainWindow):
               getattr(self, "_sig3d", None) == self.prj.to_json())
         if self.res is not None:
             self.res.post3d = self.post3d if ok else None
+            rc = self.rep3d_cache.get(id(self.prj))
+            self.res.rep3d = rc[1] if (rc and rc[0] == self.prj.to_json()) else None
 
     def export_pdf(self):
         self._ensure_results()

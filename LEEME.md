@@ -21,6 +21,15 @@ que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
 | **Todo** sale en las unidades elegidas: también la columna de observaciones, los ejes de los dibujos y los títulos | Toda la aplicación |
 | **Descripción de cada dato de entrada** en un panel al pie de cada pestaña, más la convención de signos de las cargas | Los 65 campos de entrada |
 
+## Novedades: resultados 3D en la memoria y soldadura parcial
+
+- Tras un analisis 3D, la memoria (PDF y Word) agrega una seccion con las imagenes de von Mises
+  y de desplazamiento sobre la geometria deformada, con una etiqueta (★) en el esfuerzo maximo.
+  El grafico 3D se ajusta al ancho y alto disponibles y se reajusta al cambiar el tamaño.
+- Si alguna zona del perfil esta "Sin soldadura" (p. ej. un W solo soldado en el alma), sale un
+  aviso y se verifica el contorno PARCIAL por el metodo elastico sobre las lineas soldadas; la
+  compresion se transmite por contacto.
+
 ## Novedades: pegar coordenadas desde Excel
 
 Pernos → Coordenadas manuales: boton **Pegar desde Excel** (reemplaza la lista con las

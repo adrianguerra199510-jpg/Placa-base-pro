@@ -413,6 +413,87 @@ def _welds_generic(prj: Project, rec: Recorder | None):
     return out
 
 
+def unwelded_zones(prj: Project) -> list:
+    """Zonas del perfil declaradas 'Sin soldadura' (contorno no soldado por completo)."""
+    W = prj.welds
+    if prj.section.generic:
+        return ["contorno"] if W.perimeter.wtype == "Sin soldadura" else []
+    s = prj.section.shape()
+    if s.kind == W_SHAPE:
+        return (["alas"] if W.flange.wtype == "Sin soldadura" else []) + \
+               (["alma"] if W.web.wtype == "Sin soldadura" else [])
+    return ["contorno"] if W.perimeter.wtype == "Sin soldadura" else []
+
+
+def _welds_partial_W(prj: Project, rec: Recorder | None):
+    """Perfil W con alas y/o alma sin soldar: metodo elastico sobre las lineas
+    realmente soldadas.  La compresion se transmite por contacto."""
+    W = prj.welds
+    zones = unwelded_zones(prj)
+    if not zones:
+        return []
+    s = prj.section.shape()
+    L = prj.eloads
+    u = prj.units()
+    d, bf, tf, tw = s.d, s.bf, s.tf, s.tw
+    rot = math.radians(prj.section.rotation)
+    cr, sr = math.cos(rot), math.sin(rot)
+    Fu_base = min(prj.section.mat().Fu, prj.plate.mat().Fu)
+    Fy = prj.section.mat().Fy
+
+    def cap_of(spec, t):
+        if spec.wtype.startswith("CJP"):
+            return 0.90 * Fy * t
+        thr = 0.707 * spec.size if spec.wtype == "Filete" else spec.size
+        return min(0.75 * 0.60 * spec.FEXX() * thr, 0.75 * 0.60 * Fu_base * min(t, prj.plate.tp))
+
+    pts = []
+    for (x, y, dL, tx, ty) in G.boundary_points(G.section_rects(prj), ds=0.2):
+        xl, yl = x * cr + y * sr, -x * sr + y * cr           # coordenadas locales
+        if abs(yl) < d / 2 - tf - 1e-4:                        # alma
+            if W.web.wtype == "Sin soldadura" or (not W.web.both_sides and xl < 0):
+                continue
+            pts.append((x, y, dL, cap_of(W.web, tw), "alma"))
+        elif abs(abs(yl) - d / 2) < 1e-3 or abs(abs(yl) - (d / 2 - tf)) < 1e-3:
+            if W.flange.wtype == "Sin soldadura":
+                continue
+            if abs(abs(yl) - (d / 2 - tf)) < 1e-3 and not W.flange.both_sides:
+                continue
+            pts.append((x, y, dL, cap_of(W.flange, tf), "ala"))
+    Lw = sum(p[2] for p in pts)
+    if Lw <= 1e-6:
+        return [Check("weld_part", "Soldadura perfil-placa — no hay zonas soldadas",
+                      1.0, 0.0, "-", "AISC J2", "Declare al menos una zona soldada.")]
+    xc = sum(p[0] * p[2] for p in pts) / Lw
+    yc = sum(p[1] * p[2] for p in pts) / Lw
+    Ixw = sum(p[2] * (p[1] - yc) ** 2 for p in pts)
+    Iyw = sum(p[2] * (p[0] - xc) ** 2 for p in pts)
+    Vx = 0.0 if prj.lug.enabled else abs(L.Vux)
+    Vy = 0.0 if prj.lug.enabled else abs(L.Vuy)
+    fx, fy = Vx / Lw, Vy / Lw
+    best = (-1.0, 0.0, 0.0, 0.0, 0.0, "")
+    for sgn in (1.0, -1.0):          # el momento puede traccionar cualquiera de los dos lados
+        for (x, y, dL, cap, zn) in pts:
+            fz = -L.Pu / Lw + sgn * (abs(L.Mux) * (y - yc) / Ixw if Ixw > 1e-9 else 0.0) \
+                + sgn * (abs(L.Muy) * (x - xc) / Iyw if Iyw > 1e-9 else 0.0)
+            f = math.sqrt(max(fz, 0.0) ** 2 + fx ** 2 + fy ** 2)
+            if f / cap > best[0]:
+                best = (f / cap, f, cap, x, y, zn)
+    ratio, f, cap, bx, by, zn = best
+    out = [Check("weld_part",
+                 "Soldadura perfil-placa — contorno PARCIAL (sin soldar: " + ", ".join(zones) + ")",
+                 f, cap, "kip/in", "AISC J2.4 (metodo elastico, solo lineas soldadas)",
+                 f"Lw = {u.q('L', Lw)} soldado; maximo en zona {zn} ({u.fmt('L', bx)}, "
+                 f"{u.fmt('L', by)}). La compresion se transmite por contacto; traccion, "
+                 f"cortante y momento solo por las zonas soldadas.")]
+    if rec:
+        rec.add("Zonas sin soldar", ", ".join(zones), "", None, "-", "AISC J2",
+                "contorno NO soldado por completo")
+        rec.add("Lw (soldado)", "longitud de las lineas soldadas", "", Lw, "L")
+        rec.check("Soldadura — contorno parcial", f, cap, "LF", ratio, ratio <= 1.0, "AISC J2.4")
+    return out
+
+
 def welds(prj: Project, br: Bearing, rec: Recorder | None = None) -> list[Check]:
     if prj.section.generic:
         if rec:
@@ -451,8 +532,9 @@ def welds(prj: Project, br: Bearing, rec: Recorder | None = None) -> list[Check]
                              Rf, cap, "kip", "AISC J2.4",
                              "CJP con metal de aporte compatible: no requiere calculo del deposito."))
         elif W.flange.wtype == "Sin soldadura":
-            out.append(Check("weld_fl", "Soldadura de ALA", Rf, 0.0, "kip", "",
-                             "No definida", skip=(Rf <= 1e-9)))
+            out.append(Check("weld_fl", "Soldadura de ALA — sin soldar", Rf, 0.0, "kip", "",
+                             "Alas sin soldar: la traccion y el cortante se redistribuyen "
+                             "en las zonas soldadas (ver grupo parcial).", skip=True))
         else:
             thr = 0.707 * W.flange.size if W.flange.wtype == "Filete" else W.flange.size
             kd = (1 + 0.5 * math.sin(math.radians(th_f)) ** 1.5) if W.directional else 1.0
@@ -499,8 +581,9 @@ def welds(prj: Project, br: Bearing, rec: Recorder | None = None) -> list[Check]
                              0.90 * prj.section.mat().Fy * (d - 2 * tf) * tw, "kip",
                              "AISC J2.4", "Resistencia = metal base."))
         elif W.web.wtype == "Sin soldadura":
-            out.append(Check("weld_web", "Soldadura de ALMA", Rw, 0.0, "kip", "",
-                             "No definida", skip=(Rw <= 1e-9)))
+            out.append(Check("weld_web", "Soldadura de ALMA — sin soldar", Rw, 0.0, "kip", "",
+                             "Alma sin soldar: la demanda se redistribuye en las zonas "
+                             "soldadas (ver grupo parcial).", skip=True))
         else:
             thr = 0.707 * W.web.size if W.web.wtype == "Filete" else W.web.size
             cap = 0.75 * 0.60 * W.web.FEXX() * thr * Lw
@@ -517,6 +600,7 @@ def welds(prj: Project, br: Bearing, rec: Recorder | None = None) -> list[Check]
             if W.web.wtype == "Filete":
                 out.append(Check("weld_web_min", "Tamano minimo de filete en ALMA",
                                  wmin, W.web.size, "in", "AISC Tabla J2.4"))
+        out += _welds_partial_W(prj, rec)
     else:
         # HSS / Pipe: soldadura perimetral
         Lp = s.perimeter_weld_len()

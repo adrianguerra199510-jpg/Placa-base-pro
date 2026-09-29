@@ -125,6 +125,14 @@ def solve(prj: Project, with_fea: bool = True, detail: bool = True) -> Results:
                           "concreto de los anclajes (ACI 17.10.5.2). Verifique ademas el requisito "
                           "de que el anclaje sea gobernado por la fluencia ductil del acero.")
 
+    zs = D.unwelded_zones(prj)
+    if zs:
+        R.warnings.append(
+            "La columna NO esta soldada en todo el contorno (sin soldar: " + ", ".join(zs) +
+            "). La compresion solo se transmite por contacto; la traccion, el cortante y el "
+            "momento los toman unicamente las zonas soldadas. Revise que el detalle sea "
+            "el intencionado.")
+
     # ------------------------------------------------------------ chequeos
     ck: list[Check] = []
 

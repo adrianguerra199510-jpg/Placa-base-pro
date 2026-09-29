@@ -161,6 +161,40 @@ def load_results(mesh_inp: str, frd: str) -> Result3D:
 
 
 # ==================================================================== dibujo
+def set_aspect(ax, aspect, zoom=0.72):
+    """Proporciones reales del modelo + zoom inicial conservador (luego se ajusta)."""
+    ax._pb_aspect, ax._pb_zoom = aspect, zoom
+    try:
+        ax.set_box_aspect(aspect, zoom=zoom)
+    except TypeError:
+        ax.set_box_aspect(aspect)
+
+
+def fit_to_axes(ax, margin=0.04):
+    """Escala el modelo para que llene el area del grafico (ancho y alto) sin recortarse.
+    Proyecta las 8 esquinas de la caja del modelo a pixeles y ajusta el zoom."""
+    asp = getattr(ax, "_pb_aspect", None)
+    if asp is None:
+        return
+    from mpl_toolkits.mplot3d import proj3d
+    try:
+        for _ in range(2):
+            (x0, x1), (y0, y1), (z0, z1) = ax.get_xlim3d(), ax.get_ylim3d(), ax.get_zlim3d()
+            cs = [(x, y, z) for x in (x0, x1) for y in (y0, y1) for z in (z0, z1)]
+            X, Y, _z = proj3d.proj_transform([c[0] for c in cs], [c[1] for c in cs],
+                                             [c[2] for c in cs], ax.get_proj())
+            px = ax.transData.transform(np.column_stack([X, Y]))
+            bb = ax.bbox
+            w, h = px[:, 0].max() - px[:, 0].min(), px[:, 1].max() - px[:, 1].min()
+            if w <= 1 or h <= 1 or bb.width <= 1 or bb.height <= 1:
+                return
+            k = min(bb.width * (1 - 2 * margin) / w, bb.height * (1 - 2 * margin) / h)
+            ax._pb_zoom = float(np.clip(ax._pb_zoom * k, 0.2, 3.0))
+            ax.set_box_aspect(asp, zoom=ax._pb_zoom)
+    except Exception:
+        pass
+
+
 def _soft_cmap(diverging=False):
     """Paletas suaves para los resultados 3D (azul -> verde -> amarillo -> coral)."""
     from matplotlib.colors import LinearSegmentedColormap
@@ -169,7 +203,7 @@ def _soft_cmap(diverging=False):
     return LinearSegmentedColormap.from_list("pb_suave", cols, N=256)
 
 
-def plot3d(ax, res: Result3D, prj, field="vm", scale=0.0, shrink_tris=12000):
+def plot3d(ax, res: Result3D, prj, field="vm", scale=0.0, shrink_tris=12000, tag_max=True):
     """Dibuja la piel del solido coloreada por el campo elegido."""
     from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
@@ -233,12 +267,21 @@ def plot3d(ax, res: Result3D, prj, field="vm", scale=0.0, shrink_tris=12000):
     ax.set_xlim(mins[0] - pad, maxs[0] + pad)
     ax.set_ylim(mins[1] - pad, maxs[1] + pad)
     ax.set_zlim(mins[2] - pad, maxs[2] + pad)
-    try:
-        ax.set_box_aspect(tuple(float(v) + 2 * pad for v in spans), zoom=0.92)
-    except TypeError:
-        ax.set_box_aspect(tuple(float(v) + 2 * pad for v in spans))
-    except Exception:
-        pass
+    set_aspect(ax, tuple(float(v) + 2 * pad for v in spans))
+    if tag_max and len(val):
+        try:
+            ax.computed_zorder = False
+        except Exception:
+            pass
+        k = int(np.argmax(val))
+        mx, my_, mz = Pm[k]
+        ax.scatter([mx], [my_], [mz], s=170, color="#d62728", marker="*", edgecolors="black",
+                   linewidths=0.8, depthshade=False, zorder=20)
+        lbl = {"vm": "Esfuerzo maximo", "u": "Desplazamiento maximo",
+               "uz": "Uz maximo"}.get(field, "Maximo")
+        ax.text2D(0.02, 0.93, f"{lbl} = {val[k]:.4g} {unit}   (nodo {ids[k]})",
+                  transform=ax.transAxes, fontsize=9, color="#7a1010", fontweight="bold",
+                  bbox=dict(boxstyle="round,pad=0.35", fc="#fff3e0", ec="#d62728", lw=1.0))
     ax.set_axis_off()                     # sin ejes ni reglas
     ax.set_title(f"{title}  ({unit})"
                  + (f"   —  deformada ×{scale:g}" if scale > 0 else ""),
@@ -531,12 +574,30 @@ def plot_geometry(ax, prj, show_concrete=True):
     ax.set_xlim(mins[0] - pad, maxs[0] + pad)
     ax.set_ylim(mins[1] - pad, maxs[1] + pad)
     ax.set_zlim(mins[2] - pad, maxs[2] + pad)
-    try:
-        ax.set_box_aspect(tuple(float(v) + 2 * pad for v in spans), zoom=0.92)
-    except TypeError:
-        ax.set_box_aspect(tuple(float(v) + 2 * pad for v in spans))
+    set_aspect(ax, tuple(float(v) + 2 * pad for v in spans))
     ax.set_axis_off()                     # sin ejes ni reglas
     tl = prj.loads
     ax.set_title("Geometria de la conexion"
                  + (f"   —   columna inclinada  X {tl.tilt_x:g}°, Y {tl.tilt_y:g}°"
                     if tl.tilted else ""), fontsize=9, loc="left")
+
+
+def render_result_png(res: Result3D, prj, field: str, path: str, scale: float = 0.0,
+                      size=(7.0, 4.6), dpi=150):
+    """Imagen de un campo de resultados 3D con la etiqueta del maximo (para el reporte).
+    -> (ruta, valor_maximo, nodo) o (None, 0, 0)."""
+    import matplotlib
+    from matplotlib.figure import Figure
+    try:
+        fig = Figure(figsize=size, dpi=dpi)
+        ax = fig.add_axes([0.0, 0.0, 0.87, 0.93], projection="3d")
+        m = plot3d(ax, res, prj, field, scale, tag_max=True)
+        ax.view_init(elev=24, azim=-58)
+        fit_to_axes(ax)
+        if m is not None:
+            cax = fig.add_axes([0.90, 0.16, 0.02, 0.66])
+            fig.colorbar(m, cax=cax)
+        fig.savefig(path)
+        return path
+    except Exception:
+        return None

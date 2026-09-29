@@ -174,6 +174,14 @@ if abs(_t.eloads.Pu - 400 * math.cos(math.radians(30))) > 1e-6 or abs(_t.eloads.
     FAIL.append("columna inclinada: componentes normal/tangencial incorrectas")
 case("columna inclinada 20°", **{"loads.tilt_y": 20.0})
 
+# perfil W soldado solo en el alma: la soldadura parcial debe tomar el momento
+_w = Project(); _w.welds.flange.wtype = "Sin soldadura"
+_rw = solve(_w, with_fea=False)
+_cp = [c for c in _rw.checks if c.key == "weld_part"]
+print(f"{'W soldado solo en el alma':34} weld_part D/C = {_cp[0].ratio if _cp else float('nan'):.2f}")
+if not _cp or not any("NO esta soldada" in w for w in _rw.warnings):
+    FAIL.append("soldadura parcial: falta la verificacion o el aviso")
+
 print()
 print("CASOS LIMITE")
 case("placa insuficiente", **{"loads.Mux": 26000.0})

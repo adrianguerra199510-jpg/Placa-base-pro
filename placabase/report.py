@@ -104,12 +104,28 @@ def render_3d_png(prj: Project, path: str, size=(6.4, 4.6), dpi=170) -> str | No
         view3d.plot_geometry(ax, prj)
         ax.view_init(elev=24, azim=-58)
         view3d.update_order(ax)
+        view3d.fit_to_axes(ax)
         fig.savefig(path)
         plt.close(fig)
         return path
     except Exception:
         plt.close("all")
         return None
+
+
+def _rep3d_lines(prj: Project, us, rep: dict) -> list[str]:
+    """Texto del resumen de resultados del modelo solido 3D."""
+    return [
+        f"Modelo de {rep['n_nodes']:,} nodos y {rep['n_elems']:,} tetraedros.",
+        f"ESFUERZO MAXIMO (von Mises) = {us.q('S', rep['vmmax'])}"
+        + (f", en el nodo {rep['vm_node']} (marcado con ★ en la figura)"
+           if rep.get("vm_node") else "") + ".",
+        f"Desplazamiento maximo |U| = {us.q('L', rep['umax'])}"
+        + (f"; deformada amplificada ×{rep['scale']:g}." if rep.get("scale") else "."),
+        "Los picos de von Mises en aristas vivas (borde de agujero, encuentro perfil-placa) "
+        "son singularidades de malla: dependen del tamaño del elemento y no deben leerse "
+        "como esfuerzo real.",
+    ]
 
 
 def save_figures(prj: Project, res: Results, folder: str) -> list[str]:
@@ -525,6 +541,28 @@ def export_docx(prj: Project, res: Results, path: str,
                 run.italic = True
                 run.font.color.rgb = RGBColor(0x55, 0x55, 0x55)
 
+    rep3d = getattr(res, "rep3d", None)
+    if rep3d:
+        n_sec = 7 if getattr(res, "post3d", None) is not None else 6
+        doc.add_heading(f"{n_sec}. Modelo solido 3D — esfuerzos de von Mises y deformaciones",
+                        level=1)
+        for i, ln in enumerate(_rep3d_lines(prj, us, rep3d)):
+            pp = doc.add_paragraph()
+            run = pp.add_run(ln)
+            if i == 1:
+                run.bold = True
+        for key, cap in (("vm", "Esfuerzo de von Mises (etiqueta: esfuerzo maximo)"),
+                         ("u", "Desplazamiento |U| sobre la geometria deformada")):
+            if rep3d.get(key):
+                try:
+                    doc.add_picture(rep3d[key], width=Inches(5.6))
+                    doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    c_ = doc.add_paragraph(cap)
+                    c_.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    c_.runs[0].italic = True
+                except Exception:
+                    pass
+
     if figs:
         doc.add_page_break()
         doc.add_heading("Anexo B — Dibujos y resultados graficos", level=1)
@@ -768,6 +806,27 @@ def export_pdf(prj: Project, res: Results, path: str,
         for kind, txt in res.rec.to_lines():
             st = {"sec": SEC, "txt": NT, "chk": CH}.get(kind, EQ)
             story.append(Paragraph(_esc(txt), st))
+
+    rep3d = getattr(res, "rep3d", None)
+    if rep3d:
+        n_sec = 7 if getattr(res, "post3d", None) is not None else 6
+        story.append(PageBreak())
+        story.append(Paragraph(
+            f"{n_sec}. Modelo solido 3D — esfuerzos de von Mises y deformaciones", H1))
+        for i, ln in enumerate(_rep3d_lines(prj, us, rep3d)):
+            story.append(Paragraph(f"<b>{ln}</b>" if i == 1 else ln, BODY))
+        from PIL import Image as _PIL2
+        for key, cap in (("vm", "Esfuerzo de von Mises (etiqueta: esfuerzo maximo)"),
+                         ("u", "Desplazamiento |U| sobre la geometria deformada")):
+            if rep3d.get(key):
+                try:
+                    iw, ih = _PIL2.open(rep3d[key]).size
+                    w = 5.0 * inch
+                    story.append(Spacer(1, 6))
+                    story.append(RLImage(rep3d[key], width=w, height=w * ih / iw))
+                    story.append(Paragraph(cap, CEN))
+                except Exception:
+                    pass
 
     # --------------------------------------------- anexo grafico
     if figs:
