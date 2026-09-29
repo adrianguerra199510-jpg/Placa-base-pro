@@ -599,7 +599,8 @@ class MainWindow(QMainWindow):
         t3.addWidget(self.btn3d)
         t3.addWidget(QLabel("Campo:"))
         self.cb_f3 = QComboBox()
-        self.cb_f3.addItems(["Von Mises", "Desplazamiento |U|", "Desplazamiento Uz"])
+        self.cb_f3.addItems(["Solo geometria", "Von Mises", "Desplazamiento |U|",
+                             "Desplazamiento Uz"])
         self.cb_f3.currentIndexChanged.connect(self.draw_3d)
         t3.addWidget(self.cb_f3)
         t3.addWidget(QLabel("Escala de deformada:"))
@@ -633,7 +634,9 @@ class MainWindow(QMainWindow):
         sp3.addWidget(low)
         sp3.setSizes([560, 230])
         l3.addWidget(sp3, 1)
-        self.lbl_3d = QLabel("El modelo solido 3D incluye la placa con los agujeros "
+        self.lbl_3d = QLabel("La vista 3D muestra siempre la geometria de la conexion "
+                             "(se actualiza al editar; no necesita analisis). "
+                             "El analisis solido incluye la placa con los agujeros "
                              "taladrados, el perfil, los rigidizadores y la llave, con "
                              "el concreto solo a compresion y los pernos solo a traccion. "
                              "Gmsh y CalculiX vienen incluidos: solo presione el boton "
@@ -1091,6 +1094,8 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.statusBar().showMessage(f"Error de dibujo: {e}", 8000)
         self.draw_fea()
+        if self.cb_f3.currentIndex() == 0 or self.res3d is None:
+            self.draw_3d()                      # la geometria 3D siempre esta al dia
 
     def draw_fea(self):
         self.cv_fea.reset()
@@ -1114,8 +1119,22 @@ class MainWindow(QMainWindow):
             self.lbl_fea.setText("FEA no ejecutado para el estado actual.  Presione F5.")
 
     def draw_3d(self):
+        try:                                    # conserva la orientacion de la camara
+            elev, azim = self.cv_3d.ax.elev, self.cv_3d.ax.azim
+        except Exception:
+            elev = azim = None
         self.cv_3d.reset()
-        fld = ["vm", "u", "uz"][self.cb_f3.currentIndex()]
+        k = self.cb_f3.currentIndex()
+        if k == 0 or self.res3d is None or not self.res3d.ok:
+            try:
+                view3d.plot_geometry(self.cv_3d.ax, self.prj)
+            except Exception as e:
+                self.statusBar().showMessage(f"Error de dibujo 3D: {e}", 8000)
+            if elev is not None:
+                self.cv_3d.ax.view_init(elev=elev, azim=azim)
+            self.cv_3d.cv.draw_idle()
+            return
+        fld = ["vm", "u", "uz"][k - 1]
         m = view3d.plot3d(self.cv_3d.ax, self.res3d, self.prj, fld,
                           float(self.sp_sc.value()))
         if m is not None:
@@ -1167,6 +1186,9 @@ class MainWindow(QMainWindow):
             "Los picos de von Mises en aristas vivas (borde de agujero, encuentro "
             "perfil-placa) son singularidades de malla: dependen del tamano de "
             "elemento y no deben leerse como esfuerzo real.")
+        self.cb_f3.blockSignals(True)
+        self.cb_f3.setCurrentIndex(1)           # muestra von Mises al terminar el analisis
+        self.cb_f3.blockSignals(False)
         self.draw_3d()
         self.tabs_out.setCurrentIndex(4)
 

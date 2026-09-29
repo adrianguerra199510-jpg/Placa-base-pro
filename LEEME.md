@@ -21,6 +21,14 @@ que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
 | **Todo** sale en las unidades elegidas: también la columna de observaciones, los ejes de los dibujos y los títulos | Toda la aplicación |
 | **Descripción de cada dato de entrada** en un panel al pie de cada pestaña, más la convención de signos de las cargas | Los 65 campos de entrada |
 
+## Novedades: vista 3D de geometria
+
+La pestaña **Modelo 3D** muestra siempre la geometria de la conexion (placa, perfil,
+pernos con tuerca, rigidizadores, llave de corte y pedestal transparente), dibujada
+directamente por el programa: no necesita Gmsh ni CalculiX y se actualiza al editar.
+El combo "Campo" tiene ahora "Solo geometria" (por defecto); tras un analisis 3D pasa a
+von Mises. La columna inclinada se dibuja inclinada.
+
 ## Novedades: columna inclinada
 
 Pestaña **Cargas → Inclinacion de la columna**: giro alrededor de X y/o de Y (grados,

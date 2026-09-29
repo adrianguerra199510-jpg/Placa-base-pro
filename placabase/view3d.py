@@ -238,3 +238,158 @@ def plot3d(ax, res: Result3D, prj, field="vm", scale=0.0, shrink_tris=12000):
                  fontsize=9, loc="left")
     mapper.set_array(face_val)
     return mapper
+
+
+# ============================================================ solo geometria
+def _prism(poly, z0, z1, cap=True):
+    """Caras (lista de poligonos 3D) de un prisma vertical sobre un poligono 2D."""
+    pts = list(poly)
+    if len(pts) > 1 and abs(pts[0][0] - pts[-1][0]) < 1e-9 and abs(pts[0][1] - pts[-1][1]) < 1e-9:
+        pts = pts[:-1]
+    faces = []
+    n = len(pts)
+    for i in range(n):
+        a, b = pts[i], pts[(i + 1) % n]
+        faces.append([(a[0], a[1], z0), (b[0], b[1], z0), (b[0], b[1], z1), (a[0], a[1], z1)])
+    if cap and n >= 3:
+        faces.append([(x, y, z1) for x, y in pts])
+        faces.append([(x, y, z0) for x, y in pts])
+    return faces
+
+
+def _rot_matrix(tilt_x, tilt_y):
+    """Misma matriz que Loads.eff(): R = Ry(tilt_y)·Rx(tilt_x)."""
+    cx, sx = math.cos(math.radians(tilt_x)), math.sin(math.radians(tilt_x))
+    cy, sy = math.cos(math.radians(tilt_y)), math.sin(math.radians(tilt_y))
+    return np.array([[cy, sy * sx, sy * cx], [0.0, cx, -sx], [-sy, cy * sx, cy * cx]])
+
+
+def geometry_faces(prj):
+    """Todas las piezas de la conexion como listas de caras 3D (pulgadas).
+    -> dict nombre -> (caras, color, alfa).  No requiere Gmsh ni CalculiX."""
+    from . import geometry as G
+    p, b, st, lug = prj.plate, prj.bolts, prj.stiff, prj.lug
+    s = prj.section.shape()
+    g = b.geom()
+    parts = {}
+
+    # placa
+    parts["plate"] = (_prism(G.plate_outline(prj), 0.0, p.tp), "#9aa5b1", 1.0)
+
+    # agujeros de perno (discos oscuros sobre la cara superior)
+    holes, bolts = [], []
+    for (bx, by) in G.bolt_positions(prj):
+        ring = [(bx + g.dh / 2 * math.cos(a), by + g.dh / 2 * math.sin(a))
+                for a in np.linspace(0, 2 * math.pi, 25)[:-1]]
+        holes.append([(x, y, p.tp + 0.01) for x, y in ring])
+        r = g.db / 2
+        c = [(bx + r * math.cos(a), by + r * math.sin(a))
+             for a in np.linspace(0, 2 * math.pi, 17)[:-1]]
+        bolts += _prism(c, -b.hef, p.tp + 1.25 * g.db, cap=True)
+        # tuerca (hexagono) sobre la placa
+        hexr = 0.9 * g.db
+        hx = [(bx + hexr * math.cos(math.radians(60 * k)), by + hexr * math.sin(math.radians(60 * k)))
+              for k in range(6)]
+        bolts += _prism(hx, p.tp, p.tp + 0.875 * g.db)
+    parts["holes"] = (holes, "#20262c", 1.0)
+    parts["bolts"] = (bolts, "#c9a227", 1.0)
+
+    # perfil (posiblemente inclinado)
+    H = max(3.0 * s.d, 12.0)
+    col = []
+    if prj.section.generic:
+        for poly in G.section_rects(prj):
+            col += _prism(poly, 0.0, H)
+    else:
+        ext, inn = G.profile_outline(prj)
+        col += _prism(ext, 0.0, H, cap=not inn)
+        if inn:
+            col += _prism(inn, 0.0, H, cap=False)
+            # corona superior: une exterior e interior
+            m = min(len(ext), len(inn))
+            for i in range(m - 1):
+                col.append([(ext[i][0], ext[i][1], H), (ext[i + 1][0], ext[i + 1][1], H),
+                            (inn[i][0], inn[i][1], H), (inn[i][0], inn[i][1], H)])
+    R = _rot_matrix(prj.loads.tilt_x, prj.loads.tilt_y) if prj.loads.tilted else None
+    if R is not None:
+        col = [[tuple(R @ np.array(v)) for v in f] for f in col]
+    col = [[(x, y, z + p.tp) for x, y, z in f] for f in col]
+    parts["column"] = (col, "#4c78a8", 1.0)
+
+    # rigidizadores
+    if st.enabled and st.count > 0:
+        prof2d = st.outline()[:-1]
+        faces = []
+        for (x1, y1, x2, y2) in G.stiffener_lines(prj):
+            ang = math.atan2(y2 - y1, x2 - x1)
+            ca, sa = math.cos(ang), math.sin(ang)
+
+            def T(u, v, w):
+                # (u a lo largo de la linea, w espesor, v altura)
+                return (x1 + u * ca - w * sa, y1 + u * sa + w * ca, p.tp + v)
+            for i, (u0, v0) in enumerate(prof2d):
+                u1, v1 = prof2d[(i + 1) % len(prof2d)]
+                for w in (st.t / 2,):
+                    faces.append([T(u0, v0, -w), T(u1, v1, -w), T(u1, v1, w), T(u0, v0, w)])
+            faces.append([T(u, v, st.t / 2) for u, v in prof2d])
+            faces.append([T(u, v, -st.t / 2) for u, v in prof2d])
+        parts["stiff"] = (faces, "#59a14f", 1.0)
+
+    # llave de corte (bajo la placa)
+    if lug.enabled:
+        faces = []
+        for poly in G.lug_outline(prj):
+            faces += _prism(poly, -lug.H, 0.0)
+        parts["lug"] = (faces, "#e15759", 1.0)
+
+    # pedestal de concreto (transparente)
+    c = prj.conc
+    ped = [(-c.B2 / 2, -c.N2 / 2), (c.B2 / 2, -c.N2 / 2), (c.B2 / 2, c.N2 / 2), (-c.B2 / 2, c.N2 / 2)]
+    parts["concrete"] = (_prism(ped, -min(c.ha, max(b.hef * 1.15, 12.0)), -0.0), "#b8b8b0", 0.12)
+    return parts
+
+
+def plot_geometry(ax, prj, show_concrete=True):
+    """Dibuja el conjunto de la conexion (solo geometria) en un eje 3D."""
+    from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+    from matplotlib.colors import to_rgb
+
+    ax.clear()
+    u = prj.units()
+    kl = u.fl
+    parts = geometry_faces(prj)
+    allp = []
+    for name, (faces, color, alpha) in parts.items():
+        if name == "concrete" and not show_concrete:
+            continue
+        if not faces:
+            continue
+        v = [[(x / kl, y / kl, z / kl) for x, y, z in f] for f in faces]
+        if name != "concrete":
+            allp += [pt for f in v for pt in f]
+        rgb = to_rgb(color)
+        coll = Poly3DCollection(v, facecolors=(*rgb, alpha),
+                                edgecolors=(0, 0, 0, 0.35 if alpha > 0.5 else 0.15),
+                                linewidths=0.4)
+        ax.add_collection3d(coll)
+
+    P = np.array(allp, dtype=float)
+    mins, maxs = P.min(axis=0), P.max(axis=0)
+    if show_concrete:
+        c = parts["concrete"][0]
+        Q = np.array([[x / kl, y / kl, z / kl] for f in c for x, y, z in f])
+        mins, maxs = np.minimum(mins, Q.min(axis=0)), np.maximum(maxs, Q.max(axis=0))
+    spans = np.maximum(maxs - mins, 1e-6)
+    pad = 0.03 * float(spans.max())
+    ax.set_xlim(mins[0] - pad, maxs[0] + pad)
+    ax.set_ylim(mins[1] - pad, maxs[1] + pad)
+    ax.set_zlim(mins[2] - pad, maxs[2] + pad)
+    try:
+        ax.set_box_aspect(tuple(float(v) + 2 * pad for v in spans), zoom=0.92)
+    except TypeError:
+        ax.set_box_aspect(tuple(float(v) + 2 * pad for v in spans))
+    ax.set_xlabel(f"X ({u.L})"); ax.set_ylabel(f"Y ({u.L})"); ax.set_zlabel(f"Z ({u.L})")
+    tl = prj.loads
+    ax.set_title("Geometria de la conexion"
+                 + (f"   —   columna inclinada  X {tl.tilt_x:g}°, Y {tl.tilt_y:g}°"
+                    if tl.tilted else ""), fontsize=9, loc="left")
