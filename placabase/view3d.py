@@ -161,6 +161,14 @@ def load_results(mesh_inp: str, frd: str) -> Result3D:
 
 
 # ==================================================================== dibujo
+def _soft_cmap(diverging=False):
+    """Paletas suaves para los resultados 3D (azul -> verde -> amarillo -> coral)."""
+    from matplotlib.colors import LinearSegmentedColormap
+    cols = (["#4a7fc1", "#f5f5f2", "#e2705f"] if diverging else
+            ["#4a7fc1", "#63b7c4", "#9fd3a0", "#f1e08a", "#f4b26b", "#e2705f"])
+    return LinearSegmentedColormap.from_list("pb_suave", cols, N=256)
+
+
 def plot3d(ax, res: Result3D, prj, field="vm", scale=0.0, shrink_tris=12000):
     """Dibuja la piel del solido coloreada por el campo elegido."""
     from mpl_toolkits.mplot3d.art3d import Poly3DCollection
@@ -187,13 +195,13 @@ def plot3d(ax, res: Result3D, prj, field="vm", scale=0.0, shrink_tris=12000):
         val = np.array([math.sqrt(sum(c * c for c in res.disp.get(n, (0, 0, 0))))
                         for n in ids])
         val = val / kl
-        title, cmap, unit = "Desplazamiento |U|", "viridis", u.L
+        title, cmap, unit = "Desplazamiento |U|", _soft_cmap(), u.L
     elif field == "uz":
         val = np.array([res.disp.get(n, (0, 0, 0))[2] for n in ids]) / kl
-        title, cmap, unit = "Desplazamiento vertical Uz", "coolwarm", u.L
+        title, cmap, unit = "Desplazamiento vertical Uz", _soft_cmap(True), u.L
     else:
         val = np.array([res.vm.get(n, 0.0) for n in ids]) / ks
-        title, cmap, unit = "Esfuerzo de von Mises", "inferno", u.S
+        title, cmap, unit = "Esfuerzo de von Mises", _soft_cmap(), u.S
 
     tris = res.tris
     if len(tris) > shrink_tris:                 # muestreo para que la vista fluya
@@ -213,7 +221,7 @@ def plot3d(ax, res: Result3D, prj, field="vm", scale=0.0, shrink_tris=12000):
     mapper = cm.ScalarMappable(norm=norm, cmap=cmap)
 
     coll = Poly3DCollection(verts, facecolors=mapper.to_rgba(face_val),
-                            edgecolors=(0, 0, 0, 0.10), linewidths=0.12)
+                            edgecolors=(0, 0, 0, 0.06), linewidths=0.1)
     ax.add_collection3d(coll)
 
     Pm = P / kl
@@ -231,8 +239,7 @@ def plot3d(ax, res: Result3D, prj, field="vm", scale=0.0, shrink_tris=12000):
         ax.set_box_aspect(tuple(float(v) + 2 * pad for v in spans))
     except Exception:
         pass
-    ax.set_xlabel(f"X ({u.L})"); ax.set_ylabel(f"Y ({u.L})")
-    ax.set_zlabel(f"Z ({u.L})")
+    ax.set_axis_off()                     # sin ejes ni reglas
     ax.set_title(f"{title}  ({unit})"
                  + (f"   —  deformada ×{scale:g}" if scale > 0 else ""),
                  fontsize=9, loc="left")
@@ -489,7 +496,7 @@ def plot_geometry(ax, prj, show_concrete=True):
         ax.set_box_aspect(tuple(float(v) + 2 * pad for v in spans), zoom=0.92)
     except TypeError:
         ax.set_box_aspect(tuple(float(v) + 2 * pad for v in spans))
-    ax.set_xlabel(f"X ({u.L})"); ax.set_ylabel(f"Y ({u.L})"); ax.set_zlabel(f"Z ({u.L})")
+    ax.set_axis_off()                     # sin ejes ni reglas
     tl = prj.loads
     ax.set_title("Geometria de la conexion"
                  + (f"   —   columna inclinada  X {tl.tilt_x:g}°, Y {tl.tilt_y:g}°"
