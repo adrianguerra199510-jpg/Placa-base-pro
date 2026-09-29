@@ -241,11 +241,16 @@ def plot3d(ax, res: Result3D, prj, field="vm", scale=0.0, shrink_tris=12000):
 
 
 # ============================================================ solo geometria
-def _prism(poly, z0, z1, cap=True):
-    """Caras (lista de poligonos 3D) de un prisma vertical sobre un poligono 2D."""
+def _clean_poly(poly):
     pts = list(poly)
     if len(pts) > 1 and abs(pts[0][0] - pts[-1][0]) < 1e-9 and abs(pts[0][1] - pts[-1][1]) < 1e-9:
         pts = pts[:-1]
+    return pts
+
+
+def _prism(poly, z0, z1, cap=True):
+    """Caras (lista de poligonos 3D) de un prisma vertical sobre un poligono 2D."""
+    pts = _clean_poly(poly)
     faces = []
     n = len(pts)
     for i in range(n):
@@ -264,60 +269,136 @@ def _rot_matrix(tilt_x, tilt_y):
     return np.array([[cy, sy * sx, sy * cx], [0.0, cx, -sx], [-sy, cy * sx, cy * cx]])
 
 
+def _tilted_prism(poly, H, R, cap=True):
+    """Prisma de altura axial H sobre `poly` (en el plano de la seccion), inclinado
+    con la matriz R y CORTADO al ras de la placa (z = 0): la base de la columna es
+    un corte a bisel que apoya plano sobre la placa."""
+    pts = _clean_poly(poly)
+    n = len(pts)
+    bot, top = [], []
+    for (x, y) in pts:
+        v0 = R @ np.array([x, y, 0.0])
+        t0 = -v0[2] / R[2, 2]                      # eje de la columna donde z = 0
+        bot.append(tuple(R @ np.array([x, y, t0])))
+        top.append(tuple(R @ np.array([x, y, H])))
+    faces = [[bot[i], bot[(i + 1) % n], top[(i + 1) % n], top[i]] for i in range(n)]
+    if cap and n >= 3:
+        faces.append(list(top))
+        faces.append(list(bot))
+    return faces
+
+
+def _plate_top_mesh(prj, holes, zt):
+    """Triangulos de la cara superior de la placa con los agujeros REALMENTE vacios:
+    Delaunay sobre contorno, aros de agujero y una rejilla interior; se descartan los
+    triangulos cuyo centro cae dentro de un agujero."""
+    from scipy.spatial import Delaunay
+    from . import geometry as G
+    p = prj.plate
+    outer = _clean_poly(G.plate_outline(prj))
+    pts = [tuple(q) for q in outer]
+    xs = [q[0] for q in outer]; ys = [q[1] for q in outer]
+    # refina el contorno
+    if p.shape != "Circular":
+        m = 10
+        pts = []
+        for i in range(len(outer)):
+            a, b = outer[i], outer[(i + 1) % len(outer)]
+            pts += [(a[0] + (b[0] - a[0]) * k / m, a[1] + (b[1] - a[1]) * k / m) for k in range(m)]
+    step = max(max(xs) - min(xs), max(ys) - min(ys)) / 14.0
+    circ = p.shape == "Circular"
+    R = p.Dp / 2 if circ else 0
+    gx = np.arange(min(xs) + step / 2, max(xs), step)
+    gy = np.arange(min(ys) + step / 2, max(ys), step)
+    for x in gx:
+        for y in gy:
+            if circ and x * x + y * y > (R - step * 0.4) ** 2:
+                continue
+            pts.append((float(x), float(y)))
+    for (cx, cy, r) in holes:
+        for a in np.linspace(0, 2 * math.pi, 25)[:-1]:
+            pts.append((cx + r * math.cos(a), cy + r * math.sin(a)))
+    P = np.array(pts)
+    # descarta puntos interiores demasiado cerca de un agujero (dentro del hueco)
+    keep = np.ones(len(P), bool)
+    for (cx, cy, r) in holes:
+        d = np.hypot(P[:, 0] - cx, P[:, 1] - cy)
+        keep &= ~(d < r * 0.98)
+    P = P[keep]
+    tri = Delaunay(P)
+    out = []
+    for s_ in tri.simplices:
+        c = P[s_].mean(axis=0)
+        if any(math.hypot(c[0] - cx, c[1] - cy) < r for (cx, cy, r) in holes):
+            continue
+        if circ and math.hypot(c[0], c[1]) > R:
+            continue
+        out.append([(P[k][0], P[k][1], zt) for k in s_])
+    return out
+
+
 def geometry_faces(prj):
-    """Todas las piezas de la conexion como listas de caras 3D (pulgadas).
-    -> dict nombre -> (caras, color, alfa).  No requiere Gmsh ni CalculiX."""
+    """Piezas de la conexion como caras 3D (pulgadas).
+    -> lista de (grupo, caras, color, alfa); grupo: 'conc' | 'below' | 'plate' | 'above'.
+    No requiere Gmsh ni CalculiX."""
     from . import geometry as G
     p, b, st, lug = prj.plate, prj.bolts, prj.stiff, prj.lug
     s = prj.section.shape()
     g = b.geom()
-    parts = {}
+    parts = []
+    bpos = G.bolt_positions(prj)
 
-    # placa
-    parts["plate"] = (_prism(G.plate_outline(prj), 0.0, p.tp), "#9aa5b1", 1.0)
+    # ---- placa con agujeros
+    holes = [(bx, by, g.dh / 2) for bx, by in bpos]
+    top = _plate_top_mesh(prj, holes, p.tp)
+    bot = [[(x, y, 0.0) for x, y, _ in t] for t in top]
+    side = _prism(G.plate_outline(prj), 0.0, p.tp, cap=False)
+    wall = []
+    for (cx, cy, r) in holes:
+        ring = [(cx + r * math.cos(a), cy + r * math.sin(a)) for a in np.linspace(0, 2 * math.pi, 25)[:-1]]
+        wall += _prism(ring, 0.0, p.tp, cap=False)
+    parts.append(("plate", top + bot, "#9aa5b1", 1.0, "flat"))
+    parts.append(("plate", side, "#9aa5b1", 1.0))
+    parts.append(("plate", wall, "#3b434b", 1.0))
 
-    # agujeros de perno (discos oscuros sobre la cara superior)
-    holes, bolts = [], []
-    for (bx, by) in G.bolt_positions(prj):
-        ring = [(bx + g.dh / 2 * math.cos(a), by + g.dh / 2 * math.sin(a))
-                for a in np.linspace(0, 2 * math.pi, 25)[:-1]]
-        holes.append([(x, y, p.tp + 0.01) for x, y in ring])
+    # ---- pernos (vastago inferior / parte sobre la placa) y tuercas
+    low, up, nuts = [], [], []
+    for (bx, by) in bpos:
         r = g.db / 2
-        c = [(bx + r * math.cos(a), by + r * math.sin(a))
-             for a in np.linspace(0, 2 * math.pi, 17)[:-1]]
-        bolts += _prism(c, -b.hef, p.tp + 1.25 * g.db, cap=True)
-        # tuerca (hexagono) sobre la placa
+        c = [(bx + r * math.cos(a), by + r * math.sin(a)) for a in np.linspace(0, 2 * math.pi, 17)[:-1]]
+        low += _prism(c, -b.hef, 0.0, cap=True)
+        up += _prism(c, 0.0, p.tp + 1.25 * g.db, cap=True)
         hexr = 0.9 * g.db
         hx = [(bx + hexr * math.cos(math.radians(60 * k)), by + hexr * math.sin(math.radians(60 * k)))
               for k in range(6)]
-        bolts += _prism(hx, p.tp, p.tp + 0.875 * g.db)
-    parts["holes"] = (holes, "#20262c", 1.0)
-    parts["bolts"] = (bolts, "#c9a227", 1.0)
+        nuts += _prism(hx, p.tp, p.tp + 0.875 * g.db)
+    parts.append(("below", low, "#c9a227", 1.0))
+    parts.append(("above", up, "#c9a227", 1.0))
+    parts.append(("above", nuts, "#8d7514", 1.0))
 
-    # perfil (posiblemente inclinado)
+    # ---- columna (inclinada y con la base cortada a bisel sobre la placa)
     H = max(3.0 * s.d, 12.0)
+    R = _rot_matrix(prj.loads.tilt_x, prj.loads.tilt_y)
     col = []
     if prj.section.generic:
         for poly in G.section_rects(prj):
-            col += _prism(poly, 0.0, H)
+            col += _tilted_prism(poly, H, R)
     else:
         ext, inn = G.profile_outline(prj)
-        col += _prism(ext, 0.0, H, cap=not inn)
+        col += _tilted_prism(ext, H, R, cap=not inn)
         if inn:
-            col += _prism(inn, 0.0, H, cap=False)
-            # corona superior: une exterior e interior
-            m = min(len(ext), len(inn))
-            for i in range(m - 1):
-                col.append([(ext[i][0], ext[i][1], H), (ext[i + 1][0], ext[i + 1][1], H),
-                            (inn[i][0], inn[i][1], H), (inn[i][0], inn[i][1], H)])
-    R = _rot_matrix(prj.loads.tilt_x, prj.loads.tilt_y) if prj.loads.tilted else None
-    if R is not None:
-        col = [[tuple(R @ np.array(v)) for v in f] for f in col]
+            col += _tilted_prism(inn, H, R, cap=False)
+            e, i_ = _clean_poly(ext), _clean_poly(inn)
+            if len(e) == len(i_):                    # corona superior del tubo
+                for k in range(len(e)):
+                    k2 = (k + 1) % len(e)
+                    q = [tuple(R @ np.array([x, y, H])) for x, y in (e[k], e[k2], i_[k2], i_[k])]
+                    col.append(q)
     col = [[(x, y, z + p.tp) for x, y, z in f] for f in col]
-    parts["column"] = (col, "#4c78a8", 1.0)
+    parts.append(("above", col, "#4c78a8", 1.0))
 
-    # rigidizadores
-    if st.enabled and st.count > 0:
+    # ---- rigidizadores (solo columna vertical)
+    if st.enabled and st.count > 0 and not prj.loads.tilted:
         prof2d = st.outline()[:-1]
         faces = []
         for (x1, y1, x2, y2) in G.stiffener_lines(prj):
@@ -325,28 +406,44 @@ def geometry_faces(prj):
             ca, sa = math.cos(ang), math.sin(ang)
 
             def T(u, v, w):
-                # (u a lo largo de la linea, w espesor, v altura)
                 return (x1 + u * ca - w * sa, y1 + u * sa + w * ca, p.tp + v)
+            w = st.t / 2
             for i, (u0, v0) in enumerate(prof2d):
                 u1, v1 = prof2d[(i + 1) % len(prof2d)]
-                for w in (st.t / 2,):
-                    faces.append([T(u0, v0, -w), T(u1, v1, -w), T(u1, v1, w), T(u0, v0, w)])
-            faces.append([T(u, v, st.t / 2) for u, v in prof2d])
-            faces.append([T(u, v, -st.t / 2) for u, v in prof2d])
-        parts["stiff"] = (faces, "#59a14f", 1.0)
+                faces.append([T(u0, v0, -w), T(u1, v1, -w), T(u1, v1, w), T(u0, v0, w)])
+            faces.append([T(u, v, w) for u, v in prof2d])
+            faces.append([T(u, v, -w) for u, v in prof2d])
+        parts.append(("above", faces, "#59a14f", 1.0))
 
-    # llave de corte (bajo la placa)
+    # ---- llave de corte (bajo la placa)
     if lug.enabled:
         faces = []
         for poly in G.lug_outline(prj):
             faces += _prism(poly, -lug.H, 0.0)
-        parts["lug"] = (faces, "#e15759", 1.0)
+        parts.append(("below", faces, "#e15759", 1.0))
 
-    # pedestal de concreto (transparente)
+    # ---- pedestal de concreto (transparente)
     c = prj.conc
     ped = [(-c.B2 / 2, -c.N2 / 2), (c.B2 / 2, -c.N2 / 2), (c.B2 / 2, c.N2 / 2), (-c.B2 / 2, c.N2 / 2)]
-    parts["concrete"] = (_prism(ped, -min(c.ha, max(b.hef * 1.15, 12.0)), -0.0), "#b8b8b0", 0.12)
+    parts.append(("conc", _prism(ped, -min(c.ha, max(b.hef * 1.15, 12.0)), 0.0), "#b8b8b0", 0.10))
     return parts
+
+
+_GROUP_ORDER_ABOVE = {"conc": 1, "below": 2, "plate": 3, "above": 4}
+
+
+def update_order(ax):
+    """Ordena el dibujo segun la camara: vista desde arriba -> lo de abajo se pinta
+    primero y la placa lo tapa; desde abajo, al reves."""
+    colls = getattr(ax, "_pb_groups", None)
+    if not colls:
+        return
+    from_above = ax.elev >= 0
+    for grp, coll in colls:
+        z = _GROUP_ORDER_ABOVE[grp]
+        if not from_above and grp in ("below", "above"):
+            z = 6 - z                                   # above <-> below invertidos
+        coll.set_zorder(z)
 
 
 def plot_geometry(ax, prj, show_concrete=True):
@@ -355,30 +452,34 @@ def plot_geometry(ax, prj, show_concrete=True):
     from matplotlib.colors import to_rgb
 
     ax.clear()
+    try:
+        ax.computed_zorder = False           # respeta el orden de los grupos
+    except Exception:
+        pass
     u = prj.units()
     kl = u.fl
-    parts = geometry_faces(prj)
+    groups = []
     allp = []
-    for name, (faces, color, alpha) in parts.items():
-        if name == "concrete" and not show_concrete:
-            continue
-        if not faces:
+    for part in geometry_faces(prj):
+        grp, faces, color, alpha = part[:4]
+        flat = len(part) > 4 and part[4] == "flat"
+        if not faces or (grp == "conc" and not show_concrete):
             continue
         v = [[(x / kl, y / kl, z / kl) for x, y, z in f] for f in faces]
-        if name != "concrete":
+        if grp != "conc":
             allp += [pt for f in v for pt in f]
         rgb = to_rgb(color)
-        coll = Poly3DCollection(v, facecolors=(*rgb, alpha),
-                                edgecolors=(0, 0, 0, 0.35 if alpha > 0.5 else 0.15),
-                                linewidths=0.4)
+        # los triangulos de la malla de la placa no llevan aristas
+        edge = (*rgb, 1.0) if flat else (0, 0, 0, 0.35 if alpha > 0.5 else 0.12)
+        coll = Poly3DCollection(v, facecolors=(*rgb, alpha), edgecolors=edge,
+                                linewidths=0.35)
         ax.add_collection3d(coll)
+        groups.append((grp, coll))
+    ax._pb_groups = groups
+    update_order(ax)
 
     P = np.array(allp, dtype=float)
     mins, maxs = P.min(axis=0), P.max(axis=0)
-    if show_concrete:
-        c = parts["concrete"][0]
-        Q = np.array([[x / kl, y / kl, z / kl] for f in c for x, y, z in f])
-        mins, maxs = np.minimum(mins, Q.min(axis=0)), np.maximum(maxs, Q.max(axis=0))
     spans = np.maximum(maxs - mins, 1e-6)
     pad = 0.03 * float(spans.max())
     ax.set_xlim(mins[0] - pad, maxs[0] + pad)

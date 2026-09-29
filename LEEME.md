@@ -31,7 +31,7 @@ von Mises. La columna inclinada se dibuja inclinada.
 
 ## Novedades: columna inclinada
 
-Pestaña **Cargas → Inclinacion de la columna**: giro alrededor de X y/o de Y (grados,
+Pestaña **Perfil → Inclinacion de la columna**: giro alrededor de X y/o de Y (grados,
 respecto a la normal de la placa; 0° = perpendicular). Con inclinacion, Pu, Vux, Vuy,
 Mux y Muy se ingresan en los ejes de la **columna** (Pu axial, V transversal) y el
 programa los proyecta a los ejes de la placa con R = Ry·Rx antes de TODAS las
