@@ -1153,7 +1153,15 @@ class MainWindow(QMainWindow):
             try:
                 view3d.plot_geometry(self.cv_3d.ax, self.prj)
             except Exception as e:
+                # no deja la vista en blanco: muestra el error en el propio lienzo
+                self.cv_3d.reset()
+                self.cv_3d.ax.set_axis_off()
+                self.cv_3d.ax.text2D(0.5, 0.5, "No se pudo dibujar la geometria 3D:\n"
+                                     f"{type(e).__name__}: {str(e)[:160]}",
+                                     ha="center", va="center", color="#9c0006",
+                                     transform=self.cv_3d.ax.transAxes, fontsize=9)
                 self.statusBar().showMessage(f"Error de dibujo 3D: {e}", 8000)
+                traceback.print_exc()
             if elev is not None:
                 self.cv_3d.ax.view_init(elev=elev, azim=azim)
             self.cv_3d.cv.draw_idle()

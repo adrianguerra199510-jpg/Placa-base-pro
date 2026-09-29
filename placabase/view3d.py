@@ -369,17 +369,53 @@ def geometry_faces(prj):
     parts.append(("plate", wall, "#3b434b", 1.0))
 
     # ---- pernos (vastago inferior / parte sobre la placa) y tuercas
-    low, up, nuts = [], [], []
+    low, up, nuts, ends = [], [], [], []
+    hef = max(float(b.hef), 1.0)
+    eh = float(b.eh) if b.eh and b.eh > 0 else 3.0 * g.db
+    kind = ("gancho_L" if "en L" in b.atype else "gancho_J" if "en J" in b.atype
+            else "recto" if b.atype.startswith("Recto") else "cabeza")
     for (bx, by) in bpos:
         r = g.db / 2
         c = [(bx + r * math.cos(a), by + r * math.sin(a)) for a in np.linspace(0, 2 * math.pi, 17)[:-1]]
-        low += _prism(c, -b.hef, 0.0, cap=True)
+        low += _prism(c, -hef, 0.0, cap=True)
+        # extremo embebido segun el tipo de anclaje
+        if kind == "cabeza":                       # cabeza hexagonal pesada
+            F = max(g.Fhex, 1.5 * g.db)
+            hr = F / math.sqrt(3.0)
+            hx = [(bx + hr * math.cos(math.radians(60 * k)), by + hr * math.sin(math.radians(60 * k)))
+                  for k in range(6)]
+            ends += _prism(hx, -hef - 0.7 * g.db, -hef)
+        elif kind in ("gancho_L", "gancho_J"):     # doblez hacia el exterior (radial)
+            n = math.hypot(bx, by)
+            ux, uy = (bx / n, by / n) if n > 1e-6 else (1.0, 0.0)
+            px, py = -uy, ux
+            L = eh
+
+            # pata horizontal como prisma rectangular de seccion db x db
+            def q(s, t, z):
+                return (bx + ux * s + px * t, by + uy * s + py * t, z)
+            s0, s1, t0, t1 = -r, L, -r, r
+            z0, z1 = -hef - r, -hef + r
+            ends += [[q(s0, t0, z0), q(s1, t0, z0), q(s1, t1, z0), q(s0, t1, z0)],
+                     [q(s0, t0, z1), q(s1, t0, z1), q(s1, t1, z1), q(s0, t1, z1)],
+                     [q(s0, t0, z0), q(s1, t0, z0), q(s1, t0, z1), q(s0, t0, z1)],
+                     [q(s0, t1, z0), q(s1, t1, z0), q(s1, t1, z1), q(s0, t1, z1)],
+                     [q(s1, t0, z0), q(s1, t1, z0), q(s1, t1, z1), q(s1, t0, z1)],
+                     [q(s0, t0, z0), q(s0, t1, z0), q(s0, t1, z1), q(s0, t0, z1)]]
+            if kind == "gancho_J":                  # pata corta hacia arriba en el extremo
+                h = min(1.5 * g.db + eh * 0.5, 0.5 * hef)
+                ends += [[q(s1 - 2 * r, t0, z1), q(s1, t0, z1), q(s1, t0, z1 + h), q(s1 - 2 * r, t0, z1 + h)],
+                         [q(s1 - 2 * r, t1, z1), q(s1, t1, z1), q(s1, t1, z1 + h), q(s1 - 2 * r, t1, z1 + h)],
+                         [q(s1 - 2 * r, t0, z1), q(s1 - 2 * r, t1, z1), q(s1 - 2 * r, t1, z1 + h), q(s1 - 2 * r, t0, z1 + h)],
+                         [q(s1, t0, z1), q(s1, t1, z1), q(s1, t1, z1 + h), q(s1, t0, z1 + h)],
+                         [q(s1 - 2 * r, t0, z1 + h), q(s1, t0, z1 + h), q(s1, t1, z1 + h), q(s1 - 2 * r, t1, z1 + h)]]
         up += _prism(c, 0.0, p.tp + 1.25 * g.db, cap=True)
         hexr = 0.9 * g.db
         hx = [(bx + hexr * math.cos(math.radians(60 * k)), by + hexr * math.sin(math.radians(60 * k)))
               for k in range(6)]
         nuts += _prism(hx, p.tp, p.tp + 0.875 * g.db)
     parts.append(("below", low, "#c9a227", 1.0))
+    parts.append(("below", ends, "#a8861c", 1.0))
     parts.append(("above", up, "#c9a227", 1.0))
     parts.append(("above", nuts, "#8d7514", 1.0))
 
