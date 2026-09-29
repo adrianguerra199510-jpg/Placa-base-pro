@@ -95,6 +95,23 @@ def bolt_rows(res: Results, us: UnitSet):
     return hdr, filas
 
 
+def render_3d_png(prj: Project, path: str, size=(6.4, 4.6), dpi=170) -> str | None:
+    """Vista 3D de la geometria (sin analisis) para la memoria de calculo."""
+    try:
+        from . import view3d
+        fig = plt.figure(figsize=size, dpi=dpi)
+        ax = fig.add_axes([0.0, 0.0, 1.0, 0.94], projection="3d")
+        view3d.plot_geometry(ax, prj)
+        ax.view_init(elev=24, azim=-58)
+        view3d.update_order(ax)
+        fig.savefig(path)
+        plt.close(fig)
+        return path
+    except Exception:
+        plt.close("all")
+        return None
+
+
 def save_figures(prj: Project, res: Results, folder: str) -> list[str]:
     f = Path(folder)
     f.mkdir(parents=True, exist_ok=True)
@@ -362,6 +379,14 @@ def export_docx(prj: Project, res: Results, path: str,
     p0.add_run("Normas: AISC 360-22, AISC Design Guide 1 (2ª Ed.), ACI 318-19 Cap. 17.")
 
     doc.add_heading("1. Datos de entrada", level=1)
+    import tempfile
+    _tmp3d = render_3d_png(prj, str(Path(tempfile.mkdtemp()) / "vista3d.png"))
+    if _tmp3d:
+        doc.add_picture(_tmp3d, width=Inches(4.6))
+        doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+        cap = doc.add_paragraph("Vista 3D de la conexion")
+        cap.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        cap.runs[0].italic = True
     p, b, c, L = prj.plate, prj.bolts, prj.conc, prj.eloads
     rows = input_rows(prj, us)
     t = doc.add_table(rows=0, cols=2)
@@ -569,6 +594,15 @@ def export_pdf(prj: Project, res: Results, path: str,
 
     # ------------------------------------------------------- 1. entrada
     story.append(Paragraph("1. Datos de entrada", H1))
+    import tempfile
+    _tmp3d = render_3d_png(prj, str(Path(tempfile.mkdtemp()) / "vista3d.png"))
+    if _tmp3d:
+        from PIL import Image as _PIL
+        _iw, _ih = _PIL.open(_tmp3d).size
+        _w = 4.3 * inch
+        story.append(RLImage(_tmp3d, width=_w, height=_w * _ih / _iw))
+        story.append(Paragraph("Vista 3D de la conexion", CEN))
+        story.append(Spacer(1, 4))
     p, b, c, L = prj.plate, prj.bolts, prj.conc, prj.eloads
     geo = (f"Ø{us.q('L', p.Dp)}" if p.shape == "Circular"
            else f"{us.q('L', p.N)} × {us.q('L', p.B)}")

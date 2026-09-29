@@ -468,11 +468,14 @@ def geometry_faces(prj):
     # ---- pedestal de concreto (transparente)
     c = prj.conc
     ped = [(-c.B2 / 2, -c.N2 / 2), (c.B2 / 2, -c.N2 / 2), (c.B2 / 2, c.N2 / 2), (-c.B2 / 2, c.N2 / 2)]
-    parts.append(("conc", _prism(ped, -min(c.ha, max(b.hef * 1.15, 12.0)), 0.0), "#b8b8b0", 1.0))
+    zc = -min(c.ha, max(b.hef * 1.15, 12.0))
+    conc = _prism(ped, zc, 0.0, cap=False)                 # caras laterales
+    conc.append([(x, y, zc) for x, y in ped])              # fondo (sin tapa: apoya la placa)
+    parts.append(("conc", conc, "#a9b4bd", 0.16))          # UNICO elemento translucido
     return parts
 
 
-_GROUP_ORDER_ABOVE = {"conc": 1, "below": 2, "plate": 3, "above": 4}
+_GROUP_ORDER_ABOVE = {"conc": 10, "below": 2, "plate": 3, "above": 4}
 
 
 def update_order(ax):
@@ -483,14 +486,13 @@ def update_order(ax):
         return
     from_above = ax.elev >= 0
     for grp, coll in colls:
-        z = _GROUP_ORDER_ABOVE[grp]
+        z = _GROUP_ORDER_ABOVE[grp]          # el concreto (translucido) va siempre al final
         if not from_above and grp in ("below", "above"):
             z = 6 - z                                   # above <-> below invertidos
         coll.set_zorder(z)
 
 
-def plot_geometry(ax, prj, show_concrete=False):
-    # el pedestal no se dibuja por defecto: sin transparencias taparia los anclajes
+def plot_geometry(ax, prj, show_concrete=True):
     """Dibuja el conjunto de la conexion (solo geometria) en un eje 3D."""
     from mpl_toolkits.mplot3d.art3d import Poly3DCollection
     from matplotlib.colors import to_rgb
@@ -514,7 +516,7 @@ def plot_geometry(ax, prj, show_concrete=False):
             allp += [pt for f in v for pt in f]
         rgb = to_rgb(color)
         # los triangulos de la malla de la placa no llevan aristas
-        edge = (*rgb, 1.0) if flat else (0, 0, 0, 0.35)
+        edge = (*rgb, 1.0) if flat else ((0, 0, 0, 0.35) if alpha > 0.5 else (0.3, 0.35, 0.4, 0.35))
         coll = Poly3DCollection(v, facecolors=(*rgb, alpha), edgecolors=edge,
                                 linewidths=0.35)
         ax.add_collection3d(coll)
