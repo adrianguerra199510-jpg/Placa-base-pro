@@ -21,23 +21,36 @@ que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
 | **Todo** sale en las unidades elegidas: también la columna de observaciones, los ejes de los dibujos y los títulos | Toda la aplicación |
 | **Descripción de cada dato de entrada** en un panel al pie de cada pestaña, más la convención de signos de las cargas | Los 65 campos de entrada |
 
-## Validacion cruzada 2D vs 3D (PB-01, W14X90, placa 22×22×2 in)
+## Validacion cruzada 2D vs 3D y convergencia de malla (PB-01, W14X90, placa 22×22×2 in)
 
-Se corrio el modelo solido (Gmsh + CalculiX) y el 2D (Mindlin + Winkler) con las mismas
+Se corrio el modelo solido (Gmsh + CalculiX 2.21) y el 2D (Mindlin + Winkler) con las mismas
 cargas. Maximo de la placa en el 3D medido a ≥ 1 espesor del perfil y de los agujeros
-(las aristas vivas son singularidades de malla). Relacion 3D/2D:
+(las aristas vivas son singularidades de malla). Con la rigidez del concreto repartida por
+area tributaria de cada nodo, relacion 3D/2D:
 
 | Caso | von Mises | presion | deflexion | traccion en pernos |
 |---|---|---|---|---|
-| A: Mux 1800, V 30 | 0.81 | 0.77 | 0.79 | (sin traccion) |
-| B: Mux 4200, V 0 | 0.85 | 0.82 | 0.83 | 0.77 |
+| A: Mux 1800, V 30 | 0.97 | 0.85 | 0.86 | (sin traccion) |
+| B: Mux 4200, V 0 | 1.02 | 0.90 | 0.90 | 0.77 |
 
-El 2D resulta 15-25 % mas exigente que el 3D en todas las magnitudes (del lado seguro).
-Se probaron ajustes del 2D (modulo de balasto, rigidez del perno, espesor bajo la huella,
-reparto de la carga por area de metal): ninguno acerco a la vez presion, deflexion y
-traccion sin dejar el von Mises por debajo del 3D, asi que el 2D se mantiene sin calibrar.
-En el 3D la rigidez del concreto se reparte ahora por area tributaria de cada nodo
-(antes uniforme por nodo); el efecto fue menor al 1 %.
+El 2D queda del lado seguro en presion, deflexion y traccion (10-25 % mas alto) y coincide en
+el esfuerzo de von Mises de la placa. No se calibro el 2D: ningun ajuste simple (balasto,
+rigidez del perno, espesor bajo la huella, reparto de la carga) mejoro el acuerdo.
+
+Convergencia del 3D (caso B, tamano de malla objetivo en in):
+
+| Malla | Nodos | Tiempo | Tracc. total | Perno max | p max | w placa | vM placa lejos | vM global |
+|---|---|---|---|---|---|---|---|---|
+| 2.0 | 15,912 | 0.5 min | 85.5 kip | 31.2 | 3.554 | 0.0475 | 26.5 | 138 |
+| 1.5 | 27,293 | 0.8 min | 85.5 kip | 30.8 | 3.543 | 0.0474 | 29.4 | 147 |
+| 1.0 (auto) | 56,911 | 3 min | 85.4 kip | 30.9 | 3.551 | 0.0475 | 44.2 | 172 |
+| 0.75 | 93,481 | 7 min | 85.5 kip | 30.8 | 3.549 | 0.0475 | 46.7 | 192 |
+
+Las cantidades globales (traccion en pernos, presion, deflexion, |U|, reacciones) estan
+convergidas desde la malla de 2.0 in (variacion < 1.5 %); una malla de 2.0 in basta para
+ellas y corre en ~30 s. El von Mises local NO converge (crece al refinar, sobre todo el maximo
+global: singularidades) y el de la placa lejos de las aristas aun sube ~5 % entre 1.0 y 0.75 in,
+asi que conviene leerlo con la malla automatica o mas fina.
 
 ## Novedades: resultados 3D en la memoria y soldadura parcial
 
