@@ -447,6 +447,24 @@ def write_driver(prj: Project, folder: str, stem: str) -> str:
     return str(out)
 
 
+def mesh_size_for(prj: Project) -> float:
+    """Tamano de malla 3D segun las opciones: el valor manual si se fijo; si no, el modo.
+    Automatica -> 0 (lo estima write_geo); Rapida -> el doble del automatico (en el estudio
+    de convergencia da igual la traccion en pernos, la presion y la deflexion, pero SUBESTIMA
+    el von Mises local)."""
+    if prj.fea.mesh3d and prj.fea.mesh3d > 0:
+        return float(prj.fea.mesh3d)
+    if str(getattr(prj.fea, "mesh3d_mode", "")).startswith("Rapida"):
+        p = prj.plate
+        return 2.0 * max(p.tp / 2.0, min(p.Nc, p.Bc) / 26.0)
+    return 0.0
+
+
+def is_fast_mesh(prj: Project) -> bool:
+    return (not (prj.fea.mesh3d and prj.fea.mesh3d > 0)) and \
+        str(getattr(prj.fea, "mesh3d_mode", "")).startswith("Rapida")
+
+
 def export_3d(prj: Project, geo_path: str, mesh_size: float = 0.0):
     """Escribe el .geo y su driver.  Devuelve (geo, driver)."""
     geo = write_geo(prj, geo_path, mesh_size)
@@ -786,7 +804,7 @@ def full_3d(prj: Project, folder: str, stem: str = "modelo3d", progress=None):
     Path(folder).mkdir(parents=True, exist_ok=True)
     geo = str(Path(folder) / f"{stem}.geo")
     say("1/4  Escribiendo la geometria solida ...")
-    export_3d(prj, geo, prj.fea.mesh3d)
+    export_3d(prj, geo, mesh_size_for(prj))
 
     say("2/4  Mallando con Gmsh (puede tardar varios minutos) ...")
     ok, out, mesh_inp = run_gmsh(geo)

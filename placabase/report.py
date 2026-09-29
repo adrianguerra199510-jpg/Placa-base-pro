@@ -115,7 +115,10 @@ def render_3d_png(prj: Project, path: str, size=(6.4, 4.6), dpi=170) -> str | No
 
 def _rep3d_lines(prj: Project, us, rep: dict) -> list[str]:
     """Texto del resumen de resultados del modelo solido 3D."""
-    return [
+    fast = ([ "MALLA RAPIDA: las magnitudes globales (tracción en pernos, presión, deflexión) "
+              "son fiables, pero el von Mises local está subestimado; use la malla automática "
+              "para leer esfuerzos." ] if rep.get("fast") else [])
+    return fast + [
         f"Modelo de {rep['n_nodes']:,} nodos y {rep['n_elems']:,} tetraedros.",
         f"ESFUERZO MAXIMO (von Mises) = {us.q('S', rep['vmmax'])}"
         + (f", en el nodo {rep['vm_node']} (marcado con ★ en la figura)"
@@ -549,7 +552,7 @@ def export_docx(prj: Project, res: Results, path: str,
         for i, ln in enumerate(_rep3d_lines(prj, us, rep3d)):
             pp = doc.add_paragraph()
             run = pp.add_run(ln)
-            if i == 1:
+            if ln.startswith("ESFUERZO MAXIMO"):
                 run.bold = True
         for key, cap in (("vm", "Esfuerzo de von Mises (etiqueta: esfuerzo maximo)"),
                          ("u", "Desplazamiento |U| sobre la geometria deformada")):
@@ -814,7 +817,7 @@ def export_pdf(prj: Project, res: Results, path: str,
         story.append(Paragraph(
             f"{n_sec}. Modelo solido 3D — esfuerzos de von Mises y deformaciones", H1))
         for i, ln in enumerate(_rep3d_lines(prj, us, rep3d)):
-            story.append(Paragraph(f"<b>{ln}</b>" if i == 1 else ln, BODY))
+            story.append(Paragraph(f"<b>{ln}</b>" if ln.startswith("ESFUERZO MAXIMO") else ln, BODY))
         from PIL import Image as _PIL2
         for key, cap in (("vm", "Esfuerzo de von Mises (etiqueta: esfuerzo maximo)"),
                          ("u", "Desplazamiento |U| sobre la geometria deformada")):

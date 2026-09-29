@@ -21,6 +21,13 @@ que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
 | **Todo** sale en las unidades elegidas: también la columna de observaciones, los ejes de los dibujos y los títulos | Toda la aplicación |
 | **Descripción de cada dato de entrada** en un panel al pie de cada pestaña, más la convención de signos de las cargas | Los 65 campos de entrada |
 
+## Novedades: malla 3D rapida
+
+Pestaña Elementos finitos → "Calidad de la malla 3D": **Automatica** (predeterminada) o **Rapida**
+(tetraedros del doble de tamaño, ~30 s en lugar de ~3 min). La rapida reproduce la traccion en
+pernos, la presion y la deflexion, pero subestima el von Mises local (26 frente a 44 ksi en la
+placa), por eso NO es la predeterminada; cuando se usa, el visor y la memoria lo advierten.
+
 ## Validacion cruzada 2D vs 3D y convergencia de malla (PB-01, W14X90, placa 22×22×2 in)
 
 Se corrio el modelo solido (Gmsh + CalculiX 2.21) y el 2D (Mindlin + Winkler) con las mismas

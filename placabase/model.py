@@ -9,6 +9,7 @@ from .shapes import CATALOG, Shape, W_SHAPE, GENERIC_KINDS, rect_props
 import dataclasses
 
 # --------------------------------------------------------------- catalogos
+MESH3D_MODES = ["Automatica (recomendada)", "Rapida (~30 s, solo magnitudes globales)"]
 PATTERNS = ["Perimetral (4 lados)", "2 lados (eje mayor)",
             "2 lados (eje menor)", "Circular", "Coordenadas manuales"]
 INSTALL_TYPES = ["Preinstalado (vaciado en sitio)", "Postinstalado adhesivo (epoxico)"]
@@ -354,6 +355,7 @@ class FEAOpts:
     holes: bool = True           # modelar los agujeros de perno en la malla
     gmsh_path: str = "gmsh"
     mesh3d: float = 0.0          # tamano de malla 3D (0 = automatico)
+    mesh3d_mode: str = "Automatica (recomendada)"   # ver MESH3D_MODES
 
 
 @dataclass

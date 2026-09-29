@@ -27,7 +27,7 @@ from .model import (Project, PATTERNS, ANCHOR_TYPES, WELD_TYPES, PLATE_SHAPES,
                     LUG_DIRS, STIFF_POSITIONS, STIFF_SHAPES, STIFF_SPACING)
 from . import materials as M
 from .shapes import CATALOG, W_SHAPE, HSS_RECT, HSS_ROUND, PIPE, KIND_LABELS
-from .model import LUG_TYPES, save_book, load_book
+from .model import LUG_TYPES, save_book, load_book, MESH3D_MODES
 from .dialogs import SectionDialog, MaterialsDialog
 from PySide6.QtWidgets import QListWidget, QInputDialog
 from .solver import solve
@@ -574,6 +574,7 @@ class MainWindow(QMainWindow):
                "de espesor equivalente.")
         f.group("Modelo SOLIDO 3D (Gmsh + CalculiX)")
         f.text("CalculiX propio (opcional)", "fea.ccx_path", help="Dejelo vacio: el programa usa el CalculiX incluido en la carpeta solvers. Solo escriba una ruta si quiere usar otra version de ccx.exe.")
+        f.combo("Calidad de la malla 3D", "fea.mesh3d_mode", MESH3D_MODES, help="Automatica: la recomendada. Rapida: tetraedros del doble de tamano (~30 s en lugar de ~3 min). En el estudio de convergencia la malla rapida da practicamente la misma traccion en pernos, presion de contacto, deflexion y reacciones, pero SUBESTIMA el esfuerzo de von Mises local (p. ej. 26 frente a 44 ksi en la placa), asi que no es la predeterminada. Un tamano manual mayor que 0 (abajo) tiene prioridad.")
         f.num("Tamano de malla 3D (0 = automatico)", "fea.mesh3d", 0, 20, uk="L", help="Tamano caracteristico de los tetraedros. Valores pequenos dan mas detalle y mucho mas tiempo de calculo. Deje 0 para que lo estime el programa.")
         f.note("Exportar > Modelo solido 3D escribe el .geo con la geometria real "
                "(placa taladrada, perfil, rigidizadores y llave) mas un script "
@@ -1281,7 +1282,10 @@ class MainWindow(QMainWindow):
             f"<b>von Mises max</b> = {u.q('S', res.vmmax)}  ·  "
             + (f"equilibrio: {self.post3d.msg}<br>" if self.post3d else "<br>") +
             f"Archivos en: {getattr(res, 'folder', '')}<br>"
-            "Los picos de von Mises en aristas vivas (borde de agujero, encuentro "
+            + ("<br><span style='color:#9c0006'><b>Malla rapida:</b> las magnitudes globales "
+               "son fiables, pero el von Mises local esta SUBESTIMADO; use la malla "
+               "automatica para leer esfuerzos.</span><br>" if mesh3d.is_fast_mesh(self.prj) else "")
+            + "Los picos de von Mises en aristas vivas (borde de agujero, encuentro "
             "perfil-placa) son singularidades de malla: dependen del tamano de "
             "elemento y no deben leerse como esfuerzo real.")
         self.cb_f3.blockSignals(True)
@@ -1304,7 +1308,7 @@ class MainWindow(QMainWindow):
             if not vm and not de:
                 return None
             nvm = max(res.vm, key=res.vm.get) if res.vm else None
-            return dict(vm=vm, u=de, scale=sc, n_nodes=res.n_nodes, n_elems=res.n_elems,
+            return dict(fast=mesh3d.is_fast_mesh(self.prj), vm=vm, u=de, scale=sc, n_nodes=res.n_nodes, n_elems=res.n_elems,
                         umax=res.umax, vmmax=res.vmmax, vm_node=nvm)
         except Exception:
             traceback.print_exc()
@@ -1506,7 +1510,7 @@ class MainWindow(QMainWindow):
         if not fn:
             return
         try:
-            geo, drv = mesh3d.export_3d(self.prj, fn, self.prj.fea.mesh3d)
+            geo, drv = mesh3d.export_3d(self.prj, fn, mesh3d.mesh_size_for(self.prj))
         except Exception as e:
             QMessageBox.critical(self, "Modelo 3D", f"{e}")
             return
