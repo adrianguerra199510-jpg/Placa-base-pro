@@ -21,12 +21,22 @@ que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
 | **Todo** sale en las unidades elegidas: también la columna de observaciones, los ejes de los dibujos y los títulos | Toda la aplicación |
 | **Descripción de cada dato de entrada** en un panel al pie de cada pestaña, más la convención de signos de las cargas | Los 65 campos de entrada |
 
-## Novedades: malla 3D rapida
+## Novedades: malla 3D rapida (predeterminada) y von Mises promediado
 
-Pestaña Elementos finitos → "Calidad de la malla 3D": **Automatica** (predeterminada) o **Rapida**
-(tetraedros del doble de tamaño, ~30 s en lugar de ~3 min). La rapida reproduce la traccion en
-pernos, la presion y la deflexion, pero subestima el von Mises local (26 frente a 44 ksi en la
-placa), por eso NO es la predeterminada; cuando se usa, el visor y la memoria lo advierten.
+Pestaña Elementos finitos → "Calidad de la malla 3D": **Rapida** (predeterminada; tetraedros del
+doble de tamaño, ~30 s) o **Automatica** (fina, ~3 min).
+
+El von Mises PUNTUAL del sólido no converge (crece al refinar en las aristas vivas), asi que el
+programa reporta ademas el **von Mises promediado**: promedio del tensor de esfuerzos, ponderado
+por el area de cada nodo, en un circulo de radio r (predeterminado = 1 espesor de placa; nunca
+menor que el tamaño del elemento) sobre la misma cara de la placa; la cara superior excluye lo
+cubierto por el perfil. Ese es el "esfuerzo maximo" de la etiqueta del visor y de la memoria.
+
+Rapida vs automatica (3 conexiones, r = 1 espesor): traccion en pernos, presion y desplazamiento
+difieren ≤ 0.5 %; el von Mises promediado difiere −2.4 % (PB-01 caso A: 14.96 vs 15.33 ksi),
+−0.6 % (caso B: 25.36 vs 25.5) y +0.4 % (PB-02: 20.99 vs 20.91). Con un radio menor que el
+tamaño del elemento (0.5 espesores en la malla rapida) la diferencia sube a +21 % (caso A):
+por eso el radio tiene ese minimo.
 
 ## Validacion cruzada 2D vs 3D y convergencia de malla (PB-01, W14X90, placa 22×22×2 in)
 
@@ -40,8 +50,11 @@ area tributaria de cada nodo, relacion 3D/2D:
 | A: Mux 1800, V 30 | 0.97 | 0.85 | 0.86 | (sin traccion) |
 | B: Mux 4200, V 0 | 1.02 | 0.90 | 0.90 | 0.77 |
 
-El 2D queda del lado seguro en presion, deflexion y traccion (10-25 % mas alto) y coincide en
-el esfuerzo de von Mises de la placa. No se calibro el 2D: ningun ajuste simple (balasto,
+El 2D queda del lado seguro en presion, deflexion y traccion (10-25 % mas alto). Comparado con el
+von Mises 3D que si converge (promediado, r = 1 espesor: 15.3 ksi en A y 25.5 ksi en B) el 2D
+(28.4 y 43.5 ksi) es 1.7-1.9 veces mayor: el 2D lee el pico de flexion al borde del perfil, el
+promedio 3D lo suaviza; con r = 0.5 espesores el 3D sube a 18.5 y 34.4 ksi (razon 1.3-1.5).
+(En la tabla anterior el von Mises 3D era el maximo nodal a ≥ 1 espesor, que tampoco converge.) No se calibro el 2D: ningun ajuste simple (balasto,
 rigidez del perno, espesor bajo la huella, reparto de la carga) mejoro el acuerdo.
 
 Convergencia del 3D (caso B, tamano de malla objetivo en in):
@@ -55,9 +68,9 @@ Convergencia del 3D (caso B, tamano de malla objetivo en in):
 
 Las cantidades globales (traccion en pernos, presion, deflexion, |U|, reacciones) estan
 convergidas desde la malla de 2.0 in (variacion < 1.5 %); una malla de 2.0 in basta para
-ellas y corre en ~30 s. El von Mises local NO converge (crece al refinar, sobre todo el maximo
-global: singularidades) y el de la placa lejos de las aristas aun sube ~5 % entre 1.0 y 0.75 in,
-asi que conviene leerlo con la malla automatica o mas fina.
+ellas y corre en ~30 s. El von Mises puntual NO converge (crece al refinar; el maximo nodal en la placa lejos de las
+aristas sube 26.5 → 46.7 ksi). El promediado en r = 1 espesor si: 25.4, 25.2, 25.5 y 25.5 ksi
+para las mallas de 2.0, 1.5, 1.0 y 0.75 in.
 
 ## Novedades: resultados 3D en la memoria y soldadura parcial
 

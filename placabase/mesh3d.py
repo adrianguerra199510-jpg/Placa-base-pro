@@ -449,9 +449,9 @@ def write_driver(prj: Project, folder: str, stem: str) -> str:
 
 def mesh_size_for(prj: Project) -> float:
     """Tamano de malla 3D segun las opciones: el valor manual si se fijo; si no, el modo.
-    Automatica -> 0 (lo estima write_geo); Rapida -> el doble del automatico (en el estudio
-    de convergencia da igual la traccion en pernos, la presion y la deflexion, pero SUBESTIMA
-    el von Mises local)."""
+    Automatica -> 0 (lo estima write_geo); Rapida -> el doble del automatico.  En el estudio de
+    convergencia (3 conexiones) la rapida difiere menos de 3 % de la automatica en traccion,
+    presion, deflexion y von Mises PROMEDIADO (con radio de promedio >= tamano de elemento)."""
     if prj.fea.mesh3d and prj.fea.mesh3d > 0:
         return float(prj.fea.mesh3d)
     if str(getattr(prj.fea, "mesh3d_mode", "")).startswith("Rapida"):
@@ -838,7 +838,11 @@ def full_3d(prj: Project, folder: str, stem: str = "modelo3d", progress=None):
     res.folder = folder
     try:
         from .view3d import smoothed_plate_vm
-        res.vm_avg = smoothed_plate_vm(res, prj, prj.fea.vm_avg_factor * prj.plate.tp)
+        p_ = prj.plate
+        lc = mesh_size_for(prj) or max(p_.tp / 2.0, min(p_.Nc, p_.Bc) / 26.0)
+        # el radio no baja del tamano de elemento: promediar en menos que un elemento no promedia
+        r_avg = max(prj.fea.vm_avg_factor * p_.tp, lc)
+        res.vm_avg = smoothed_plate_vm(res, prj, r_avg)
         if res.vm_avg:
             res.msg += (f"   Von Mises PROMEDIADO en la placa (r = {res.vm_avg['radius']:.2f} in) = "
                         f"{res.vm_avg['vm']:.1f} ksi")

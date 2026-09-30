@@ -574,8 +574,8 @@ class MainWindow(QMainWindow):
                "de espesor equivalente.")
         f.group("Modelo SOLIDO 3D (Gmsh + CalculiX)")
         f.text("CalculiX propio (opcional)", "fea.ccx_path", help="Dejelo vacio: el programa usa el CalculiX incluido en la carpeta solvers. Solo escriba una ruta si quiere usar otra version de ccx.exe.")
-        f.combo("Calidad de la malla 3D", "fea.mesh3d_mode", MESH3D_MODES, help="Automatica: la recomendada. Rapida: tetraedros del doble de tamano (~30 s en lugar de ~3 min). En el estudio de convergencia la malla rapida da practicamente la misma traccion en pernos, presion de contacto, deflexion y reacciones, pero SUBESTIMA el esfuerzo de von Mises local (p. ej. 26 frente a 44 ksi en la placa), asi que no es la predeterminada. Un tamano manual mayor que 0 (abajo) tiene prioridad.")
-        f.num("Radio de promedio del von Mises 3D (× espesor)", "fea.vm_avg_factor", 0.1, 3.0, 0.1, 2, help="El von Mises puntual del modelo solido crece sin limite al refinar la malla (singularidades en el borde de los agujeros y en el pie del perfil). El programa reporta ademas el maximo PROMEDIADO: promedio del tensor de esfuerzos, ponderado por area, en un circulo de este radio (en espesores de placa) sobre la misma cara. 0.5 = valor por defecto; con 1.0 el promedio es menor y mas 'de membrana'. Este valor si converge con la malla.")
+        f.combo("Calidad de la malla 3D", "fea.mesh3d_mode", MESH3D_MODES, help="Rapida (predeterminada): tetraedros del doble de tamano que la automatica (~30 s en lugar de ~3 min). En el estudio de convergencia (3 conexiones) difiere menos de 3 % de la automatica en traccion en pernos, presion, deflexion y von Mises PROMEDIADO. El pico puntual de von Mises no converge con ninguna malla. Automatica: mas fina y lenta. Un tamano manual mayor que 0 (abajo) tiene prioridad.")
+        f.num("Radio de promedio del von Mises 3D (× espesor)", "fea.vm_avg_factor", 0.1, 3.0, 0.1, 2, help="El von Mises puntual del modelo solido crece sin limite al refinar la malla (singularidades en el borde de los agujeros y en el pie del perfil). El programa reporta ademas el maximo PROMEDIADO: promedio del tensor de esfuerzos, ponderado por area, en un circulo de este radio (en espesores de placa) sobre la misma cara. Predeterminado 1.0. Un radio menor da valores mas altos y mas sensibles a la malla; el radio nunca baja del tamano del elemento. Este valor si converge con la malla.")
         f.num("Tamano de malla 3D (0 = automatico)", "fea.mesh3d", 0, 20, uk="L", help="Tamano caracteristico de los tetraedros. Valores pequenos dan mas detalle y mucho mas tiempo de calculo. Deje 0 para que lo estime el programa.")
         f.note("Exportar > Modelo solido 3D escribe el .geo con la geometria real "
                "(placa taladrada, perfil, rigidizadores y llave) mas un script "
@@ -1285,9 +1285,9 @@ class MainWindow(QMainWindow):
             + f"<b>von Mises pico puntual</b> = {u.q('S', res.vmmax)} (depende de la malla)  ·  "
             + (f"equilibrio: {self.post3d.msg}<br>" if self.post3d else "<br>") +
             f"Archivos en: {getattr(res, 'folder', '')}<br>"
-            + ("<br><span style='color:#9c0006'><b>Malla rapida:</b> las magnitudes globales "
-               "son fiables, pero el von Mises local esta SUBESTIMADO; use la malla "
-               "automatica para leer esfuerzos.</span><br>" if mesh3d.is_fast_mesh(self.prj) else "")
+            + ("<br><span style='color:#595959'>Malla rapida (2× el tamano automatico): en las "
+               "comparaciones hechas difiere &lt; 3 % de la automatica en las magnitudes "
+               "reportadas, salvo el pico puntual.</span><br>" if mesh3d.is_fast_mesh(self.prj) else "")
             + "Los picos de von Mises en aristas vivas (borde de agujero, encuentro "
             "perfil-placa) son singularidades de malla: dependen del tamano de "
             "elemento y no deben leerse como esfuerzo real.")
