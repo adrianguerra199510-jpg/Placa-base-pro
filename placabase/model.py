@@ -356,6 +356,7 @@ class FEAOpts:
     gmsh_path: str = "gmsh"
     mesh3d: float = 0.0          # tamano de malla 3D (0 = automatico)
     mesh3d_mode: str = "Rapida (recomendada, ~30 s)"   # ver MESH3D_MODES
+    calib_auto: bool = True      # 2D: los factores de abajo dependen de la forma de la placa (ver fea.calibration)
     ks_factor: float = 1.0       # 2D: multiplica el modulo de balasto
     bolt_factor: float = 0.7     # 2D: multiplica la rigidez axial del perno (calibrado con el 3D)
     fp_factor: float = 3.0       # 2D: espesor de la placa bajo la huella del perfil, en veces tp

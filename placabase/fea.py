@@ -133,6 +133,21 @@ def _elem_k(xe, ye, t, E, nu):
     return K
 
 
+def calibration(prj: Project) -> dict:
+    """Ajustes del 2D calibrados contra el modelo solido 3D (ver LEEME).
+    Con fea.calib_auto se elige el conjunto segun la forma de la placa:
+      rectangular: espesor 3·tp bajo la huella (banda 0.5·tp), carga por area de metal, perno ×0.7
+      circular   : sin rigidizacion bajo la huella, carga por area de metal, perno ×1.0
+    Sin calib_auto se usan tal cual los campos de FEAOpts."""
+    o = prj.fea
+    if getattr(o, "calib_auto", True):
+        if prj.plate.shape == "Circular":
+            return dict(fp_factor=1.0, fp_band=0.0, bolt_factor=1.0, ks_factor=1.0, fp_weighted=True)
+        return dict(fp_factor=3.0, fp_band=0.5, bolt_factor=0.7, ks_factor=1.0, fp_weighted=True)
+    return dict(fp_factor=o.fp_factor, fp_band=o.fp_band, bolt_factor=o.bolt_factor,
+                ks_factor=o.ks_factor, fp_weighted=o.fp_weighted)
+
+
 def shear_arm(prj: Project) -> float:
     """Brazo e (in) entre donde el cortante entra en la placa (cara superior) y donde lo
     devuelven los pernos o la llave.  Manual si fea.shear_arm >= 0; si no:
@@ -155,6 +170,7 @@ def run_fea(prj: Project) -> FEAResult:
         return r
 
     p, c, L = prj.plate, prj.conc, prj.eloads
+    CAL = calibration(prj)
     circ = (p.shape == "Circular")
     Bx = p.Dp if circ else p.B
     Ny = p.Dp if circ else p.N
@@ -224,11 +240,11 @@ def run_fea(prj: Project) -> FEAResult:
                 t_el[ii, jj] = max(t_el[ii, jj], t_eq)
 
     # ---- la pared del perfil (soldada a la placa) rigidiza la placa bajo su huella
-    fpf = float(getattr(prj.fea, "fp_factor", 1.0))
+    fpf = CAL["fp_factor"]
     if fpf > 1.0 + 1e-9:
         from .geometry import _seg_dist
         segs = [(a, b) for poly in G.section_polys(prj) for a, b in zip(poly[:-1], poly[1:])]
-        tol = max(0.75 * max(dx, dy), float(getattr(prj.fea, "fp_band", 0.0)) * p.tp)
+        tol = max(0.75 * max(dx, dy), CAL["fp_band"] * p.tp)
         for i in range(nx):
             for j in range(ny):
                 cx = 0.5 * (xs[i] + xs[i + 1]); cy = 0.5 * (ys[j] + ys[j + 1])
@@ -271,7 +287,7 @@ def run_fea(prj: Project) -> FEAResult:
     else:
         Ec = Ec_ksi(c.fc)
         ks = Ec / max(6.0, c.ha)                        # kip/in^3
-    ks *= float(getattr(prj.fea, "ks_factor", 1.0))
+    ks *= CAL["ks_factor"]
     kf_node = ks * trib                                  # kip/in
 
     # ---- resortes de perno
@@ -280,7 +296,7 @@ def run_fea(prj: Project) -> FEAResult:
     #      ese anillo.  Asi el modelo sigue siendo valido con el agujero
     #      recortado de la malla.
     Lb = prj.bolts.hef + p.tp + p.grout
-    kb = ES_KSI * g.Ase / max(Lb, 1.0) * float(getattr(prj.fea, "bolt_factor", 1.0))
+    kb = ES_KSI * g.Ase / max(Lb, 1.0) * CAL["bolt_factor"]
     bolt_groups = []                     # [(lista_nodos, x, y)]
     for (bx, by) in bolts:
         ring = []
@@ -310,7 +326,7 @@ def run_fea(prj: Project) -> FEAResult:
 
     # ---- cargas sobre la huella del perfil
     F = np.zeros(ndof)
-    if getattr(prj.fea, "fp_weighted", False):
+    if CAL["fp_weighted"]:
         fpw = G.profile_footprint_weighted(prj)
     else:
         fpw = [(q[0], q[1], 1.0) for q in G.profile_footprint(prj)]

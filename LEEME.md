@@ -23,28 +23,34 @@ que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
 
 ## Calibracion del 2D con el 3D
 
-Tres ajustes fisicos del 2D (Elementos finitos, valores en `FEAOpts`) elegidos por busqueda contra
-tres casos 3D convergidos (PB-01 A y B, PB-02 con rigidizadores; 3D promediado en r = 1 espesor,
-penalizando mas quedar por debajo del 3D):
+Los ajustes del 2D dependen de la forma de la placa (`fea.calib_auto`; `fea.calibration()`),
+elegidos por busqueda contra casos 3D convergidos (3D promediado en r = 1 espesor, penalizando
+mas quedar por debajo del 3D):
 
-- la pared del perfil rigidiza la placa: espesor bajo la huella = 3·tp en una banda de 0.5·tp
-  a cada lado de la pared (`fp_factor`, `fp_band`);
-- la carga del perfil se reparte segun el AREA de metal de cada punto de la huella
-  (alas gruesas > alma delgada; `fp_weighted`);
-- rigidez axial del perno ×0.7 (`bolt_factor`).
+| Placa | Espesor bajo la huella | Reparto de la carga | Rigidez del perno |
+|---|---|---|---|
+| Rectangular | 3·tp en banda de 0.5·tp a cada lado de la pared | por area de metal | ×0.7 |
+| Circular | sin cambio | por area de metal | ×1.0 |
 
-Razon 2D/3D (1.00 = igual):
+(La rigidizacion bajo la huella que mejoraba las placas rectangulares dejaba las circulares con
+presion y deflexion 35-45 % por debajo del 3D; una busqueda con todos los casos a la vez no
+lograba un solo conjunto bueno para ambas.) Con `calib_auto` desactivado se usan los campos de
+`FEAOpts` (`fp_factor`, `fp_band`, `bolt_factor`, `ks_factor`, `fp_weighted`).
+
+Razon 2D/3D (1.00 = igual; von Mises / presion / deflexion / traccion):
 
 | Caso | von Mises | presion | deflexion | traccion |
 |---|---|---|---|---|
-| Antes (promedio de los 3 casos de ajuste) | 1.74 | 1.12 | 1.14 | 1.3 |
-| PB-01 A / B / PB-02 (ajuste) | 1.03 / 1.04 / 0.94 | 1.02 / 1.14 / 0.94 | 1.01 / 1.23 / 1.04 | 1.08 / 1.10 / 0.92 |
-| PB-03 circular (NO usado en el ajuste) | 1.01 | 1.15 | 1.30 | 0.94 |
-| PB-01 con tp = 1.25 in (NO usado) | 1.20 | 1.05 | 1.25 | 1.12 |
+| Rectangular: PB-01 A, PB-01 B, PB-02 (ajuste) | 1.03 / 1.04 / 0.94 | 1.02 / 1.14 / 0.94 | 1.01 / 1.23 / 1.04 | 1.08 / 1.10 / 0.92 |
+| Rectangular: PB-01 con tp = 1.25 in (validacion) | 1.20 | 1.05 | 1.25 | 1.12 |
+| Circular, pernos radiales: PB-03, R1, R2 (ajuste) | 1.57 / 1.33 / 1.31 | 0.91 / 0.98 / 0.98 | 0.99 / 1.14 / 1.11 | 1.00 / 1.08 / 1.08 |
+| Circular, pernos radiales: R3 (validacion) | 1.28 | 1.02 | 0.99 | 1.06 |
 
-En los dos casos de validacion el von Mises mejora (1.57 → 1.01 y 1.45 → 1.20) y la traccion y la
-presion del PB-01 tambien; en el poste circular la presion y la deflexion pasan de ≈1.0 a 1.15 y
-1.30 (del lado seguro). Son solo 5 geometrias en total: el 2D queda entre 0.92 y 1.30 del 3D.
+Casos circulares: R1 = placa Ø36 × 1.5 in, 16 pernos, Mux 3500 + Vux 20; R2 = igual con Mux 2500 y
+Muy 2500; R3 = Ø30 × 2 in, 10 pernos. En los tres la tension por perno del 2D y del 3D tienen
+correlacion 0.997-1.000 (tambien con momento biaxial). El 2D queda entre 0.91 y 1.57 del 3D; lo
+unico por debajo del 3D es presion y traccion de hasta −9 % (PB-02, PB-03). Son 9 geometrias en
+total: fuera de estos rangos (perfiles pequeños, placas muy delgadas) no hay evidencia.
 
 ## Correccion del 2D: cortante y asimetria
 
