@@ -228,7 +228,7 @@ def run_fea(prj: Project) -> FEAResult:
     if fpf > 1.0 + 1e-9:
         from .geometry import _seg_dist
         segs = [(a, b) for poly in G.section_polys(prj) for a, b in zip(poly[:-1], poly[1:])]
-        tol = max(0.75 * max(dx, dy), float(getattr(prj.fea, "fp_band", 0.0)))
+        tol = max(0.75 * max(dx, dy), float(getattr(prj.fea, "fp_band", 0.0)) * p.tp)
         for i in range(nx):
             for j in range(ny):
                 cx = 0.5 * (xs[i] + xs[i + 1]); cy = 0.5 * (ys[j] + ys[j + 1])
