@@ -356,6 +356,7 @@ class FEAOpts:
     gmsh_path: str = "gmsh"
     mesh3d: float = 0.0          # tamano de malla 3D (0 = automatico)
     mesh3d_mode: str = "Automatica (recomendada)"   # ver MESH3D_MODES
+    vm_avg_factor: float = 0.5   # radio de promedio del von Mises 3D, en espesores de placa
 
 
 @dataclass

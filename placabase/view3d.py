@@ -32,6 +32,7 @@ class Result3D:
     umax: float = 0.0
     vmmax: float = 0.0
     rf_sum: tuple = (0.0, 0.0, 0.0)
+    vm_avg: dict = None                             # ver smoothed_plate_vm
 
 
 # ============================================================ malla (.inp)
@@ -275,13 +276,22 @@ def plot3d(ax, res: Result3D, prj, field="vm", scale=0.0, shrink_tris=12000, tag
             pass
         k = int(np.argmax(val))
         mx, my_, mz = Pm[k]
+        avg = res.vm_avg if (field == "vm" and getattr(res, "vm_avg", None)) else None
+        if avg:                               # maximo PROMEDIADO (converge con la malla)
+            mx, my_, mz = avg["x"] / kl, avg["y"] / kl, avg["z"] / kl
         ax.scatter([mx], [my_], [mz], s=170, color="#d62728", marker="*", edgecolors="black",
                    linewidths=0.8, depthshade=False, zorder=20)
         lbl = {"vm": "Esfuerzo maximo", "u": "Desplazamiento maximo",
                "uz": "Uz maximo"}.get(field, "Maximo")
-        ax.text2D(0.02, 0.93, f"{lbl} = {val[k]:.4g} {unit}   (nodo {ids[k]})",
+        if avg:
+            txt = (f"Esfuerzo maximo (promediado, r = {avg['radius'] / kl:.2g} {u.L}) = "
+                   f"{avg['vm'] / ks:.4g} {unit}\npico puntual {avg['vm_point'] / ks:.4g} {unit} "
+                   f"(depende de la malla)")
+        else:
+            txt = f"{lbl} = {val[k]:.4g} {unit}   (nodo {ids[k]})"
+        ax.text2D(0.02, 0.93, txt,
                   transform=ax.transAxes, fontsize=9, color="#7a1010", fontweight="bold",
-                  bbox=dict(boxstyle="round,pad=0.35", fc="#fff3e0", ec="#d62728", lw=1.0))
+                  va="top", bbox=dict(boxstyle="round,pad=0.35", fc="#fff3e0", ec="#d62728", lw=1.0))
     ax.set_axis_off()                     # sin ejes ni reglas
     ax.set_title(f"{title}  ({unit})"
                  + (f"   —  deformada ×{scale:g}" if scale > 0 else ""),
@@ -601,3 +611,90 @@ def render_result_png(res: Result3D, prj, field: str, path: str, scale: float = 
         return path
     except Exception:
         return None
+
+
+# ====================================== esfuerzo promediado en la placa (convergente)
+def _covered_by_profile(prj, x, y):
+    """True si (x, y) esta bajo el metal del perfil (union placa-perfil)."""
+    from . import geometry as G
+    if prj.section.generic:
+        return any(G._inside(x, y, poly) for poly in G.section_rects(prj))
+    ext, inn = G.profile_outline(prj)
+    if not G._inside(x, y, ext):
+        return False
+    return not (inn and G._inside(x, y, inn))
+
+
+def smoothed_plate_vm(res: "Result3D", prj, radius: float = 0.0):
+    """Esfuerzo de von Mises PROMEDIADO en la placa, para leer un maximo que no dependa
+    de la malla.  El von Mises puntual crece sin limite al refinar en las aristas vivas
+    (borde de agujero, pie del perfil); en cambio el promedio ponderado por area sobre
+    un circulo de radio fijo (por defecto el espesor de la placa) SI converge.
+
+    Se promedia el TENSOR de esfuerzos (no el von Mises) y solo entre nodos de la misma
+    cara (superior o inferior de la placa), para no anular la flexion a traves del
+    espesor.  La cara superior excluye lo cubierto por el perfil.  Los pesos son el area
+    tributaria de cada nodo (triangulacion de la cara), asi la densidad de la malla no
+    sesga el promedio.
+
+    -> dict(vm=maximo promediado, x, y, z, radius, vm_point=maximo puntual de la misma
+    zona, n=nodos) o None."""
+    import numpy as np
+    from scipy.spatial import Delaunay, cKDTree
+    from . import geometry as G
+
+    tp = prj.plate.tp
+    r = radius if radius and radius > 0 else tp
+    g = prj.bolts.geom()
+    bolts = np.array(G.bolt_positions(prj), dtype=float).reshape(-1, 2)
+    r_hole = g.dh / 2.0
+    tol = 1e-4
+
+    ids = [n for n in res.nodes if n in res.stress]
+    if not ids:
+        return None
+    P = np.array([res.nodes[n] for n in ids], dtype=float)
+    S = np.array([res.stress[n] for n in ids], dtype=float)
+
+    def in_hole(x, y):
+        return bolts.size > 0 and bool(np.any(np.hypot(bolts[:, 0] - x, bolts[:, 1] - y) < r_hole - 1e-6))
+
+    best = None
+    for zl, is_top in ((0.0, False), (tp, True)):
+        sel = np.where(np.abs(P[:, 2] - zl) < tol)[0]
+        if is_top:
+            sel = np.array([k for k in sel if not _covered_by_profile(prj, P[k, 0], P[k, 1])], dtype=int)
+        if len(sel) < 4:
+            continue
+        xy = P[sel, :2]
+        tri = Delaunay(xy)
+        w = np.zeros(len(sel))
+        for s_ in tri.simplices:
+            a, b, c = xy[s_[0]], xy[s_[1]], xy[s_[2]]
+            cen = (a + b + c) / 3.0
+            if in_hole(cen[0], cen[1]):
+                continue
+            if is_top and _covered_by_profile(prj, cen[0], cen[1]):
+                continue
+            ar = 0.5 * abs((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]))
+            if ar > 50.0 * (r * r):                # triangulo espurio que cruza vacios grandes
+                continue
+            w[s_] += ar / 3.0
+        keep = w > 0
+        if keep.sum() < 4:
+            continue
+        idx = sel[keep]; xyk = xy[keep]; wk = w[keep]; Sk = S[idx]
+        tree = cKDTree(xyk)
+        vm_pt = np.array([von_mises(*s) for s in Sk])
+        for i in range(len(idx)):
+            nb = tree.query_ball_point(xyk[i], r)
+            ww = wk[nb]
+            sm = (Sk[nb] * ww[:, None]).sum(axis=0) / ww.sum()
+            v = von_mises(*sm)
+            if best is None or v > best["vm"]:
+                best = dict(vm=float(v), x=float(xyk[i][0]), y=float(xyk[i][1]), z=float(zl),
+                            radius=float(r), vm_point=0.0, n=0)
+        if best is not None:
+            best["vm_point"] = max(best["vm_point"], float(vm_pt.max()))
+            best["n"] += int(len(idx))
+    return best

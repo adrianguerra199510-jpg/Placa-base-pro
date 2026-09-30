@@ -115,20 +115,31 @@ def render_3d_png(prj: Project, path: str, size=(6.4, 4.6), dpi=170) -> str | No
 
 def _rep3d_lines(prj: Project, us, rep: dict) -> list[str]:
     """Texto del resumen de resultados del modelo solido 3D."""
-    fast = ([ "MALLA RAPIDA: las magnitudes globales (tracción en pernos, presión, deflexión) "
-              "son fiables, pero el von Mises local está subestimado; use la malla automática "
-              "para leer esfuerzos." ] if rep.get("fast") else [])
-    return fast + [
-        f"Modelo de {rep['n_nodes']:,} nodos y {rep['n_elems']:,} tetraedros.",
-        f"ESFUERZO MAXIMO (von Mises) = {us.q('S', rep['vmmax'])}"
-        + (f", en el nodo {rep['vm_node']} (marcado con ★ en la figura)"
-           if rep.get("vm_node") else "") + ".",
-        f"Desplazamiento maximo |U| = {us.q('L', rep['umax'])}"
-        + (f"; deformada amplificada ×{rep['scale']:g}." if rep.get("scale") else "."),
-        "Los picos de von Mises en aristas vivas (borde de agujero, encuentro perfil-placa) "
-        "son singularidades de malla: dependen del tamaño del elemento y no deben leerse "
-        "como esfuerzo real.",
-    ]
+    out = []
+    if rep.get("fast"):
+        out.append("MALLA RAPIDA: las magnitudes globales (traccion en pernos, presion, "
+                   "deflexion) y el von Mises promediado son fiables; el pico puntual de "
+                   "von Mises esta subestimado.")
+    out.append(f"Modelo de {rep['n_nodes']:,} nodos y {rep['n_elems']:,} tetraedros.")
+    va = rep.get("vm_avg")
+    if va:
+        out.append(f"ESFUERZO MAXIMO (von Mises promediado en la placa, r = "
+                   f"{us.q('L', va['radius'])}) = {us.q('S', va['vm'])}, en "
+                   f"({us.fmt('L', va['x'])}, {us.fmt('L', va['y'])}) (marcado con ★ en la "
+                   f"figura). Pico puntual = {us.q('S', rep['vmmax'])}, que crece al refinar "
+                   f"la malla y no debe usarse para verificar.")
+    else:
+        out.append(f"ESFUERZO MAXIMO (von Mises, pico puntual) = {us.q('S', rep['vmmax'])}"
+                   + (f", en el nodo {rep['vm_node']} (marcado con ★ en la figura)"
+                      if rep.get("vm_node") else "") + ".")
+    out.append(f"Desplazamiento maximo |U| = {us.q('L', rep['umax'])}"
+               + (f"; deformada amplificada ×{rep['scale']:g}." if rep.get("scale") else "."))
+    out.append("El promedio se calcula sobre el tensor de esfuerzos, ponderado por el area de "
+               "cada nodo, dentro de un circulo de radio fijo sobre la misma cara de la placa "
+               "(la cara superior excluye lo cubierto por el perfil): converge al refinar la "
+               "malla. Los picos puntuales en aristas vivas (borde de agujero, encuentro "
+               "perfil-placa) son singularidades de malla.")
+    return out
 
 
 def save_figures(prj: Project, res: Results, folder: str) -> list[str]:

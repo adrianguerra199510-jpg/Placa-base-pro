@@ -836,6 +836,15 @@ def full_3d(prj: Project, folder: str, stem: str = "modelo3d", progress=None):
         res.post = None
         res.msg += f"   (postproceso de soldadura fallido: {e})"
     res.folder = folder
+    try:
+        from .view3d import smoothed_plate_vm
+        res.vm_avg = smoothed_plate_vm(res, prj, prj.fea.vm_avg_factor * prj.plate.tp)
+        if res.vm_avg:
+            res.msg += (f"   Von Mises PROMEDIADO en la placa (r = {res.vm_avg['radius']:.2f} in) = "
+                        f"{res.vm_avg['vm']:.1f} ksi")
+    except Exception as e:
+        res.vm_avg = None
+        res.msg += f"   (promedio de von Mises no disponible: {e})"
     return res, res.msg
 
 

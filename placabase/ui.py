@@ -575,6 +575,7 @@ class MainWindow(QMainWindow):
         f.group("Modelo SOLIDO 3D (Gmsh + CalculiX)")
         f.text("CalculiX propio (opcional)", "fea.ccx_path", help="Dejelo vacio: el programa usa el CalculiX incluido en la carpeta solvers. Solo escriba una ruta si quiere usar otra version de ccx.exe.")
         f.combo("Calidad de la malla 3D", "fea.mesh3d_mode", MESH3D_MODES, help="Automatica: la recomendada. Rapida: tetraedros del doble de tamano (~30 s en lugar de ~3 min). En el estudio de convergencia la malla rapida da practicamente la misma traccion en pernos, presion de contacto, deflexion y reacciones, pero SUBESTIMA el esfuerzo de von Mises local (p. ej. 26 frente a 44 ksi en la placa), asi que no es la predeterminada. Un tamano manual mayor que 0 (abajo) tiene prioridad.")
+        f.num("Radio de promedio del von Mises 3D (× espesor)", "fea.vm_avg_factor", 0.1, 3.0, 0.1, 2, help="El von Mises puntual del modelo solido crece sin limite al refinar la malla (singularidades en el borde de los agujeros y en el pie del perfil). El programa reporta ademas el maximo PROMEDIADO: promedio del tensor de esfuerzos, ponderado por area, en un circulo de este radio (en espesores de placa) sobre la misma cara. 0.5 = valor por defecto; con 1.0 el promedio es menor y mas 'de membrana'. Este valor si converge con la malla.")
         f.num("Tamano de malla 3D (0 = automatico)", "fea.mesh3d", 0, 20, uk="L", help="Tamano caracteristico de los tetraedros. Valores pequenos dan mas detalle y mucho mas tiempo de calculo. Deje 0 para que lo estime el programa.")
         f.note("Exportar > Modelo solido 3D escribe el .geo con la geometria real "
                "(placa taladrada, perfil, rigidizadores y llave) mas un script "
@@ -1279,7 +1280,9 @@ class MainWindow(QMainWindow):
         self.lbl_3d.setText(
             f"<b>{res.n_nodes:,} nodos</b> y {res.n_elems:,} tetraedros.  "
             f"<b>|U| max</b> = {u.q('L', res.umax)}  ·  "
-            f"<b>von Mises max</b> = {u.q('S', res.vmmax)}  ·  "
+            + (f"<b>von Mises promediado en la placa</b> (r = {u.q('L', res.vm_avg['radius'])}) = "
+               f"{u.q('S', res.vm_avg['vm'])}  ·  " if getattr(res, "vm_avg", None) else "")
+            + f"<b>von Mises pico puntual</b> = {u.q('S', res.vmmax)} (depende de la malla)  ·  "
             + (f"equilibrio: {self.post3d.msg}<br>" if self.post3d else "<br>") +
             f"Archivos en: {getattr(res, 'folder', '')}<br>"
             + ("<br><span style='color:#9c0006'><b>Malla rapida:</b> las magnitudes globales "
@@ -1308,7 +1311,8 @@ class MainWindow(QMainWindow):
             if not vm and not de:
                 return None
             nvm = max(res.vm, key=res.vm.get) if res.vm else None
-            return dict(fast=mesh3d.is_fast_mesh(self.prj), vm=vm, u=de, scale=sc, n_nodes=res.n_nodes, n_elems=res.n_elems,
+            return dict(fast=mesh3d.is_fast_mesh(self.prj), vm_avg=getattr(res, "vm_avg", None),
+                        vm=vm, u=de, scale=sc, n_nodes=res.n_nodes, n_elems=res.n_elems,
                         umax=res.umax, vmmax=res.vmmax, vm_node=nvm)
         except Exception:
             traceback.print_exc()
