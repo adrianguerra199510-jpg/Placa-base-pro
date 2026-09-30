@@ -21,6 +21,31 @@ que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
 | **Todo** sale en las unidades elegidas: también la columna de observaciones, los ejes de los dibujos y los títulos | Toda la aplicación |
 | **Descripción de cada dato de entrada** en un panel al pie de cada pestaña, más la convención de signos de las cargas | Los 65 campos de entrada |
 
+## Calibracion del 2D con el 3D
+
+Tres ajustes fisicos del 2D (Elementos finitos, valores en `FEAOpts`) elegidos por busqueda contra
+tres casos 3D convergidos (PB-01 A y B, PB-02 con rigidizadores; 3D promediado en r = 1 espesor,
+penalizando mas quedar por debajo del 3D):
+
+- la pared del perfil rigidiza la placa: espesor bajo la huella = 3·tp en una banda de 0.5·tp
+  a cada lado de la pared (`fp_factor`, `fp_band`);
+- la carga del perfil se reparte segun el AREA de metal de cada punto de la huella
+  (alas gruesas > alma delgada; `fp_weighted`);
+- rigidez axial del perno ×0.7 (`bolt_factor`).
+
+Razon 2D/3D (1.00 = igual):
+
+| Caso | von Mises | presion | deflexion | traccion |
+|---|---|---|---|---|
+| Antes (promedio de los 3 casos de ajuste) | 1.74 | 1.12 | 1.14 | 1.3 |
+| PB-01 A / B / PB-02 (ajuste) | 1.03 / 1.04 / 0.94 | 1.02 / 1.14 / 0.94 | 1.01 / 1.23 / 1.04 | 1.08 / 1.10 / 0.92 |
+| PB-03 circular (NO usado en el ajuste) | 1.01 | 1.15 | 1.30 | 0.94 |
+| PB-01 con tp = 1.25 in (NO usado) | 1.20 | 1.05 | 1.25 | 1.12 |
+
+En los dos casos de validacion el von Mises mejora (1.57 → 1.01 y 1.45 → 1.20) y la traccion y la
+presion del PB-01 tambien; en el poste circular la presion y la deflexion pasan de ≈1.0 a 1.15 y
+1.30 (del lado seguro). Son solo 5 geometrias en total: el 2D queda entre 0.92 y 1.30 del 3D.
+
 ## Correccion del 2D: cortante y asimetria
 
 - El 2D ahora incluye el par del cortante: V entra en la cara superior de la placa y los pernos
