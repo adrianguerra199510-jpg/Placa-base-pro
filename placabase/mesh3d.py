@@ -641,13 +641,18 @@ def build_inp(prj: Project, mesh_inp: str, out_inp: str, height: float = 0.0) ->
         return "\n".join(", ".join(str(x) for x in lst[i:i + per])
                          for i in range(0, len(lst), per))
 
+    from .fea import shear_arm
+    z_arm = shear_arm(prj)
+
     L = ["** PlacaBasePro - modelo solido 3D",
          f"** {prj.name} / {prj.element}",
          "*INCLUDE, INPUT=" + os.path.basename(mesh_inp),
-         # nodo de referencia a la altura de la cara superior de la placa: los
-         # cortantes actuan ahi (sin brazo adicional), como en el calculo DG1
-         "*NODE", f"{ref}, 0.0, 0.0, {p.tp:.6f}",
-         f"{ref + 1}, 0.0, 0.0, {p.tp:.6f}",
+         # nodo de referencia: los cortantes actuan a la altura de la cara superior de la
+         # placa MAS el brazo e (el mismo del modelo 2D, fea.shear_arm): los pernos y la
+         # llave los devuelven en el plano de la cara superior, asi que el par V·e llega
+         # a la placa igual que en el 2D.  Con e = 0 (manual) actuan en la cara superior.
+         "*NODE", f"{ref}, 0.0, 0.0, {p.tp + z_arm:.6f}",
+         f"{ref + 1}, 0.0, 0.0, {p.tp + z_arm:.6f}",
          "*NSET, NSET=NREF", str(ref),
          "*NSET, NSET=NTOPE", wrap(tope),
          "*MATERIAL, NAME=ACERO", "*ELASTIC",

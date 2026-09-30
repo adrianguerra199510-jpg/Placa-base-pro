@@ -152,6 +152,44 @@ def profile_footprint(prj: Project):
     return _rot(pts, rot)
 
 
+def profile_footprint_weighted(prj: Project):
+    """Como profile_footprint pero con el AREA de metal que representa cada punto
+    (longitud tributaria × espesor de la pared): (x, y, w)."""
+    s = prj.section.shape()
+    rot = prj.section.rotation
+    out = []
+    if prj.section.generic:
+        for a, b, c, e in prj.section.local_rects():
+            if (c - a) >= (e - b):
+                ym, t, Lw = (b + e) / 2, e - b, c - a
+                out += [(a + Lw * i / 8, ym, t * Lw / 8 * (0.5 if i in (0, 8) else 1.0)) for i in range(9)]
+            else:
+                xm, t, Lw = (a + c) / 2, c - a, e - b
+                out += [(xm, b + Lw * i / 8, t * Lw / 8 * (0.5 if i in (0, 8) else 1.0)) for i in range(9)]
+    elif s.kind == W_SHAPE:
+        d, bf, tf, tw = s.d, s.bf, s.tf, s.tw
+        for yy in (-(d - tf) / 2, (d - tf) / 2):
+            for i in range(9):
+                out.append((-bf / 2 + bf * i / 8, yy, tf * bf / 8 * (0.5 if i in (0, 8) else 1.0)))
+        hw = d - 2 * tf
+        for i in range(1, 8):
+            out.append((0.0, -(d / 2 - tf) + hw * i / 8, tw * hw / 8))
+    elif s.kind == HSS_RECT:
+        Ht, B, t = s.d, s.bf, s.tw
+        a, b = B / 2 - t / 2, Ht / 2 - t / 2
+        for i in range(12):
+            u = i / 12.0
+            for (x, y, Ls) in ((-a + 2 * a * u, -b, 2 * a), (a, -b + 2 * b * u, 2 * b),
+                               (a - 2 * a * u, b, 2 * a), (-a, b - 2 * b * u, 2 * b)):
+                out.append((x, y, t * Ls / 12.0))
+    else:
+        r = s.d / 2 - s.tw / 2
+        pts = circle(r, 36)[:-1]
+        out = [(x, y, s.tw * 2 * math.pi * r / len(pts)) for x, y in pts]
+    rp = _rot([(x, y) for x, y, _ in out], rot)
+    return [(q[0], q[1], w) for q, (_, _, w) in zip(rp, out)]
+
+
 def plate_outline(prj: Project):
     p = prj.plate
     if p.shape == "Circular":

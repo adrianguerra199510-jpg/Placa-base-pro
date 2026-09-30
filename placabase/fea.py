@@ -223,6 +223,18 @@ def run_fea(prj: Project) -> FEAResult:
                 jj = int(np.clip(math.floor((yy + Ny / 2) / dy), 0, ny - 1))
                 t_el[ii, jj] = max(t_el[ii, jj], t_eq)
 
+    # ---- la pared del perfil (soldada a la placa) rigidiza la placa bajo su huella
+    fpf = float(getattr(prj.fea, "fp_factor", 1.0))
+    if fpf > 1.0 + 1e-9:
+        from .geometry import _seg_dist
+        segs = [(a, b) for poly in G.section_polys(prj) for a, b in zip(poly[:-1], poly[1:])]
+        tol = max(0.75 * max(dx, dy), float(getattr(prj.fea, "fp_band", 0.0)))
+        for i in range(nx):
+            for j in range(ny):
+                cx = 0.5 * (xs[i] + xs[i + 1]); cy = 0.5 * (ys[j] + ys[j + 1])
+                if any(_seg_dist(cx, cy, a[0], a[1], b[0], b[1]) <= tol for a, b in segs):
+                    t_el[i, j] = max(t_el[i, j], p.tp * fpf)
+
     # ---- rigidez global
     ndof = 3 * nnod
     rows, cols, vals = [], [], []
@@ -259,6 +271,7 @@ def run_fea(prj: Project) -> FEAResult:
     else:
         Ec = Ec_ksi(c.fc)
         ks = Ec / max(6.0, c.ha)                        # kip/in^3
+    ks *= float(getattr(prj.fea, "ks_factor", 1.0))
     kf_node = ks * trib                                  # kip/in
 
     # ---- resortes de perno
@@ -267,7 +280,7 @@ def run_fea(prj: Project) -> FEAResult:
     #      ese anillo.  Asi el modelo sigue siendo valido con el agujero
     #      recortado de la malla.
     Lb = prj.bolts.hef + p.tp + p.grout
-    kb = ES_KSI * g.Ase / max(Lb, 1.0)
+    kb = ES_KSI * g.Ase / max(Lb, 1.0) * float(getattr(prj.fea, "bolt_factor", 1.0))
     bolt_groups = []                     # [(lista_nodos, x, y)]
     for (bx, by) in bolts:
         ring = []
@@ -297,14 +310,18 @@ def run_fea(prj: Project) -> FEAResult:
 
     # ---- cargas sobre la huella del perfil
     F = np.zeros(ndof)
-    fp = G.profile_footprint(prj)
-    fp = [q for q in fp if abs(q[0]) < Bx / 2 - 1e-9 and abs(q[1]) < Ny / 2 - 1e-9]
-    if not fp:
-        fp = [(0.0, 0.0)]
-    m = len(fp)
-    wj = 1.0 / m
-    Iyy = sum(wj * q[1] ** 2 for q in fp)
-    Ixx = sum(wj * q[0] ** 2 for q in fp)
+    if getattr(prj.fea, "fp_weighted", False):
+        fpw = G.profile_footprint_weighted(prj)
+    else:
+        fpw = [(q[0], q[1], 1.0) for q in G.profile_footprint(prj)]
+    fpw = [q for q in fpw if abs(q[0]) < Bx / 2 - 1e-9 and abs(q[1]) < Ny / 2 - 1e-9]
+    if not fpw:
+        fpw = [(0.0, 0.0, 1.0)]
+    Wt = sum(q[2] for q in fpw)
+    fp = [(q[0], q[1]) for q in fpw]
+    wjs = [q[2] / Wt for q in fpw]
+    Iyy = sum(w_ * q[1] ** 2 for w_, q in zip(wjs, fp))
+    Ixx = sum(w_ * q[0] ** 2 for w_, q in zip(wjs, fp))
     # El cortante entra en la cara superior de la placa y los pernos (o la llave) lo
     # devuelven a otra altura: el par V·e es un momento sobre la placa.  Convencion de
     # mano derecha (la misma que usa el modelo 3D): fuerza (Vx, Vy) a la altura e sobre
@@ -314,7 +331,7 @@ def run_fea(prj: Project) -> FEAResult:
     Mx_tot = abs(L.Mux) - e_arm * L.Vuy
     My_tot = L.Muy + e_arm * L.Vux
     r.shear_arm, r.Mx_tot, r.My_tot = e_arm, Mx_tot, My_tot
-    for (qx, qy) in fp:
+    for (qx, qy), wj in zip(fp, wjs):
         fz = wj * L.Pu
         if Iyy > 1e-9:
             fz -= Mx_tot * wj * qy / Iyy

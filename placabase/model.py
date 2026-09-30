@@ -356,6 +356,11 @@ class FEAOpts:
     gmsh_path: str = "gmsh"
     mesh3d: float = 0.0          # tamano de malla 3D (0 = automatico)
     mesh3d_mode: str = "Rapida (recomendada, ~30 s)"   # ver MESH3D_MODES
+    ks_factor: float = 1.0       # 2D: multiplica el modulo de balasto
+    bolt_factor: float = 1.0     # 2D: multiplica la rigidez axial del perno
+    fp_factor: float = 1.0       # 2D: espesor de la placa bajo la huella del perfil ×
+    fp_band: float = 0.0         # 2D: ancho extra (in) a cada lado de la pared con ese espesor
+    fp_weighted: bool = False    # 2D: reparte la carga segun el area de metal de cada punto
     shear_arm: float = -1.0      # brazo del cortante sobre la placa, in (-1 = automatico)
     vm_avg_factor: float = 1.0  # radio de promedio del von Mises 3D, en espesores de placa
 
