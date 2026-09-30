@@ -12,6 +12,7 @@ from . import materials as M
 from .design import Check, Bearing
 from .explain import Recorder
 from .fea import run_fea, FEAResult
+from .linear_checks import linear_checks
 
 
 @dataclass
@@ -21,6 +22,8 @@ class Results:
     tdet: dict = field(default_factory=dict)
     checks: list = field(default_factory=list)
     fea: FEAResult = None
+    lin: object = None              # LinearResult: fuerza por perno con distribucion lineal
+    lin_checks: list = field(default_factory=list)      # verificaciones informativas (metodo DG1)
     warnings: list = field(default_factory=list)
     rec: Recorder = None
 
@@ -210,4 +213,19 @@ def solve(prj: Project, with_fea: bool = True, detail: bool = True) -> Results:
                         f"{rec.n('F', R.fea.sumF)}",
                         R.fea.R_found - R.fea.R_bolts - R.fea.sumF, "F",
                         "", "residuo de equilibrio del modelo")
+
+    # ------------------------------------------------ fuerza por perno, distribucion lineal
+    # Siempre se calcula; solo entra en el veredicto si el metodo elegido es el lineal (con el
+    # metodo DG1 queda como informacion y en la memoria).
+    try:
+        R.lin, lck = linear_checks(prj, br, R.fea, rec)
+        if b.force_method.startswith("Lineal"):
+            R.checks += lck
+            if not (with_fea and prj.fea.enabled and R.fea is not None and R.fea.ok):
+                R.warnings.append("Metodo lineal: la validez de la hipotesis de placa rigida "
+                                  "requiere el analisis 2D (F5); aun no se ha verificado.")
+        else:
+            R.lin_checks = lck
+    except Exception as e:                                  # pragma: no cover
+        R.warnings.append(f"No se pudo calcular la distribucion lineal: {e}")
     return R

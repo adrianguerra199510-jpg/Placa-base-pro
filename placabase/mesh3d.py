@@ -576,7 +576,7 @@ def build_inp(prj: Project, mesh_inp: str, out_inp: str, height: float = 0.0) ->
     Lb = max(b.hef + p.tp + p.grout, 1.0)
     kb = ES_KSI * g.Ase / Lb                      # rigidez axial del perno
     Gs = ES_KSI / (2.0 * (1.0 + NU_STEEL))
-    kbh = Gs * g.Ase / Lb                         # rigidez a cortante del perno
+    kbh = Gs * g.Ase / Lb
 
     nodes, elems = read_mesh_inp(mesh_inp)
     if not nodes or not elems:
@@ -609,13 +609,30 @@ def build_inp(prj: Project, mesh_inp: str, out_inp: str, height: float = 0.0) ->
 
     r_hole = g.dh / 2.0
     r_wash = max(g.Fhex, 2.2 * g.db) / 2.0
-    sup = [(n, x, y) for n, (x, y, z) in nodes.items() if abs(z - p.tp) < 1e-4]
-    rings = {}
+    sup = [(n, x, y) for n, (x, y, z) in nodes.items() if abs(z - p.tp) < 1e-4]     # cara superior
+    inf = [(n, x, y) for n, (x, y, z) in nodes.items() if abs(z) < 1e-4]            # cara inferior
+
+    def ring_of(cands, bx, by, nmin=4):
+        """Nodos del anillo de apoyo de un perno (entre el borde del agujero y el radio de la
+        arandela); con malla gruesa toma los nmin mas cercanos al borde del agujero."""
+        d = sorted((math.hypot(x - bx, y - by), n) for n, x, y in cands)
+        d = [(r_, n) for r_, n in d if r_ >= r_hole - 1e-6]
+        ring = [n for r_, n in d if r_ <= r_wash + 1e-6]
+        if len(ring) < nmin:
+            ring = [n for _, n in d[:nmin]]
+        return sorted(ring)
+
+    # Traccion/compresion del perno: la tuerca apoya en el anillo de la CARA SUPERIOR.
+    # Cortante del perno: se devuelve en el plano de la CARA INFERIOR (interfaz con el mortero,
+    # donde esta el centro de giro de la placa); si estuvieran arriba, el giro de la placa
+    # (θ·tp) movería sus resortes horizontales y añadiría una rigidez de giro artificial que
+    # crece con tp² y falsea la fuerza de los pernos en placas gruesas.
+    rings, hrings = {}, {}
     for k, (bx, by) in enumerate(G.bolt_positions(prj), start=1):
-        ring = [n for n, x, y in sup
-                if r_hole - 1e-6 <= math.hypot(x - bx, y - by) <= r_wash + 1e-6]
+        ring = ring_of(sup, bx, by)
         if ring:
-            rings[k] = sorted(ring)
+            rings[k] = ring
+            hrings[k] = ring_of(inf, bx, by)
 
     ref = max(nodes) + 1
     # el mayor numero de elemento de la malla (Gmsh numera tambien lineas y
@@ -642,17 +659,17 @@ def build_inp(prj: Project, mesh_inp: str, out_inp: str, height: float = 0.0) ->
                          for i in range(0, len(lst), per))
 
     from .fea import shear_arm
-    z_arm = shear_arm(prj)
+    # con llave el cortante se devuelve a media altura de la llave (H/2 bajo la cara inferior)
+    z_arm = shear_arm(prj) - (0.5 * prj.lug.H if prj.lug.enabled else 0.0)
 
     L = ["** PlacaBasePro - modelo solido 3D",
          f"** {prj.name} / {prj.element}",
          "*INCLUDE, INPUT=" + os.path.basename(mesh_inp),
-         # nodo de referencia: los cortantes actuan a la altura de la cara superior de la
-         # placa MAS el brazo e (el mismo del modelo 2D, fea.shear_arm): los pernos y la
-         # llave los devuelven en el plano de la cara superior, asi que el par V·e llega
-         # a la placa igual que en el 2D.  Con e = 0 (manual) actuan en la cara superior.
-         "*NODE", f"{ref}, 0.0, 0.0, {p.tp + z_arm:.6f}",
-         f"{ref + 1}, 0.0, 0.0, {p.tp + z_arm:.6f}",
+         # nodo de referencia: el cortante actua a la altura e (el mismo brazo del 2D y del calculo
+         # lineal, fea.shear_arm) sobre el plano donde los pernos lo devuelven (cara inferior de
+         # la placa): el par V·e llega a la placa igual que en el 2D.  e = 0 -> en la cara inferior.
+         "*NODE", f"{ref}, 0.0, 0.0, {z_arm:.6f}",
+         f"{ref + 1}, 0.0, 0.0, {z_arm:.6f}",
          "*NSET, NSET=NREF", str(ref),
          "*NSET, NSET=NTOPE", wrap(tope),
          "*MATERIAL, NAME=ACERO", "*ELASTIC",
@@ -712,13 +729,14 @@ def build_inp(prj: Project, mesh_inp: str, out_inp: str, height: float = 0.0) ->
         # perno: SOLO TRACCION (la tuerca retiene a la placa cuando sube)
         L += [f"*SPRING, ELSET=EPERNO{k}, NONLINEAR",
               f"{-kr*1e-5*D:.6e}, {-D:.1f}", "0.0, 0.0", f"{kr*D:.6e}, {D:.1f}"]
+        hr = hrings.get(k) or ring
         for dof in (1, 2):
             L.append(f"*ELEMENT, TYPE=SPRING1, ELSET=EPERNO{k}H{dof}")
-            for n in ring:
+            for n in hr:
                 L.append(f"{eid}, {n}")
                 eid += 1
             L += [f"*SPRING, ELSET=EPERNO{k}H{dof}", str(dof),
-                  f"{kbh / len(ring):.6f}"]
+                  f"{kbh / len(hr):.6f}"]
 
     # --- llave de corte: si existe, toma el cortante por aplastamiento contra
     #     el concreto.  Se modela como resortes horizontales en sus caras.

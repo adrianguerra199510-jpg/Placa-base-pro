@@ -95,6 +95,78 @@ def bolt_rows(res: Results, us: UnitSet):
     return hdr, filas
 
 
+def lin_section(prj: Project, res: Results, us: UnitSet):
+    """Datos de la seccion 'Fuerza por perno — distribucion lineal (placa rigida)'.
+    -> None si no hay resultado, o dict(hdr, rows, checks, verdict, tp_rigid, lines)."""
+    lin = getattr(res, "lin", None)
+    if lin is None or not getattr(lin, "ok", False):
+        return None
+    from .linear_checks import bolt_phiRnt, rigid_thickness
+    phi = bolt_phiRnt(prj)
+    fr = getattr(res, "fea", None)
+    t2 = {}
+    if fr is not None and fr.ok:
+        t2 = {(round(x, 2), round(y, 2)): T for (x, y), T in zip(fr.bolt_xy, fr.bolt_T)}
+    post = getattr(res, "post3d", None)
+    t3 = {}
+    if post is not None:
+        t3 = {k - 1: T for (k, x, y, T) in post.bolts}
+    hdr = ["Perno", f"x ({us.L})", f"y ({us.L})", f"T lineal ({us.F})", "D/C lineal"]
+    if t2:
+        hdr.append(f"T 2D ({us.F})")
+    if t3:
+        hdr.append(f"T 3D ({us.F})")
+    order = sorted(range(len(lin.bolt_T)), key=lambda i: -lin.bolt_T[i])
+    rows = []
+    for i in order:
+        x, y = lin.bolt_xy[i]
+        row = [f"P{i + 1}", us.fmt("L", x), us.fmt("L", y), us.fmt("F", lin.bolt_T[i]),
+               f"{lin.bolt_T[i] / phi:.3f}" if phi > 0 else "-"]
+        if t2:
+            row.append(us.fmt("F", t2.get((round(x, 2), round(y, 2)), 0.0)))
+        if t3:
+            row.append(us.fmt("F", t3.get(i, 0.0)))
+        rows.append(row)
+    cks = {c.key: c for c in list(getattr(res, "checks", [])) + list(getattr(res, "lin_checks", []))
+           if c.key.startswith("lin_")}
+    chk_rows = []
+    for k in ("lin_t", "lin_tv", "lin_brg", "lin_tp", "lin_rigid"):
+        c = cks.get(k)
+        if c is None:
+            continue
+        dv, cv, ul = ck_vals(us, c)
+        chk_rows.append([c.title, f"{dv:,.3f}", f"{cv:,.3f}", ul,
+                         "—" if c.skip else f"{c.ratio:.3f}",
+                         "n/a" if c.skip else ("CUMPLE" if c.ok else "NO CUMPLE")])
+    rig = cks.get("lin_rigid")
+    if rig is None:
+        verdict = ("Validez de la hipotesis de placa rigida: NO VERIFICADA (requiere el analisis 2D "
+                   "de la placa flexible).")
+    elif rig.skip:
+        verdict = ("La traccion en los pernos es pequena: la distribucion lineal no es determinante.")
+    elif rig.ok:
+        verdict = ("La distribucion lineal ES APLICABLE: la placa flexible (2D) no excede a la "
+                   "lineal en mas de 10 %.")
+    else:
+        verdict = ("La distribucion lineal NO ES APLICABLE con el espesor actual: la placa es flexible "
+                   "y el reparto lineal SUBESTIMA la traccion. " + rig.note)
+    tpr = None
+    if rig is not None and not rig.skip:
+        try:
+            cache = getattr(res, "_tp_rigid", None)
+            if cache is None:
+                cache = rigid_thickness(prj)
+                res._tp_rigid = cache
+            tpr = cache
+        except Exception:
+            tpr = None
+    lines = [lin.msg,
+             (f"Hipotesis: w = a + b·x + c·y con a = {lin.a:.4g}, b = {lin.b:.4g}, c = {lin.c:.4g}; "
+              f"ks = {us.q('K', lin.ks)}, kb = {us.q('LF', lin.kb)}, brazo del cortante e = "
+              f"{us.q('L', lin.arm)}.")]
+    return dict(hdr=hdr, rows=rows, checks=chk_rows, verdict=verdict, tp_rigid=tpr, lines=lines)
+
+
 def render_3d_png(prj: Project, path: str, size=(6.4, 4.6), dpi=170) -> str | None:
     """Vista 3D de la geometria (sin analisis) para la memoria de calculo."""
     try:
@@ -474,13 +546,44 @@ def export_docx(prj: Project, res: Results, path: str,
     pv.add_run(f"   D/C maximo = {res.max_ratio:.3f}" +
                (f"   (gobierna: {gov.title})" if gov else ""))
 
+    _ls = lin_section(prj, res, us)
+    if _ls:
+        doc.add_heading("5. Fuerza por perno — distribucion lineal (placa rigida)", level=1)
+        for ln in _ls["lines"]:
+            doc.add_paragraph(ln)
+        tb = doc.add_table(rows=1, cols=len(_ls["hdr"]))
+        tb.style = "Light Grid Accent 1"
+        for j, h_ in enumerate(_ls["hdr"]):
+            tb.rows[0].cells[j].text = ""
+            tb.rows[0].cells[j].paragraphs[0].add_run(h_).bold = True
+        for row in _ls["rows"]:
+            cel = tb.add_row().cells
+            for j, v in enumerate(row):
+                cel[j].text = v
+        doc.add_paragraph().add_run("Verificaciones AISC con la distribucion lineal").bold = True
+        tc = doc.add_table(rows=1, cols=6)
+        tc.style = "Light Grid Accent 1"
+        for j, h_ in enumerate(("Verificacion", "Demanda", "Capacidad", "Un.", "D/C", "Estado")):
+            tc.rows[0].cells[j].text = ""
+            tc.rows[0].cells[j].paragraphs[0].add_run(h_).bold = True
+        for row in _ls["checks"]:
+            cel = tc.add_row().cells
+            for j, v in enumerate(row):
+                cel[j].text = v
+        pv = doc.add_paragraph()
+        pv.add_run("Validez: ").bold = True
+        pv.add_run(_ls["verdict"])
+        if _ls["tp_rigid"] and _ls["tp_rigid"].get("tp"):
+            doc.add_paragraph(f"Espesor de placa con el que la distribucion lineal es aplicable: "
+                              f"tp ≥ {us.q('L', _ls['tp_rigid']['tp'])} (actual {us.q('L', prj.plate.tp)}).")
+
     if res.warnings:
         doc.add_heading("4. Avisos", level=1)
         for wmsg in res.warnings:
             doc.add_paragraph(wmsg, style="List Bullet")
 
     if res.fea is not None and res.fea.ok:
-        doc.add_heading("5. Elementos finitos", level=1)
+        doc.add_heading("6. Elementos finitos", level=1)
         doc.add_paragraph(
             f"Placa de Mindlin-Reissner (cuadrilateros de 4 nodos, integracion reducida "
             f"selectiva) sobre fundacion elastica de Winkler solo a compresion, con resortes "
@@ -512,7 +615,7 @@ def export_docx(prj: Project, res: Results, path: str,
     post = getattr(res, "post3d", None)
     if post is not None:
         from .weld3d import summary_rows
-        doc.add_heading("6. Modelo solido 3D — soldadura y pernos", level=1)
+        doc.add_heading("7. Modelo solido 3D — soldadura y pernos", level=1)
         doc.add_paragraph("Modelo solido de tetraedros cuadraticos (Gmsh + CalculiX): placa con los agujeros "
             "taladrados, perfil, rigidizadores y llave; concreto como resortes solo a "
             "compresion y pernos solo a traccion (paso no lineal). La fuerza en la "
@@ -557,7 +660,7 @@ def export_docx(prj: Project, res: Results, path: str,
 
     rep3d = getattr(res, "rep3d", None)
     if rep3d:
-        n_sec = 7 if getattr(res, "post3d", None) is not None else 6
+        n_sec = 8 if getattr(res, "post3d", None) is not None else 7
         doc.add_heading(f"{n_sec}. Modelo solido 3D — esfuerzos de von Mises y deformaciones",
                         level=1)
         for i, ln in enumerate(_rep3d_lines(prj, us, rep3d)):
@@ -747,10 +850,42 @@ def export_pdf(prj: Project, res: Results, path: str,
             col = "9C0006" if wmsg.startswith("**") else "7F6000"
             story.append(Paragraph(f'<font color="#{col}">• {wmsg}</font>', BODY))
 
-    # --------------------------------------------- 5. FEA
+    # --------------------------------------------- 5. distribucion lineal por perno
+    _ls = lin_section(prj, res, us)
+    if _ls:
+        story.append(Paragraph("5. Fuerza por perno — distribucion lineal (placa rigida)", H1))
+        for ln in _ls["lines"]:
+            story.append(Paragraph(ln, BODY))
+        story.append(Spacer(1, 4))
+        n_c = len(_ls["hdr"])
+        wcol = [0.55 * inch] + [(6.4 * inch - 0.55 * inch) / (n_c - 1)] * (n_c - 1)
+        story.append(tbl([[Paragraph(str(c_), BODY) for c_ in _ls["hdr"]]] +
+                         [[Paragraph(str(c_), BODY) for c_ in row] for row in _ls["rows"]], wcol,
+                         [("ALIGN", (1, 1), (-1, -1), "RIGHT")]))
+        story.append(Spacer(1, 5))
+        story.append(Paragraph("<b>Verificaciones AISC con la distribucion lineal</b>", BODY))
+        if _ls["checks"]:
+            cst = []
+            for k_, row in enumerate(_ls["checks"], start=1):
+                cst.append(("BACKGROUND", (5, k_), (5, k_),
+                            colors.HexColor("#C6EFCE" if row[5] == "CUMPLE" else
+                                            ("#EEEEEE" if row[5] == "n/a" else "#FFC7CE"))))
+            story.append(tbl([[Paragraph(h_, BODY) for h_ in ("Verificacion", "Demanda", "Capacidad",
+                                                              "Un.", "D/C", "Estado")]] +
+                             [[Paragraph(str(c_), BODY) for c_ in row] for row in _ls["checks"]],
+                             [2.9 * inch, 0.8 * inch, 0.8 * inch, 0.4 * inch, 0.6 * inch, 0.9 * inch],
+                             cst))
+        story.append(Spacer(1, 4))
+        story.append(Paragraph(f"<b>Validez:</b> {_ls['verdict']}", BODY))
+        if _ls["tp_rigid"] and _ls["tp_rigid"].get("tp"):
+            story.append(Paragraph(
+                f"Espesor de placa con el que la distribucion lineal es aplicable: "
+                f"<b>tp ≥ {us.q('L', _ls['tp_rigid']['tp'])}</b> (actual {us.q('L', prj.plate.tp)}).", BODY))
+
+    # --------------------------------------------- 6. FEA
     if res.fea is not None and res.fea.ok:
         fr = res.fea
-        story.append(Paragraph("5. Elementos finitos", H1))
+        story.append(Paragraph("6. Elementos finitos", H1))
         story.append(Paragraph(
             "Placa de Mindlin-Reissner con elemento MITC4 sobre fundacion elastica de "
             "Winkler solo a compresion; pernos como resortes solo a traccion repartidos "
@@ -769,7 +904,7 @@ def export_pdf(prj: Project, res: Results, path: str,
     if post is not None:
         from .weld3d import summary_rows
         import math as _m
-        story.append(Paragraph("6. Modelo solido 3D — soldadura y pernos", H1))
+        story.append(Paragraph("7. Modelo solido 3D — soldadura y pernos", H1))
         story.append(Paragraph("Modelo solido de tetraedros cuadraticos (Gmsh + CalculiX): placa con los agujeros "
             "taladrados, perfil, rigidizadores y llave; concreto como resortes solo a "
             "compresion y pernos solo a traccion (paso no lineal). La fuerza en la "
@@ -823,7 +958,7 @@ def export_pdf(prj: Project, res: Results, path: str,
 
     rep3d = getattr(res, "rep3d", None)
     if rep3d:
-        n_sec = 7 if getattr(res, "post3d", None) is not None else 6
+        n_sec = 8 if getattr(res, "post3d", None) is not None else 7
         story.append(PageBreak())
         story.append(Paragraph(
             f"{n_sec}. Modelo solido 3D — esfuerzos de von Mises y deformaciones", H1))

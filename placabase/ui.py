@@ -27,7 +27,7 @@ from .model import (Project, PATTERNS, ANCHOR_TYPES, WELD_TYPES, PLATE_SHAPES,
                     LUG_DIRS, STIFF_POSITIONS, STIFF_SHAPES, STIFF_SPACING)
 from . import materials as M
 from .shapes import CATALOG, W_SHAPE, HSS_RECT, HSS_ROUND, PIPE, KIND_LABELS
-from .model import LUG_TYPES, save_book, load_book, MESH3D_MODES
+from .model import LUG_TYPES, save_book, load_book, MESH3D_MODES, BOLT_FORCE_METHODS
 from .dialogs import SectionDialog, MaterialsDialog
 from PySide6.QtWidgets import QListWidget, QInputDialog
 from .solver import solve
@@ -369,6 +369,7 @@ class MainWindow(QMainWindow):
         self.lbl_bolt.setStyleSheet("color:#1f3864; font-size:8pt;")
         f._lay.addRow("", self.lbl_bolt)
         f.combo("Material", "bolts.steel", [s.name for s in M.ANCHOR_STEELS], help="Grado de la varilla de anclaje. Ademas de Fy y Fu define si el elemento es ductil, lo que decide el factor de reduccion de ACI Tabla 17.5.3.")
+        f.combo("Metodo de fuerza en los pernos", "bolts.force_method", BOLT_FORCE_METHODS, help="DG1: la traccion Tu del equilibrio se reparte por igual entre los pernos del lado traccionado. Lineal elastico: cada perno toma una fuerza proporcional a su distancia al eje neutro (placa rigida, secciones planas; resortes del concreto solo a compresion y de los pernos solo a traccion): el perno mas cargado y el grupo traccionado salen de ahi. La hipotesis solo es valida si la placa es rigida: el programa lo verifica contra el analisis de la placa flexible (2D) y la verificacion falla si no se cumple; con el metodo DG1 esa informacion queda solo en la memoria.")
         f.combo("Tipo de anclaje", "bolts.atype", ANCHOR_TYPES, help="Con cabeza: la extraccion se calcula con 8·Abrg·f'c. Gancho L o J: con 0.9·f'c·eh·da. Recto: ACI no le reconoce resistencia a la extraccion y el programa lo marca como no valido si hay traccion.")
         f.combo("Instalacion (varilla recta)", "bolts.install", INSTALL_TYPES,
                 help="Solo se usa con varilla recta. Preinstalada (vaciada en sitio): ACI no "
@@ -605,6 +606,11 @@ class MainWindow(QMainWindow):
         btn = QPushButton("Recalcular FEA  (F5)")
         btn.clicked.connect(lambda: self.recalc(fea=True))
         top.addWidget(btn)
+        btn_rig = QPushButton("Espesor de placa rigida...")
+        btn_rig.setToolTip("Espesor minimo con el que la distribucion lineal de fuerzas en los pernos "
+                           "(placa rigida) es aplicable: compara con el 2D de la placa flexible.")
+        btn_rig.clicked.connect(self.rigid_thickness_dialog)
+        top.addWidget(btn_rig)
         top.addStretch(1)
         self.lbl_fea = QLabel("")
         self.lbl_fea.setWordWrap(True)
@@ -612,11 +618,11 @@ class MainWindow(QMainWindow):
         self.cv_fea = Canvas(size=(7, 6))
         spl = QSplitter(Qt.Vertical)
         spl.addWidget(self.cv_fea)
-        self.tbl_bolts = QTableWidget(0, 6)
+        self.tbl_bolts = QTableWidget(0, 8)
         self.tbl_bolts.setHorizontalHeaderLabels(
-            ["Perno", "x", "y", "Traccion T", "Esfuerzo σt", "D/C"])
+            ["Perno", "x", "y", "Traccion T", "Esfuerzo σt", "D/C", "T lineal", "T / T lineal"])
         hb = self.tbl_bolts.horizontalHeader()
-        for c in range(6):
+        for c in range(8):
             hb.setSectionResizeMode(c, QHeaderView.Stretch)
         self.tbl_bolts.verticalHeader().setVisible(False)
         self.tbl_bolts.setEditTriggers(QTableWidget.NoEditTriggers)
@@ -1184,6 +1190,35 @@ class MainWindow(QMainWindow):
         if self.cb_f3.currentIndex() == 0 or self.res3d is None:
             self.draw_3d()                      # la geometria 3D siempre esta al dia
 
+    def rigid_thickness_dialog(self):
+        from .linear_checks import rigid_thickness
+        self.store_ui()
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            d = rigid_thickness(self.prj)
+        except Exception as e:
+            QApplication.restoreOverrideCursor()
+            QMessageBox.warning(self, "Placa rigida", f"No se pudo calcular: {e}")
+            return
+        finally:
+            if QApplication.overrideCursor() is not None:
+                QApplication.restoreOverrideCursor()
+        u_ = self.us
+        if not d["applicable"]:
+            txt = ("No hay traccion significativa en los pernos: la distribucion lineal no es "
+                   "determinante en este caso.")
+        elif d["tp"] is None:
+            txt = ("Con hasta 8 veces el espesor actual la placa aun no es rigida segun el criterio "
+                   "(desviacion 2D/lineal > 10 %). Use las fuerzas del 2D/3D.")
+        elif d["ok_actual"]:
+            txt = (f"La placa actual ({u_.q('L', self.prj.plate.tp)}) YA es rigida: el 2D de la placa "
+                   f"flexible excede a la distribucion lineal en {100 * d['dev_actual']:+.0f} %.")
+        else:
+            txt = (f"La distribucion lineal es aplicable con tp ≥ {u_.q('L', d['tp'])}. Con el espesor "
+                   f"actual ({u_.q('L', self.prj.plate.tp)}) el 2D excede a la lineal en "
+                   f"{100 * d['dev_actual']:+.0f} %.")
+        QMessageBox.information(self, "Placa rigida", txt)
+
     def draw_fea(self):
         self.cv_fea.reset()
         key = FIELDS_FEA[self.cb_field.currentIndex()][1]
@@ -1361,15 +1396,23 @@ class MainWindow(QMainWindow):
         u = self.us
         self.tbl_bolts.setHorizontalHeaderLabels(
             ["Perno", f"x ({u.L})", f"y ({u.L})", f"T ({u.F})",
-             f"σt ({u.S})", "D/C"])
+             f"σt ({u.S})", "D/C", f"T lineal ({u.F})", "T / T lineal"])
+        lin = getattr(self.res, "lin", None)
+        tlin = {}
+        if lin is not None and getattr(lin, "ok", False):
+            tlin = {(round(x, 2), round(y, 2)): T for (x, y), T in zip(lin.bolt_xy, lin.bolt_T)}
         red, green = QColor("#ffc7ce"), QColor("#c6efce")
         order = sorted(range(len(fr.bolt_T)), key=lambda i: -fr.bolt_T[i])
         for i in order:
             r = self.tbl_bolts.rowCount()
             self.tbl_bolts.insertRow(r)
             x, y = fr.bolt_xy[i]
+            tl = tlin.get((round(x, 2), round(y, 2)))
             vals = [str(i + 1), u.fmt("L", x), u.fmt("L", y), u.fmt("F", fr.bolt_T[i]),
-                    u.fmt("S", fr.bolt_sig[i]), f"{fr.bolt_ratio[i]:.3f}"]
+                    u.fmt("S", fr.bolt_sig[i]), f"{fr.bolt_ratio[i]:.3f}",
+                    "—" if tl is None else u.fmt("F", tl),
+                    "—" if (tl is None or tl < 1e-6 or fr.bolt_T[i] < 1e-6)
+                    else f"{fr.bolt_T[i] / tl:.2f}"]
             for j, v in enumerate(vals):
                 it = QTableWidgetItem(v)
                 if j:

@@ -9,6 +9,8 @@ from .shapes import CATALOG, Shape, W_SHAPE, GENERIC_KINDS, rect_props
 import dataclasses
 
 # --------------------------------------------------------------- catalogos
+BOLT_FORCE_METHODS = ["DG1 (Tu repartida por igual entre los pernos traccionados)",
+                      "Lineal elastico (placa rigida, secciones planas)"]
 MESH3D_MODES = ["Rapida (recomendada, ~30 s)", "Automatica (fina, ~3 min)"]
 PATTERNS = ["Perimetral (4 lados)", "2 lados (eje mayor)",
             "2 lados (eje menor)", "Circular", "Coordenadas manuales"]
@@ -120,6 +122,7 @@ class BoltGroup:
     size: str = "1-1/4"
     steel: str = "ASTM F1554 Gr.55"
     atype: str = "Con cabeza (hex pesada)"
+    force_method: str = "DG1 (Tu repartida por igual entre los pernos traccionados)"   # ver BOLT_FORCE_METHODS
     pattern: str = "Perimetral (4 lados)"
     n_major: int = 3             # pernos por fila en el eje MAYOR (a lo largo de X)
     n_minor: int = 3             # pernos por fila en el eje MENOR (a lo largo de Y)
@@ -356,12 +359,6 @@ class FEAOpts:
     gmsh_path: str = "gmsh"
     mesh3d: float = 0.0          # tamano de malla 3D (0 = automatico)
     mesh3d_mode: str = "Rapida (recomendada, ~30 s)"   # ver MESH3D_MODES
-    calib_auto: bool = True      # 2D: los factores de abajo dependen de la forma de la placa (ver fea.calibration)
-    ks_factor: float = 1.0       # 2D: multiplica el modulo de balasto
-    bolt_factor: float = 0.7     # 2D: multiplica la rigidez axial del perno (calibrado con el 3D)
-    fp_factor: float = 3.0       # 2D: espesor de la placa bajo la huella del perfil, en veces tp
-    fp_band: float = 0.5         # 2D: ancho extra a cada lado de la pared con ese espesor, en veces tp
-    fp_weighted: bool = True     # 2D: reparte la carga segun el area de metal de cada punto
     shear_arm: float = -1.0      # brazo del cortante sobre la placa, in (-1 = automatico)
     vm_avg_factor: float = 1.0  # radio de promedio del von Mises 3D, en espesores de placa
 
@@ -414,6 +411,10 @@ class Project:
 
     @staticmethod
     def from_json(txt: str) -> "Project":
+        def mk(cls, dd):
+            """Crea el dataclass ignorando claves que ya no existen (archivos de otras versiones)."""
+            ok = getattr(cls, "__dataclass_fields__", {})
+            return cls(**{k: v for k, v in dd.items() if k in ok})
         d = json.loads(txt)
         p = Project()
         for k, v in d.items():
@@ -425,11 +426,11 @@ class Project:
                     w = Welds()
                     for wk in ("flange", "web", "perimeter"):
                         if wk in v and isinstance(v[wk], dict):
-                            setattr(w, wk, WeldSpec(**v[wk]))
+                            setattr(w, wk, mk(WeldSpec, v[wk]))
                     w.directional = v.get("directional", True)
                     setattr(p, k, w)
                 else:
-                    setattr(p, k, type(cur)(**v))
+                    setattr(p, k, mk(type(cur), v))
             else:
                 setattr(p, k, v)
         return p

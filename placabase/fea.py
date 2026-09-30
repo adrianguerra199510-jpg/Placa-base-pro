@@ -133,21 +133,6 @@ def _elem_k(xe, ye, t, E, nu):
     return K
 
 
-def calibration(prj: Project) -> dict:
-    """Ajustes del 2D calibrados contra el modelo solido 3D (ver LEEME).
-    Con fea.calib_auto se elige el conjunto segun la forma de la placa:
-      rectangular: espesor 3·tp bajo la huella (banda 0.5·tp), carga por area de metal, perno ×0.7
-      circular   : sin rigidizacion bajo la huella, carga por area de metal, perno ×1.0
-    Sin calib_auto se usan tal cual los campos de FEAOpts."""
-    o = prj.fea
-    if getattr(o, "calib_auto", True):
-        if prj.plate.shape == "Circular":
-            return dict(fp_factor=1.0, fp_band=0.0, bolt_factor=1.0, ks_factor=1.0, fp_weighted=True)
-        return dict(fp_factor=3.0, fp_band=0.5, bolt_factor=0.7, ks_factor=1.0, fp_weighted=True)
-    return dict(fp_factor=o.fp_factor, fp_band=o.fp_band, bolt_factor=o.bolt_factor,
-                ks_factor=o.ks_factor, fp_weighted=o.fp_weighted)
-
-
 def shear_arm(prj: Project) -> float:
     """Brazo e (in) entre donde el cortante entra en la placa (cara superior) y donde lo
     devuelven los pernos o la llave.  Manual si fea.shear_arm >= 0; si no:
@@ -170,7 +155,6 @@ def run_fea(prj: Project) -> FEAResult:
         return r
 
     p, c, L = prj.plate, prj.conc, prj.eloads
-    CAL = calibration(prj)
     circ = (p.shape == "Circular")
     Bx = p.Dp if circ else p.B
     Ny = p.Dp if circ else p.N
@@ -239,18 +223,6 @@ def run_fea(prj: Project) -> FEAResult:
                 jj = int(np.clip(math.floor((yy + Ny / 2) / dy), 0, ny - 1))
                 t_el[ii, jj] = max(t_el[ii, jj], t_eq)
 
-    # ---- la pared del perfil (soldada a la placa) rigidiza la placa bajo su huella
-    fpf = CAL["fp_factor"]
-    if fpf > 1.0 + 1e-9:
-        from .geometry import _seg_dist
-        segs = [(a, b) for poly in G.section_polys(prj) for a, b in zip(poly[:-1], poly[1:])]
-        tol = max(0.75 * max(dx, dy), CAL["fp_band"] * p.tp)
-        for i in range(nx):
-            for j in range(ny):
-                cx = 0.5 * (xs[i] + xs[i + 1]); cy = 0.5 * (ys[j] + ys[j + 1])
-                if any(_seg_dist(cx, cy, a[0], a[1], b[0], b[1]) <= tol for a, b in segs):
-                    t_el[i, j] = max(t_el[i, j], p.tp * fpf)
-
     # ---- rigidez global
     ndof = 3 * nnod
     rows, cols, vals = [], [], []
@@ -287,8 +259,14 @@ def run_fea(prj: Project) -> FEAResult:
     else:
         Ec = Ec_ksi(c.fc)
         ks = Ec / max(6.0, c.ha)                        # kip/in^3
-    ks *= CAL["ks_factor"]
     kf_node = ks * trib                                  # kip/in
+    if prj.lug.enabled:                                  # bajo la llave no hay contacto (como en el 3D)
+        from .linear import lug_contains
+        under = lug_contains(prj)
+        for i in range(nx + 1):
+            for j in range(ny + 1):
+                if under(xs[i], ys[j]):
+                    kf_node[nid(i, j)] = 0.0
 
     # ---- resortes de perno
     #      La tuerca/arandela apoya sobre un ANILLO alrededor del agujero, no
@@ -296,7 +274,7 @@ def run_fea(prj: Project) -> FEAResult:
     #      ese anillo.  Asi el modelo sigue siendo valido con el agujero
     #      recortado de la malla.
     Lb = prj.bolts.hef + p.tp + p.grout
-    kb = ES_KSI * g.Ase / max(Lb, 1.0) * CAL["bolt_factor"]
+    kb = ES_KSI * g.Ase / max(Lb, 1.0)
     bolt_groups = []                     # [(lista_nodos, x, y)]
     for (bx, by) in bolts:
         ring = []
@@ -326,16 +304,11 @@ def run_fea(prj: Project) -> FEAResult:
 
     # ---- cargas sobre la huella del perfil
     F = np.zeros(ndof)
-    if CAL["fp_weighted"]:
-        fpw = G.profile_footprint_weighted(prj)
-    else:
-        fpw = [(q[0], q[1], 1.0) for q in G.profile_footprint(prj)]
-    fpw = [q for q in fpw if abs(q[0]) < Bx / 2 - 1e-9 and abs(q[1]) < Ny / 2 - 1e-9]
-    if not fpw:
-        fpw = [(0.0, 0.0, 1.0)]
-    Wt = sum(q[2] for q in fpw)
-    fp = [(q[0], q[1]) for q in fpw]
-    wjs = [q[2] / Wt for q in fpw]
+    fp = G.profile_footprint(prj)
+    fp = [q for q in fp if abs(q[0]) < Bx / 2 - 1e-9 and abs(q[1]) < Ny / 2 - 1e-9]
+    if not fp:
+        fp = [(0.0, 0.0)]
+    wjs = [1.0 / len(fp)] * len(fp)
     Iyy = sum(w_ * q[1] ** 2 for w_, q in zip(wjs, fp))
     Ixx = sum(w_ * q[0] ** 2 for w_, q in zip(wjs, fp))
     # El cortante entra en la cara superior de la placa y los pernos (o la llave) lo
@@ -405,7 +378,7 @@ def run_fea(prj: Project) -> FEAResult:
         r.iters = prj.fea.max_iter
 
     w = u[0::3]
-    press = np.where((w > 0) & used_nodes, ks * np.maximum(w, 0.0), 0.0)
+    press = np.where((w > 0) & used_nodes & (kf_node > 0), ks * np.maximum(w, 0.0), 0.0)
     r.R_found = float(np.sum(press * trib))
     r.bolt_T = [float(sum(max(0.0, -w[n_]) * kb / len(ring) for n_ in ring))
                 for ring, _, _ in bolt_groups]

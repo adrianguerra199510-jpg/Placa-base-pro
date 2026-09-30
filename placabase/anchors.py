@@ -50,6 +50,20 @@ def anchor_checks(prj: Project, br: Bearing,
         xs_ = [q[0] for q in grp]; ys_ = [q[1] for q in grp]
         xtmin, xtmax, ytmin, ytmax = min(xs_), max(xs_), min(ys_), max(ys_)
         elastic = True
+    linear_mode = False
+    if b.force_method.startswith("Lineal"):
+        # fuerza de cada perno por distribucion lineal (placa rigida): el grupo traccionado son
+        # los pernos con T > 0 y el perno de diseno es el mas cargado
+        from .linear import linear_bolt_forces
+        _lin = linear_bolt_forces(prj)
+        if _lin.ok and _lin.T_max > 1e-9:
+            grp = [q for q, t in zip(_lin.bolt_xy, _lin.bolt_T) if t > 1e-9]
+            n_t = len(grp)
+            Nua, Nua_b = _lin.T_sum, _lin.T_max
+            xs_ = [q[0] for q in grp]; ys_ = [q[1] for q in grp]
+            xtmin, xtmax, ytmin, ytmax = min(xs_), max(xs_), min(ys_), max(ys_)
+            elastic = True
+            linear_mode = True
     Vua = 0.0 if prj.lug.enabled else prj.eloads.Vu
     if prj.eloads.friction and not prj.lug.enabled and L.Pu > 0:
         Vfric = prj.eloads.mu_fric * L.Pu
@@ -86,7 +100,11 @@ def anchor_checks(prj: Project, br: Bearing,
         rec.section("D.  PERNOS DE ANCLAJE — ACERO  (AISC 360 Cap. J3)")
         rec.add("Nua", "Tu (del equilibrio)", "", Nua, "F", "",
                 "traccion total del grupo")
-        if elastic:
+        if linear_mode:
+            rec.add("Nua,perno", "Tmax de la distribucion lineal (placa rigida)",
+                    "ver seccion J: fuerza proporcional a la distancia al eje neutro",
+                    Nua_b, "F", "", "el grupo traccionado son los pernos con T > 0")
+        elif elastic:
             rec.add("Nua,perno", "max( |Pu|/n + Mux·yi/Σy² )",
                     "traccion neta: reparto elastico entre todos los pernos",
                     Nua_b, "F")
