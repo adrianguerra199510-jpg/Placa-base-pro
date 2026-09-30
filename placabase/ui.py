@@ -1160,6 +1160,7 @@ class MainWindow(QMainWindow):
             self.res = solve(self.prj, with_fea=fea)
             if not fea and prev is not None:
                 self.res.fea = None                 # resultados FEA previos quedan obsoletos
+            self._attach_3d()                       # si hay un 3D vigente, valida la placa rigida con el
         except Exception as e:
             QApplication.restoreOverrideCursor()
             QMessageBox.critical(self, "Error de calculo",
@@ -1327,6 +1328,9 @@ class MainWindow(QMainWindow):
             + "Los picos de von Mises en aristas vivas (borde de agujero, encuentro "
             "perfil-placa) son singularidades de malla: dependen del tamano de "
             "elemento y no deben leerse como esfuerzo real.")
+        self._attach_3d()
+        if self.res is not None:
+            self.fill_table()                   # la validez de la placa rigida pasa a verificarse con el 3D
         self.cb_f3.blockSignals(True)
         self.cb_f3.setCurrentIndex(1)           # muestra von Mises al terminar el analisis
         self.cb_f3.blockSignals(False)
@@ -1532,6 +1536,9 @@ class MainWindow(QMainWindow):
               getattr(self, "_sig3d", None) == self.prj.to_json())
         if self.res is not None:
             self.res.post3d = self.post3d if ok else None
+            if ok:
+                from .linear_checks import apply_3d_validation
+                apply_3d_validation(self.prj, self.res)
             rc = self.rep3d_cache.get(id(self.prj))
             self.res.rep3d = rc[1] if (rc and rc[0] == self.prj.to_json()) else None
 

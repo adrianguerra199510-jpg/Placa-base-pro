@@ -229,6 +229,14 @@ _m = Project(); _m.bolts.force_method = BOLT_FORCE_METHODS[1]
 _rm = solve(_m, with_fea=True)
 if not any(c.key == "lin_rigid" for c in _rm.checks):
     FAIL.append("metodo lineal: falta la verificacion de placa rigida")
+# validacion de la placa rigida contra el 3D (simulado con las mismas fuerzas: debe cumplir)
+import types
+from placabase.linear_checks import apply_3d_validation
+_rm.post3d = types.SimpleNamespace(bolts=[(k + 1, x, y, T) for k, ((x, y), T) in enumerate(zip(_rm.lin.bolt_xy, _rm.lin.bolt_T))])
+_ok3d = apply_3d_validation(_m, _rm)
+_row = [c for c in _rm.checks if c.key == "lin_rigid"]
+if not (_ok3d and _row and _row[0].ok and "3D" in _row[0].title):
+    FAIL.append("validacion de placa rigida contra el 3D")
 print(f"{'metodo lineal en el solver':34} D/C max = {_rm.max_ratio:.2f}  filas lin_ = {[c.key for c in _rm.checks if c.key.startswith('lin_')]}")
 
 print()
