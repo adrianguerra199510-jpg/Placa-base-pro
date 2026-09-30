@@ -21,47 +21,95 @@ que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
 | **Todo** sale en las unidades elegidas: también la columna de observaciones, los ejes de los dibujos y los títulos | Toda la aplicación |
 | **Descripción de cada dato de entrada** en un panel al pie de cada pestaña, más la convención de signos de las cargas | Los 65 campos de entrada |
 
-## Calibracion del 2D con el 3D
+## Fuerza por perno: distribucion lineal (placa rigida)
 
-Los ajustes del 2D dependen de la forma de la placa (`fea.calib_auto`; `fea.calibration()`),
-elegidos por busqueda contra casos 3D convergidos (3D promediado en r = 1 espesor, penalizando
-mas quedar por debajo del 3D):
+Ademas del reparto de DG1 (la traccion Tu del equilibrio dividida por igual entre los pernos del
+lado traccionado) el programa calcula la fuerza de CADA perno con la distribucion lineal del metodo
+elastico (`placabase/linear.py`). Hipotesis: la placa es rigida y sus secciones permanecen planas,
 
-| Placa | Espesor bajo la huella | Reparto de la carga | Rigidez del perno |
-|---|---|---|---|
-| Rectangular | 3·tp en banda de 0.5·tp a cada lado de la pared | por area de metal | ×0.7 |
-| Circular | sin cambio | por area de metal | ×1.0 |
+    w(x, y) = a + b·x + c·y                       (w > 0 hacia el concreto)
+    concreto: p = ks·max(w, 0)        perno i: Ti = kb·max(−wi, 0)
+    ∫p dA − ΣTi = Pu ;   ∫p·y dA − ΣTi·yi = −Mx' ;   ∫p·x dA − ΣTi·xi = My'
+    Mx' = |Mux| − e·Vuy ,  My' = Muy + e·Vux       (e = brazo del cortante)
 
-(La rigidizacion bajo la huella que mejoraba las placas rectangulares dejaba las circulares con
-presion y deflexion 35-45 % por debajo del 3D; una busqueda con todos los casos a la vez no
-lograba un solo conjunto bueno para ambas.) Con `calib_auto` desactivado se usan los campos de
-`FEAOpts` (`fp_factor`, `fp_band`, `bolt_factor`, `ks_factor`, `fp_weighted`).
+de modo que la fuerza del perno es proporcional a su distancia al eje neutro (w = 0). a, b y c salen
+de un Newton con Jacobiano exacto (es el minimo de una energia convexa: converge siempre); las
+integrales sobre la zona comprimida (placa recortada por w > 0, menos agujeros y menos la huella de
+la llave de corte) son exactas (momentos de poligonos). ks y kb son los mismos del 2D y del 3D
+(Ec/hped y E·Ase/(hef + tp + mortero)). Funciona con placa rectangular o circular y cualquier
+disposicion de pernos, con momento en una o dos direcciones.
 
-Razon 2D/3D (1.00 = igual; von Mises / presion / deflexion / traccion):
+Pestaña Pernos → **Metodo de fuerza en los pernos**: "DG1" (predeterminado) o "Lineal elastico". Con el
+lineal, el perno de diseño es el mas cargado y el grupo traccionado son los pernos con T > 0 (acero
+AISC J3, arrancamiento, extraccion, etc.). La memoria (seccion J y seccion 5 del PDF/Word) y la tabla
+del FEA muestran siempre la fuerza lineal de cada perno junto a la del 2D (y del 3D si hay).
 
-| Caso | von Mises | presion | deflexion | traccion |
-|---|---|---|---|---|
-| Rectangular: PB-01 A, PB-01 B, PB-02 (ajuste) | 1.03 / 1.04 / 0.94 | 1.02 / 1.14 / 0.94 | 1.01 / 1.23 / 1.04 | 1.08 / 1.10 / 0.92 |
-| Rectangular: PB-01 con tp = 1.25 in (validacion) | 1.20 | 1.05 | 1.25 | 1.12 |
-| Circular, pernos radiales: PB-03, R1, R2 (ajuste) | 1.57 / 1.33 / 1.31 | 0.91 / 0.98 / 0.98 | 0.99 / 1.14 / 1.11 | 1.00 / 1.08 / 1.08 |
-| Circular, pernos radiales: R3 (validacion) | 1.28 | 1.02 | 0.99 | 1.06 |
+**Verificaciones AISC con la distribucion lineal**: resistencia a traccion del perno mas cargado
+(J3.6, φ·0.75·Fu·Ab) e interaccion traccion-cortante (J3.7); aplastamiento del concreto con la
+presion maxima (J8); espesor de la placa (DG1 §3.1 y §3.3) con esa presion y esa traccion.
 
-Casos circulares: R1 = placa Ø36 × 1.5 in, 16 pernos, Mux 3500 + Vux 20; R2 = igual con Mux 2500 y
-Muy 2500; R3 = Ø30 × 2 in, 10 pernos. En los tres la tension por perno del 2D y del 3D tienen
-correlacion 0.997-1.000 (tambien con momento biaxial). El 2D queda entre 0.91 y 1.57 del 3D; lo
-unico por debajo del 3D es presion y traccion de hasta −9 % (PB-02, PB-03). Son 9 geometrias en
-total: fuera de estos rangos (perfiles pequeños, placas muy delgadas) no hay evidencia.
+**Validez de la hipotesis de placa rigida.** ACI 318 Cap. 17 y EN 1992-4 reparten la traccion de los
+anclajes con una distribucion plana solo si la placa es rigida, pero ni ellos ni AISC dan un limite
+numerico de rigidez; con una placa flexible aparece el efecto palanca y la distribucion lineal
+SUBESTIMA la traccion. El programa lo comprueba (fila `lin_rigid`): el perno mas cargado y la
+traccion total de la placa flexible no deben exceder a las lineales en mas de 10 % (o en mas de 10 %
+de φRnt si la traccion es pequeña). Se compara con el 2D y, si hay un analisis 3D vigente, con el 3D
+(que incluye el perfil soldado y por eso es menos flexible que el 2D). Con el metodo lineal esta
+verificacion forma parte del veredicto; con DG1 queda solo en la memoria. El boton "Espesor de placa
+rigida..." (pestaña Elementos finitos) busca el espesor con el que se cumple.
 
-## Correccion del 2D: cortante y asimetria
+Comprobaciones del solver: axial puro → T = 0 y p = Pu/A; equilibrio de fuerzas y momentos exacto; y
+con una placa muy gruesa (tp = 12 in) el 2D de Mindlin converge a la solucion lineal (ΣT 86.84 contra
+86.86 kip; perno a perno ≤ 5 %, en placas rectangulares y circulares con pernos radiales).
 
-- El 2D ahora incluye el par del cortante: V entra en la cara superior de la placa y los pernos
-  (o la llave) lo devuelven a otra altura; el brazo e es automatico (sin llave: tp/2 + mortero;
-  con llave: tp + H/2) o manual en Elementos finitos. Mx' = |Mux| − e·Vuy, My' = Muy + e·Vux.
-  Con Vux ≠ 0 los pernos de un lado quedan mas cargados que los del otro (con Vux = 0 sigue
-  simetrico), como se ve en el 3D. e = 0 anula el efecto. El 3D aplica el cortante en la cara
-  superior de la placa (brazo 0): con e automatico el 2D marca mas asimetria que el 3D.
-- CORREGIDO un error de signo: en el 2D Muy > 0 traccionaba el lado +X; ahora tracciona −X,
-  igual que el modelo 3D (mano derecha; comprobado con el 3D: 27 kip en los pernos de −X).
+Se retiro el engrosamiento de la placa bajo el perfil (y los demas factores de calibracion) que se
+habia añadido al 2D: el 2D es de nuevo una placa de Mindlin sin ajustes empiricos.
+
+## Calibracion del 3D contra el calculo lineal
+
+Prueba en el limite de placa rigida: el 3D con placa gruesa debe reproducir la distribucion lineal.
+Relacion 3D / lineal (traccion total, perno max):
+
+| Prueba | Antes | Despues |
+|---|---|---|
+| Rectangular (PB-01 B) tp = 8 in | 0.61 / 0.61 | 0.97 / 0.97 (perno a perno ≤ 4 %) |
+| Circular, 16 pernos radiales (R1) tp = 8 in | — | 1.00 / 1.01 (perno a perno ≤ 2 %) |
+
+Defectos encontrados y corregidos en el 3D:
+1. Los resortes HORIZONTALES de los pernos estaban en la cara superior de la placa: el giro de la
+   placa (θ·tp) los movia y añadian una rigidez de giro artificial que crece con tp² (con tp = 8 in
+   la traccion salia 40 % baja; con tp = 2 in el efecto era 0.2 %). Ahora estan en la cara inferior
+   (interfaz con el mortero, centro de giro de la placa); la traccion/compresion del perno sigue en
+   el anillo de la tuerca (cara superior).
+2. El cortante actua a la altura e (el mismo brazo del 2D y del calculo lineal) sobre ese plano de
+   reaccion (con llave, sobre la mitad de su altura).
+3. La seleccion del anillo de apoyo de cada perno es robusta con mallas gruesas.
+4. Bajo la llave de corte no hay resortes del concreto (su cara superior queda pegada a la placa);
+   ahora el 2D y el calculo lineal excluyen igual esa huella, asi los tres modelos comparten area.
+
+Placas reales (tp entre 1.5 y 3.25 in, malla rapida), relacion respecto al 3D:
+
+| Caso | ΣT lineal | ΣT 2D | Tmax lineal | Tmax 2D | p lineal | p 2D |
+|---|---|---|---|---|---|---|
+| PB-01 B (Mux 4200, llave) | 1.05 | 1.23 | 0.97 | 1.24 | 1.09 | 1.10 |
+| PB-02 (HSS, rigidizadores) | 0.79 | 1.27 | 0.66 | 1.29 | 1.05 | 1.06 |
+| PB-03 circular, tp = 3.25 | 0.97 | 1.00 | 0.95 | 1.02 | 1.21 | 0.91 |
+| R1 circular, 16 pernos, tp = 1.5 | 0.73 | 1.09 | 0.80 | 1.12 | 0.53 | 0.98 |
+| R2 (momento biaxial) | 0.77 | 1.08 | 0.83 | 1.13 | 0.55 | 0.98 |
+| R3 circular, 10 pernos, tp = 2 | 0.76 | 1.06 | 0.79 | 1.08 | 1.02 | 1.02 |
+
+La distribucion lineal queda 20-35 % por debajo del 3D en placas de espesor de diseño DG1
+(placa flexible: efecto palanca) y coincide con placas gruesas (PB-03); el 2D queda 6-29 % por
+encima. Por eso el metodo lineal solo se acepta si pasa la verificacion de placa rigida.
+Nota: el 2D vs 3D del von Mises (maximo del 2D contra el promediado del 3D) no se calibro.
+
+## Cortante y asimetria en el 2D y el 3D
+
+- El par del cortante entra en el 2D y el calculo lineal: Mx' = |Mux| − e·Vuy, My' = Muy + e·Vux, con e
+  automatico (sin llave: tp/2 + mortero; con llave: tp + H/2) o manual en Elementos finitos. Con
+  Vux ≠ 0 los pernos de un lado quedan mas cargados (con Vux = 0 el reparto es simetrico), como en el 3D.
+- CORREGIDO un error de signo: en el 2D Muy > 0 traccionaba el lado +X; ahora tracciona −X, igual
+  que el modelo 3D (mano derecha; comprobado con el 3D).
 
 ## Novedades: malla 3D rapida (predeterminada) y von Mises promediado
 
@@ -80,24 +128,11 @@ difieren ≤ 0.5 %; el von Mises promediado difiere −2.4 % (PB-01 caso A: 14.9
 tamaño del elemento (0.5 espesores en la malla rapida) la diferencia sube a +21 % (caso A):
 por eso el radio tiene ese minimo.
 
-## Validacion cruzada 2D vs 3D y convergencia de malla (PB-01, W14X90, placa 22×22×2 in)
+## Convergencia de malla del 3D (PB-01, W14X90, placa 22×22×2 in)
 
-Se corrio el modelo solido (Gmsh + CalculiX 2.21) y el 2D (Mindlin + Winkler) con las mismas
-cargas. Maximo de la placa en el 3D medido a ≥ 1 espesor del perfil y de los agujeros
-(las aristas vivas son singularidades de malla). Con la rigidez del concreto repartida por
-area tributaria de cada nodo, relacion 3D/2D:
-
-| Caso | von Mises | presion | deflexion | traccion en pernos |
-|---|---|---|---|---|
-| A: Mux 1800, V 30 | 0.97 | 0.85 | 0.86 | (sin traccion) |
-| B: Mux 4200, V 0 | 1.02 | 0.90 | 0.90 | 0.77 |
-
-El 2D queda del lado seguro en presion, deflexion y traccion (10-25 % mas alto). Comparado con el
-von Mises 3D que si converge (promediado, r = 1 espesor: 15.3 ksi en A y 25.5 ksi en B) el 2D
-(28.4 y 43.5 ksi) es 1.7-1.9 veces mayor: el 2D lee el pico de flexion al borde del perfil, el
-promedio 3D lo suaviza; con r = 0.5 espesores el 3D sube a 18.5 y 34.4 ksi (razon 1.3-1.5).
-(En la tabla anterior el von Mises 3D era el maximo nodal a ≥ 1 espesor, que tampoco converge.) No se calibro el 2D: ningun ajuste simple (balasto,
-rigidez del perno, espesor bajo la huella, reparto de la carga) mejoro el acuerdo.
+Se corrio el modelo solido (Gmsh + CalculiX 2.21). Los estudios de esta seccion se hicieron antes de
+mover los resortes horizontales de los pernos a la cara inferior (cambio de ≤ 1 % en placas de
+2 in; ver la calibracion del 3D arriba).
 
 Convergencia del 3D (caso B, tamano de malla objetivo en in):
 
