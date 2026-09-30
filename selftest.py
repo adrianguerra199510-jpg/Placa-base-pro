@@ -203,6 +203,34 @@ print(f"{'2D cortante Vux>0':34} T(-X) = {_a:.2f}  T(+X) = {_b:.2f}   (Vux=0: {s
 if not (_a > _b + 0.1 and abs(sum(_s0) - sum(_s1)) < 1e-6):
     FAIL.append("2D: el cortante debe cargar mas el lado -X y sin cortante debe ser simetrico")
 
+# ---- fuerza por perno con distribucion lineal (placa rigida)
+from placabase.linear import linear_bolt_forces
+from placabase.model import BOLT_FORCE_METHODS
+_l = Project(); _l.lug.enabled = False
+_l.loads.Mux = 0.0; _l.loads.Muy = 0.0; _l.loads.Vux = 0.0; _l.loads.Vuy = 0.0; _l.loads.Pu = 400.0
+_r = linear_bolt_forces(_l)
+print(f"{'lineal: axial puro':34} T = {_r.T_sum:.4f}  p = {_r.p_max:.4f}  (Pu/A = {400 / _r.A_plate:.4f})")
+if not (_r.ok and _r.T_sum < 1e-9 and abs(_r.p_max - 400 / _r.A_plate) < 1e-6):
+    FAIL.append("lineal: axial puro debe dar T = 0 y p = Pu/A")
+_l.loads.Mux = 4200.0
+_r = linear_bolt_forces(_l)
+_mchk = sum(T * y for (x, y), T in zip(_r.bolt_xy, _r.bolt_T)) - _r.R_conc * _r.yc
+print(f"{'lineal: equilibrio (Mux 4200)':34} ΣT = {_r.T_sum:.2f}  R−ΣT−Pu = {_r.R_conc - _r.T_sum - 400:+.2e}  M = {_mchk:.2f}")
+if not (_r.ok and abs(_r.R_conc - _r.T_sum - 400) < 1e-6 and abs(_mchk - 4200) < 1e-3 and _r.T_sum > 10):
+    FAIL.append("lineal: equilibrio de fuerzas y momentos")
+# limite de placa rigida: el 2D con una placa muy gruesa debe coincidir con la distribucion lineal
+_t = Project(); _t.lug.enabled = False; _t.loads.Mux = 4200.0; _t.loads.Vux = 0.0; _t.plate.tp = 12.0
+_rl, _rf = linear_bolt_forces(_t), run_fea(_t)
+_dif = abs(sum(_rf.bolt_T) - _rl.T_sum) / _rl.T_sum
+print(f"{'placa rigida: 2D contra lineal':34} ΣT lineal {_rl.T_sum:.2f}  2D {sum(_rf.bolt_T):.2f}  ({100 * _dif:.1f} %)")
+if _dif > 0.05:
+    FAIL.append("placa rigida: el 2D no converge a la distribucion lineal")
+_m = Project(); _m.bolts.force_method = BOLT_FORCE_METHODS[1]
+_rm = solve(_m, with_fea=True)
+if not any(c.key == "lin_rigid" for c in _rm.checks):
+    FAIL.append("metodo lineal: falta la verificacion de placa rigida")
+print(f"{'metodo lineal en el solver':34} D/C max = {_rm.max_ratio:.2f}  filas lin_ = {[c.key for c in _rm.checks if c.key.startswith('lin_')]}")
+
 print()
 print("CASOS LIMITE")
 case("placa insuficiente", **{"loads.Mux": 26000.0})

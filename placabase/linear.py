@@ -266,7 +266,7 @@ def linear_bolt_forces(prj: Project) -> LinearResult:
             t *= 0.5
         x = x + t * d
         gres, Pi, K = g2, Pi2, K2
-    a, b, c = (float(v) for v in x)
+    a, b, c = (float(v) if abs(float(v)) > 1e-14 else 0.0 for v in x)
     r.a, r.b, r.c, r.ks, r.kb, r.arm, r.Mx, r.My, r.iters = a, b, c, ks, kb, arm, Mx, My, it
     r.resid = float(np.linalg.norm(gres))
 

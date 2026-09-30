@@ -121,7 +121,9 @@ def linear_checks(prj: Project, br: Bearing, fea=None, rec=None):
                 f"{lin.iters} iteraciones; residuo de equilibrio {lin.resid:.1e} kip")
         rec.add("A comprimida", "region con w > 0", "", lin.A_comp, "A", "",
                 f"{100 * lin.A_comp / max(lin.A_plate, 1e-9):.0f} % del area de la placa")
-        rec.add("ΣT", "Σ kb·(−wi)⁺", "", lin.T_sum, "F")
+        rec.add("ΣT", "Σ kb·(−wi)⁺", "", lin.T_sum, "F", "",
+                f"Tu de DG1 (bloque rectangular de resistencia) = {rec.n('F', br.Tu)}; el reparto "
+                f"elastico (presion triangular) exige mas traccion que el equilibrio plastico de DG1")
         rec.add("Tmax", "perno mas cargado", "", lin.T_max, "F")
         rec.add("pmax", "ks·wmax", "", lin.p_max, "S")
         for i, (xy, T) in enumerate(zip(lin.bolt_xy, lin.bolt_T)):
