@@ -625,20 +625,11 @@ def _covered_by_profile(prj, x, y):
     return not (inn and G._inside(x, y, inn))
 
 
-def smoothed_plate_vm(res: "Result3D", prj, radius: float = 0.0):
-    """Esfuerzo de von Mises PROMEDIADO en la placa, para leer un maximo que no dependa
-    de la malla.  El von Mises puntual crece sin limite al refinar en las aristas vivas
-    (borde de agujero, pie del perfil); en cambio el promedio ponderado por area sobre
-    un circulo de radio fijo (por defecto el espesor de la placa) SI converge.
-
-    Se promedia el TENSOR de esfuerzos (no el von Mises) y solo entre nodos de la misma
-    cara (superior o inferior de la placa), para no anular la flexion a traves del
-    espesor.  La cara superior excluye lo cubierto por el perfil.  Los pesos son el area
-    tributaria de cada nodo (triangulacion de la cara), asi la densidad de la malla no
-    sesga el promedio.
-
-    -> dict(vm=maximo promediado, x, y, z, radius, vm_point=maximo puntual de la misma
-    zona, n=nodos) o None."""
+def smoothed_face_fields(res: "Result3D", prj, radius: float = 0.0):
+    """Campo de von Mises PROMEDIADO nodo a nodo en cada cara de la placa (ver smoothed_plate_vm).
+    -> dict(radius, top=dict(xy, vm, vm_point, z), bot=dict(...)); una cara ausente no aparece.
+    xy: (n,2) nodos usados; vm: von Mises del tensor promediado en el circulo de radio r alrededor de
+    cada nodo; vm_point: von Mises puntual del nodo."""
     import numpy as np
     from scipy.spatial import Delaunay, cKDTree
     from . import geometry as G
@@ -651,16 +642,16 @@ def smoothed_plate_vm(res: "Result3D", prj, radius: float = 0.0):
     tol = 1e-4
 
     ids = [n for n in res.nodes if n in res.stress]
+    out = dict(radius=float(r))
     if not ids:
-        return None
+        return out
     P = np.array([res.nodes[n] for n in ids], dtype=float)
     S = np.array([res.stress[n] for n in ids], dtype=float)
 
     def in_hole(x, y):
         return bolts.size > 0 and bool(np.any(np.hypot(bolts[:, 0] - x, bolts[:, 1] - y) < r_hole - 1e-6))
 
-    best = None
-    for zl, is_top in ((0.0, False), (tp, True)):
+    for name, zl, is_top in (("bot", 0.0, False), ("top", tp, True)):
         sel = np.where(np.abs(P[:, 2] - zl) < tol)[0]
         if is_top:
             sel = np.array([k for k in sel if not _covered_by_profile(prj, P[k, 0], P[k, 1])], dtype=int)
@@ -686,15 +677,44 @@ def smoothed_plate_vm(res: "Result3D", prj, radius: float = 0.0):
         idx = sel[keep]; xyk = xy[keep]; wk = w[keep]; Sk = S[idx]
         tree = cKDTree(xyk)
         vm_pt = np.array([von_mises(*s) for s in Sk])
+        vm_sm = np.empty(len(idx))
         for i in range(len(idx)):
             nb = tree.query_ball_point(xyk[i], r)
             ww = wk[nb]
-            sm = (Sk[nb] * ww[:, None]).sum(axis=0) / ww.sum()
-            v = von_mises(*sm)
-            if best is None or v > best["vm"]:
-                best = dict(vm=float(v), x=float(xyk[i][0]), y=float(xyk[i][1]), z=float(zl),
-                            radius=float(r), vm_point=0.0, n=0)
-        if best is not None:
-            best["vm_point"] = max(best["vm_point"], float(vm_pt.max()))
-            best["n"] += int(len(idx))
+            vm_sm[i] = von_mises(*((Sk[nb] * ww[:, None]).sum(axis=0) / ww.sum()))
+        out[name] = dict(xy=xyk, vm=vm_sm, vm_point=vm_pt, z=float(zl))
+    return out
+
+
+def smoothed_plate_vm(res: "Result3D", prj, radius: float = 0.0):
+    """Esfuerzo de von Mises PROMEDIADO en la placa, para leer un maximo que no dependa
+    de la malla.  El von Mises puntual crece sin limite al refinar en las aristas vivas
+    (borde de agujero, pie del perfil); en cambio el promedio ponderado por area sobre
+    un circulo de radio fijo (por defecto el espesor de la placa) SI converge.
+
+    Se promedia el TENSOR de esfuerzos (no el von Mises) y solo entre nodos de la misma
+    cara (superior o inferior de la placa), para no anular la flexion a traves del
+    espesor.  La cara superior excluye lo cubierto por el perfil.  Los pesos son el area
+    tributaria de cada nodo (triangulacion de la cara), asi la densidad de la malla no
+    sesga el promedio.
+
+    -> dict(vm=maximo promediado, x, y, z, radius, vm_point=maximo puntual de la misma
+    zona, n=nodos) o None."""
+    import numpy as np
+    F = smoothed_face_fields(res, prj, radius)
+    best = None
+    for name in ("bot", "top"):
+        f = F.get(name)
+        if f is None:
+            continue
+        i = int(np.argmax(f["vm"]))
+        if best is None or f["vm"][i] > best["vm"]:
+            best = dict(vm=float(f["vm"][i]), x=float(f["xy"][i][0]), y=float(f["xy"][i][1]),
+                        z=f["z"], radius=F["radius"], vm_point=0.0, n=0)
+    if best is not None:
+        for name in ("bot", "top"):
+            f = F.get(name)
+            if f is not None:
+                best["vm_point"] = max(best["vm_point"], float(f["vm_point"].max()))
+                best["n"] += int(len(f["vm"]))
     return best

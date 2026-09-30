@@ -32,7 +32,8 @@ from .dialogs import SectionDialog, MaterialsDialog
 from PySide6.QtWidgets import QListWidget, QInputDialog
 from .solver import solve
 from .units import parse_xy_clipboard
-from . import draw, report, ccx, mesh3d, view3d
+from . import draw, report, mesh3d, view3d
+from .rep3d import make_fem
 from .ui_widgets import Form, scroll, PasteTable
 from .units import (UnitSet, LEN_UNITS, FORCE_UNITS, STRESS_UNITS, MOMENT_UNITS,
                     DEFAULT_SETS, KIP_TO_KN, IN_TO_MM, KIPIN_TO_KNM)
@@ -40,8 +41,6 @@ from .units import (UnitSet, LEN_UNITS, FORCE_UNITS, STRESS_UNITS, MOMENT_UNITS,
 KIND_NAMES = {W_SHAPE: "W (ala ancha)", HSS_RECT: "HSS cuadrado/rectangular",
               HSS_ROUND: "HSS circular", PIPE: "Pipe (tuberia)"}
 KIND_BY_NAME = {v: k for k, v in KIND_NAMES.items()}
-FIELDS_FEA = [("Von Mises", "vm"), ("Presion de contacto", "p"), ("Deflexion", "w"),
-              ("Momento Mx", "mx"), ("Momento My", "my")]
 
 
 FAMILY_DESC = {"W": "W — ala ancha", "M": "M — perfil I liviano", "S": "S — I americano",
@@ -173,12 +172,9 @@ class MainWindow(QMainWindow):
         self.prj.date = datetime.date.today().isoformat()
         self.book = [self.prj]
         self.cur = 0
-        self.cache3d = {}            # id(conexion) -> (firma, post3d)
-        self.rep3d = None            # imagenes/resumen 3D para el reporte
-        self.rep3d_cache = {}        # id(conexion) -> (firma, rep3d)
+        self.fem_cache = {}          # id(conexion) -> Fem3D (con la firma del proyecto que lo genero)
         self.res = None
-        self.res3d = None
-        self.post3d = None
+        self.res3d = None            # resultado crudo del ultimo 3D (para dibujar)
         self._sig3d = None
         self.worker = None
         self.path = None
@@ -217,11 +213,11 @@ class MainWindow(QMainWindow):
 
         self.timer = QTimer(self)
         self.timer.setSingleShot(True)
-        self.timer.timeout.connect(lambda: self.recalc(fea=True))
+        self.timer.timeout.connect(self.recalc)
 
         self.load_ui()
         self._refresh_list()
-        self.recalc(fea=True)
+        self.recalc()
 
     # =============================================================== acciones
     def _build_actions(self):
@@ -254,8 +250,7 @@ class MainWindow(QMainWindow):
         m_file.addSeparator()
         act(m_file, "Salir", self.close, "Ctrl+Q")
         tb.addSeparator()
-        act(m_calc, "Recalcular ahora", lambda: self.recalc(fea=True), "F5")
-        act(m_calc, "Calcular sin FEA", lambda: self.recalc(fea=False), "F6")
+        act(m_calc, "Recalcular ahora", self.recalc, "F5")
         m_calc.addSeparator()
         act(m_calc, "Analisis SOLIDO 3D (Gmsh + CalculiX)...", self.run_3d, "F8")
         tb.addSeparator()
@@ -264,18 +259,12 @@ class MainWindow(QMainWindow):
         act(m_exp, "Imagenes (.png)...", self.export_png)
         m_exp.addSeparator()
         act(m_exp, "Modelo solido 3D para Gmsh (.geo)...", self.export_3d)
-        act(m_exp, "Modelo de cascaras CalculiX (.inp)...", self.export_ccx)
         act(m_help, "Acerca de", self.about)
         act(m_mat, "Biblioteca de materiales...", self.materials_dialog)
         m_exp.addSeparator()
         act(m_exp, "Reportes PDF de TODAS las conexiones...", lambda: self.export_all("pdf"))
         act(m_exp, "Reportes Word de TODAS las conexiones...", lambda: self.export_all("docx"))
 
-        self.chk_auto = QCheckBox("FEA automatico")
-        self.chk_auto.setToolTip("Recalcula el modelo de elementos finitos con cada cambio "
-                                 "(mas lento).  Si esta desactivado, use F5.")
-        self.chk_auto.setChecked(True)
-        self.chk_auto.setVisible(False)
         self.lbl_verdict = QLabel("  ")
         f = QFont(); f.setBold(True); f.setPointSize(11)
         self.lbl_verdict.setFont(f)
@@ -336,10 +325,10 @@ class MainWindow(QMainWindow):
         f.check("Doble, espalda con espalda", "section.double", help="Dos piezas iguales espalda con espalda (por ejemplo 2L o 2C), simetricas respecto al eje Y. Se calculan A, Ix, Sx y Zx dobles, e Iy, Sy y Zy con la separacion real. La soldadura se verifica como grupo en todo el contorno. No aplica a secciones redondas.")
         f.num("Separacion entre piezas", "section.gap", 0, 12, uk="L", help="Distancia libre entre las espaldas de las dos piezas (espesor de la cartela o del separador). En dobles angulos AISC tabula 0, 3/8 y 3/4 in.")
         f.group("Orientacion respecto a la placa")
-        f.num("Rotacion", "section.rotation", -180, 180, 15.0, 1, "°", help="Giro del perfil respecto a la placa. 0° = eje fuerte paralelo a N, de modo que Mux flexiona el perfil en su eje fuerte. 90° = eje debil. Con angulos intermedios las formulas cerradas de DG1 usan el rectangulo envolvente; el FEA usa la geometria real.")
+        f.num("Rotacion", "section.rotation", -180, 180, 15.0, 1, "°", help="Giro del perfil respecto a la placa. 0° = eje fuerte paralelo a N, de modo que Mux flexiona el perfil en su eje fuerte. 90° = eje debil. Con angulos intermedios las formulas cerradas de DG1 usan el rectangulo envolvente; el modelo 3D usa la geometria real.")
         f.note("0° = eje fuerte paralelo a N (Y).  90° = eje debil paralelo a N.  "
                "Con angulos distintos de 0/90 las formulas de DG1 usan el rectangulo "
-               "envolvente; el FEA usa la geometria real.")
+               "envolvente; el modelo 3D usa la geometria real.")
         f.group("Inclinacion de la columna (respecto a la normal de la placa)")
         f.num("Giro alrededor de X", "loads.tilt_x", -85, 85, 1.0, 2, "°", help="Inclinacion de la columna respecto a la normal de la placa, girando alrededor del eje X (la columna se inclina hacia +Y/-Y). 0° = perpendicular. Con inclinacion, Pu, Vux, Vuy, Mux y Muy se ingresan en los ejes de la COLUMNA (Pu = axial, V = transversal) y el programa los proyecta a los ejes de la placa para todas las verificaciones.")
         f.num("Giro alrededor de Y", "loads.tilt_y", -85, 85, 1.0, 2, "°", help="Inclinacion de la columna respecto a la normal de la placa, girando alrededor del eje Y (la columna se inclina hacia +X/-X). 0° = perpendicular. Puede combinarse con el giro alrededor de X.")
@@ -351,7 +340,7 @@ class MainWindow(QMainWindow):
         # ---- placa
         f = new_form("Placa")
         f.group("Geometria")
-        f.combo("Forma", "plate.shape", PLATE_SHAPES, help="Rectangular o circular. En placa circular las formulas cerradas usan el cuadrado equivalente de igual area (Leq = 0.8862·Dp); el FEA modela el circulo real.")
+        f.combo("Forma", "plate.shape", PLATE_SHAPES, help="Rectangular o circular. En placa circular las formulas cerradas usan el cuadrado equivalente de igual area (Leq = 0.8862·Dp); el modelo 3D modela el circulo real.")
         f.num("N (largo, dir. Y)", "plate.N", 1, 200, uk="L", help="Dimension de la placa en la direccion Y, que es la direccion en que actua el momento Mux. Es el lado que gobierna el equilibrio de aplastamiento.")
         f.num("B (ancho, dir. X)", "plate.B", 1, 200, uk="L", help="Dimension de la placa en la direccion X, perpendicular a Mux. Es el ancho sobre el que se reparte la presion de contacto.")
         f.num("Dp (si es circular)", "plate.Dp", 1, 200, uk="L", help="Diametro de la placa. Solo se usa cuando la forma es Circular.")
@@ -442,7 +431,7 @@ class MainWindow(QMainWindow):
                "Los valores se leen en las unidades actuales; se aceptan coma o punto "
                "decimal, y los encabezados se ignoran.")
         f.note("Origen en el centro de la placa; +Y es el lado traccionado por Mux. "
-               "Las filas se numeran P1, P2... igual que en los dibujos y en la tabla del FEA.")
+               "Las filas se numeran P1, P2... igual que en los dibujos y en la tabla del modelo 3D.")
         f.finish()
 
         # ---- llave
@@ -542,7 +531,7 @@ class MainWindow(QMainWindow):
         f.group("Cargas factorizadas (LRFD)")
         f.num("Pu (compresion +)", "loads.Pu", -1e5, 1e5, uk="F", help="Carga axial factorizada en la base. POSITIVA en compresion, que es el caso habitual. Negativa significa traccion neta o levantamiento: la placa no apoya y toda la fuerza la toman los pernos.")
         f.num("Mux (traccion en +Y)", "loads.Mux", -1e6, 1e6, uk="M", help="Momento factorizado que flexiona la base alrededor del eje X. Por convencion produce TRACCION en el lado +Y de la placa, que es el borde superior del dibujo en planta. Es el momento que gobierna el equilibrio de DG1.")
-        f.num("Muy", "loads.Muy", -1e6, 1e6, uk="M", help="Momento alrededor del eje Y. Entra en el esfuerzo del perfil, en la soldadura y en el FEA, pero el equilibrio cerrado de aplastamiento de DG1 es uniaxial y usa solo Mux.")
+        f.num("Muy", "loads.Muy", -1e6, 1e6, uk="M", help="Momento alrededor del eje Y. Entra en el esfuerzo del perfil, en la soldadura y en el modelo 3D, pero el equilibrio cerrado de aplastamiento de DG1 es uniaxial y usa solo Mux.")
         f.num("Vux", "loads.Vux", -1e5, 1e5, uk="F", help="Cortante factorizado en direccion X. Si hay llave de corte lo toma ella; si no, se reparte entre todos los pernos.")
         f.num("Vuy", "loads.Vuy", -1e5, 1e5, uk="F", help="Cortante factorizado en direccion Y. El programa trabaja con la resultante de ambas componentes.")
         f.note("CONVENCION DE SIGNOS — Pu positivo en compresion.  Mux positivo "
@@ -560,29 +549,22 @@ class MainWindow(QMainWindow):
         f._lay.addRow("En SI", self.lbl_si)
         f.finish()
 
-        # ---- FEA
+        # ---- FEM 3D y modelo de apoyo
         f = new_form("Elementos finitos")
-        f.group("Modelo de placa (integrado)")
-        f.check("Ejecutar FEA de la placa", "fea.enabled", help="Modelo de placa integrado, rapido, pensado para iterar. No sustituye a las verificaciones normativas: las complementa mostrando el reparto real de presiones y de traccion entre pernos.")
-        f.int_("Divisiones en X", "fea.nx", 6, 60, help="Numero de divisiones de la malla en direccion X. Con mallas finas los agujeros se representan mejor pero el calculo tarda mas.")
-        f.int_("Divisiones en Y", "fea.ny", 6, 60, help="Numero de divisiones de la malla en direccion Y.")
-        f.combo("Modulo de balasto", "fea.ks_mode", ["Ec/hped", "manual"], help="Ec/hped estima el modulo de balasto como el modulo elastico del concreto dividido entre la altura del pedestal. Con manual usted lo impone.")
+        f.group("Apoyo y reparto de fuerzas en los pernos")
+        f.combo("Modulo de balasto", "fea.ks_mode", ["Ec/hped", "manual"], help="Ec/hped estima el modulo de balasto como el modulo elastico del concreto dividido entre la altura del pedestal (minimo 6 in). Con manual usted lo impone. Lo usan la distribucion lineal y el modelo solido 3D.")
         f.num("ks manual", "fea.ks_manual", 1, 1e5, uk="K", help="Modulo de balasto del apoyo de concreto. Solo se usa en modo manual.")
-        f.int_("Iteraciones de contacto max.", "fea.max_iter", 3, 200, help="Tope de iteraciones para resolver el contacto unilateral: resortes que solo trabajan a compresion y pernos que solo trabajan a traccion. Normalmente converge en 3 a 6.")
-        f.check("Modelar los agujeros de perno en la malla", "fea.holes", help="Recorta los agujeros de la malla y hace que el perno apoye sobre el anillo de la tuerca en vez de sobre un nodo puntual. Requiere que la malla sea suficientemente fina.")
-        f.note("Elemento MITC4 de Mindlin-Reissner sobre resortes de Winkler solo a "
-               "compresion; pernos como resortes solo a traccion; rigidizadores como banda "
-               "de espesor equivalente.")
+        f.num("Brazo del cortante (-1 = automatico)", "fea.shear_arm", -1, 60, uk="L", help="Distancia entre donde el cortante entra en la placa (cara superior) y donde lo devuelven los pernos o la llave. El par V·e es un momento sobre la placa: hace que los pernos de un lado tengan mas traccion que los del otro. -1 = automatico: tp/2 + mortero sin llave; tp + H/2 con llave. 0 = sin efecto del cortante. Lo usan la distribucion lineal y el modelo 3D (altura del punto de aplicacion de las cargas).")
         f.group("Modelo SOLIDO 3D (Gmsh + CalculiX)")
         f.text("CalculiX propio (opcional)", "fea.ccx_path", help="Dejelo vacio: el programa usa el CalculiX incluido en la carpeta solvers. Solo escriba una ruta si quiere usar otra version de ccx.exe.")
         f.combo("Calidad de la malla 3D", "fea.mesh3d_mode", MESH3D_MODES, help="Rapida (predeterminada): tetraedros del doble de tamano que la automatica (~30 s en lugar de ~3 min). En el estudio de convergencia (3 conexiones) difiere menos de 3 % de la automatica en traccion en pernos, presion, deflexion y von Mises PROMEDIADO. El pico puntual de von Mises no converge con ninguna malla. Automatica: mas fina y lenta. Un tamano manual mayor que 0 (abajo) tiene prioridad.")
-        f.num("Brazo del cortante en el 2D (-1 = automatico)", "fea.shear_arm", -1, 60, uk="L", help="Distancia entre donde el cortante entra en la placa (cara superior) y donde lo devuelven los pernos o la llave. El par V·e es un momento sobre la placa: hace que los pernos de un lado tengan mas traccion que los del otro. -1 = automatico: tp/2 + mortero sin llave; tp + H/2 con llave. 0 = sin efecto del cortante. (El modelo 3D aplica el cortante en la cara superior de la placa, es decir, con brazo 0.)")
-        f.num("Radio de promedio del von Mises 3D (× espesor)", "fea.vm_avg_factor", 0.1, 3.0, 0.1, 2, help="El von Mises puntual del modelo solido crece sin limite al refinar la malla (singularidades en el borde de los agujeros y en el pie del perfil). El programa reporta ademas el maximo PROMEDIADO: promedio del tensor de esfuerzos, ponderado por area, en un circulo de este radio (en espesores de placa) sobre la misma cara. Predeterminado 1.0. Un radio menor da valores mas altos y mas sensibles a la malla; el radio nunca baja del tamano del elemento. Este valor si converge con la malla.")
+        f.num("Radio de promedio del von Mises 3D (× espesor)", "fea.vm_avg_factor", 0.1, 3.0, 0.1, 2, help="El von Mises puntual del modelo solido crece sin limite al refinar la malla (singularidades en el borde de los agujeros y en el pie del perfil). El programa verifica el maximo PROMEDIADO: promedio del tensor de esfuerzos, ponderado por area, en un circulo de este radio (en espesores de placa) sobre la misma cara. Predeterminado 1.0. Un radio menor da valores mas altos y mas sensibles a la malla; el radio nunca baja del tamano del elemento. Este valor si converge con la malla.")
         f.num("Tamano de malla 3D (0 = automatico)", "fea.mesh3d", 0, 20, uk="L", help="Tamano caracteristico de los tetraedros. Valores pequenos dan mas detalle y mucho mas tiempo de calculo. Deje 0 para que lo estime el programa.")
-        f.note("Exportar > Modelo solido 3D escribe el .geo con la geometria real "
-               "(placa taladrada, perfil, rigidizadores y llave) mas un script "
-               "correr_3d.py que lo malla con Gmsh, arma el .inp y lo resuelve con "
-               "CalculiX.  Los resultados se abren en PrePoMax o CGX.")
+        f.note("El analisis solido 3D es el unico analisis de elementos finitos del programa: sus "
+               "resultados (traccion en pernos, presion de contacto, von Mises promediado en la "
+               "placa y fuerzas en la soldadura) entran al veredicto y a la memoria de calculo. "
+               "Exportar > Modelo solido 3D escribe el .geo con la geometria real mas un script "
+               "correr_3d.py que lo malla con Gmsh, arma el .inp y lo resuelve con CalculiX.")
         f.finish()
 
     # ================================================================== vistas
@@ -594,44 +576,6 @@ class MainWindow(QMainWindow):
         self.tabs_out.addTab(self.cv_plan, "Planta")
         self.tabs_out.addTab(self.cv_elev, "Elevacion")
         self.tabs_out.addTab(self.cv_stif, "Rigidizador")
-
-        w = QWidget()
-        lay = QVBoxLayout(w)
-        top = QHBoxLayout()
-        top.addWidget(QLabel("Campo:"))
-        self.cb_field = QComboBox()
-        self.cb_field.addItems([a for a, _ in FIELDS_FEA])
-        self.cb_field.currentIndexChanged.connect(self.draw_fea)
-        top.addWidget(self.cb_field)
-        btn = QPushButton("Recalcular FEA  (F5)")
-        btn.clicked.connect(lambda: self.recalc(fea=True))
-        top.addWidget(btn)
-        btn_rig = QPushButton("Espesor de placa rigida...")
-        btn_rig.setToolTip("Espesor minimo con el que la distribucion lineal de fuerzas en los pernos "
-                           "(placa rigida) es aplicable: compara con el 2D de la placa flexible.")
-        btn_rig.clicked.connect(self.rigid_thickness_dialog)
-        top.addWidget(btn_rig)
-        top.addStretch(1)
-        self.lbl_fea = QLabel("")
-        self.lbl_fea.setWordWrap(True)
-        lay.addLayout(top)
-        self.cv_fea = Canvas(size=(7, 6))
-        spl = QSplitter(Qt.Vertical)
-        spl.addWidget(self.cv_fea)
-        self.tbl_bolts = QTableWidget(0, 8)
-        self.tbl_bolts.setHorizontalHeaderLabels(
-            ["Perno", "x", "y", "Traccion T", "Esfuerzo σt", "D/C", "T lineal", "T / T lineal"])
-        hb = self.tbl_bolts.horizontalHeader()
-        for c in range(8):
-            hb.setSectionResizeMode(c, QHeaderView.Stretch)
-        self.tbl_bolts.verticalHeader().setVisible(False)
-        self.tbl_bolts.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.tbl_bolts.setAlternatingRowColors(True)
-        spl.addWidget(self.tbl_bolts)
-        spl.setSizes([520, 230])
-        lay.addWidget(spl, 1)
-        lay.addWidget(self.lbl_fea)
-        self.tabs_out.addTab(w, "Elementos finitos")
 
         # ---------------- modelo solido 3D
         w3 = QWidget()
@@ -1004,14 +948,9 @@ class MainWindow(QMainWindow):
         self.cur = max(0, min(i, len(self.book) - 1))
         self.prj = self.book[self.cur]
         self.res3d = None
-        c = self.cache3d.get(id(self.prj))
-        self.post3d, self._sig3d = (c[1], c[0]) if c else (None, None)
-        rc = self.rep3d_cache.get(id(self.prj))
-        self.rep3d = rc[1] if rc else None
-        self.fill_3d_tables()
         self.load_ui()
         self._refresh_list()
-        self.recalc(fea=True)
+        self.recalc()
 
     def on_select_connection(self, i):
         if i < 0 or i == self.cur or i >= len(self.book):
@@ -1055,7 +994,7 @@ class MainWindow(QMainWindow):
         if QMessageBox.question(self, "Conexiones",
                                 f"¿Eliminar la conexion {self.prj.element}?") != QMessageBox.Yes:
             return
-        self.cache3d.pop(id(self.prj), None)
+        self.fem_cache.pop(id(self.prj), None)
         del self.book[self.cur]
         self._switch(min(self.cur, len(self.book) - 1))
 
@@ -1074,11 +1013,7 @@ class MainWindow(QMainWindow):
             dlg.setLabelText(f"{p.element}  ({i + 1} de {len(self.book)})")
             QApplication.processEvents()
             try:
-                r = solve(p, with_fea=True)
-                c = self.cache3d.get(id(p))
-                r.post3d = c[1] if c and c[0] == p.to_json() else None
-                rc = self.rep3d_cache.get(id(p))
-                r.rep3d = rc[1] if rc and rc[0] == p.to_json() else None
+                r = solve(p, fem=self._fem_now(p))
                 tmp = tempfile.mkdtemp(prefix="pbase_")
                 figs = report.save_figures(p, r, tmp)
                 safe = "".join(ch if ch.isalnum() or ch in "-_ ." else "_"
@@ -1150,17 +1085,19 @@ class MainWindow(QMainWindow):
                             f"      |      Pu={L.Pu:.1f} kip   Mux={L.Mux:.0f} kip·in")
 
     # =================================================================== calculo
-    def recalc(self, fea=False):
+    def _fem_now(self, prj=None):
+        """Analisis 3D vigente de la conexion: solo si se corrio con el proyecto tal como esta."""
+        p = prj if prj is not None else self.prj
+        f = self.fem_cache.get(id(p))
+        return f if (f is not None and f.sig == p.sig3d()) else None
+
+    def recalc(self):
         if hasattr(self, "timer"):
             self.timer.stop()                   # evita que un recalculo pendiente pise este
         self.store_ui()
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
-            prev = self.res.fea if (self.res is not None and not fea) else None
-            self.res = solve(self.prj, with_fea=fea)
-            if not fea and prev is not None:
-                self.res.fea = None                 # resultados FEA previos quedan obsoletos
-            self._attach_3d()                       # si hay un 3D vigente, valida la placa rigida con el
+            self.res = solve(self.prj, fem=self._fem_now())
         except Exception as e:
             QApplication.restoreOverrideCursor()
             QMessageBox.critical(self, "Error de calculo",
@@ -1171,11 +1108,12 @@ class MainWindow(QMainWindow):
                 QApplication.restoreOverrideCursor()
         self.draw_all()
         self.fill_table()
+        self.fill_3d_tables()
         if self.res.rec is not None:
             self.txt_mem.setHtml(self.res.rec.to_html())
         self.statusBar().showMessage(
-            "Calculo completo" + (" con FEA" if fea and self.prj.fea.enabled else
-                                  " (FEA pendiente: F5)"), 5000)
+            "Calculo completo" + ("" if self.res.fem is not None else
+                                  " (FEM 3D pendiente: F8)"), 5000)
 
     def draw_all(self):
         try:
@@ -1187,59 +1125,8 @@ class MainWindow(QMainWindow):
             self.cv_stif.cv.draw_idle()
         except Exception as e:
             self.statusBar().showMessage(f"Error de dibujo: {e}", 8000)
-        self.draw_fea()
         if self.cb_f3.currentIndex() == 0 or self.res3d is None:
             self.draw_3d()                      # la geometria 3D siempre esta al dia
-
-    def rigid_thickness_dialog(self):
-        from .linear_checks import rigid_thickness
-        self.store_ui()
-        QApplication.setOverrideCursor(Qt.WaitCursor)
-        try:
-            d = rigid_thickness(self.prj)
-        except Exception as e:
-            QApplication.restoreOverrideCursor()
-            QMessageBox.warning(self, "Placa rigida", f"No se pudo calcular: {e}")
-            return
-        finally:
-            if QApplication.overrideCursor() is not None:
-                QApplication.restoreOverrideCursor()
-        u_ = self.us
-        if not d["applicable"]:
-            txt = ("No hay traccion significativa en los pernos: la distribucion lineal no es "
-                   "determinante en este caso.")
-        elif d["tp"] is None:
-            txt = ("Con hasta 8 veces el espesor actual la placa aun no es rigida segun el criterio "
-                   "(desviacion 2D/lineal > 10 %). Use las fuerzas del 2D/3D.")
-        elif d["ok_actual"]:
-            txt = (f"La placa actual ({u_.q('L', self.prj.plate.tp)}) YA es rigida: el 2D de la placa "
-                   f"flexible excede a la distribucion lineal en {100 * d['dev_actual']:+.0f} %.")
-        else:
-            txt = (f"La distribucion lineal es aplicable con tp ≥ {u_.q('L', d['tp'])}. Con el espesor "
-                   f"actual ({u_.q('L', self.prj.plate.tp)}) el 2D excede a la lineal en "
-                   f"{100 * d['dev_actual']:+.0f} %.")
-        QMessageBox.information(self, "Placa rigida", txt)
-
-    def draw_fea(self):
-        self.cv_fea.reset()
-        key = FIELDS_FEA[self.cb_field.currentIndex()][1]
-        fr = self.res.fea if self.res else None
-        cs = draw.fea_view(self.cv_fea.ax, self.prj, fr, key)
-        if cs is not None:
-            self.cv_fea.fig.colorbar(cs, ax=self.cv_fea.ax, shrink=0.85)
-        self.cv_fea.cv.draw_idle()
-        if fr is not None and fr.ok:
-            u = self.us
-            self.lbl_fea.setText(
-                f"<b>w max</b> = {u.q('L', fr.w_max)}  ·  <b>p max</b> = {u.q('S', fr.press_max)}  ·  "
-                f"<b>von Mises max</b> = {u.q('S', fr.vm_max)}  ·  "
-                f"<b>T max perno</b> = {u.q('F', max(fr.bolt_T) if fr.bolt_T else 0)}  ·  "
-                f"<b>soldadura</b> ≈ {u.q('LF', fr.weld_line_max)}<br>{fr.msg}")
-            self.fill_bolts()
-        elif fr is not None:
-            self.lbl_fea.setText(f"<span style='color:#9c0006'>{fr.msg}</span>")
-        else:
-            self.lbl_fea.setText("FEA no ejecutado para el estado actual.  Presione F5.")
 
     def draw_3d(self):
         try:                                    # conserva la orientacion de la camara
@@ -1285,7 +1172,7 @@ class MainWindow(QMainWindow):
         base = (Path(self.path).parent if self.path else
                 Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir())) / "PlacaBasePro")
         folder = str(base / f"{self.prj.element or 'placa'}_3D_{stamp}")
-        self._sig3d = self.prj.to_json()
+        self._sig3d = self.prj.sig3d()
         self.dlg3d = QProgressDialog("Preparando el modelo 3D ...", "Cancelar",
                                      0, 0, self)
         self.dlg3d.setWindowTitle("Analisis 3D")
@@ -1294,7 +1181,8 @@ class MainWindow(QMainWindow):
         self.dlg3d.setCancelButton(None)
         self.dlg3d.show()
         self.btn3d.setEnabled(False)
-        self.worker = Worker3D(self.prj, folder)
+        import copy
+        self.worker = Worker3D(copy.deepcopy(self.prj), folder)   # copia: editar mientras corre no lo afecta
         self.worker.progress.connect(self.dlg3d.setLabelText)
         self.worker.done.connect(self._on_3d)
         self.worker.start()
@@ -1307,68 +1195,61 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Analisis 3D", msg[-2500:])
             return
         self.res3d = res
-        self.post3d = getattr(res, "post", None)
-        if self.post3d is not None:
-            self.cache3d[id(self.prj)] = (self._sig3d, self.post3d)
-        self.rep3d = self._make_rep3d(res)
-        self.rep3d_cache[id(self.prj)] = (self._sig3d, self.rep3d)
-        self.fill_3d_tables()
+        fem = make_fem(self.prj, res)
+        fem.sig = self._sig3d                   # firma del proyecto con que SE CORRIO
+        self.fem_cache[id(self.prj)] = fem
         u = self.us
+        vmx = getattr(res, "vm_avg", None)
         self.lbl_3d.setText(
             f"<b>{res.n_nodes:,} nodos</b> y {res.n_elems:,} tetraedros.  "
             f"<b>|U| max</b> = {u.q('L', res.umax)}  ·  "
-            + (f"<b>von Mises promediado en la placa</b> (r = {u.q('L', res.vm_avg['radius'])}) = "
-               f"{u.q('S', res.vm_avg['vm'])}  ·  " if getattr(res, "vm_avg", None) else "")
+            + (f"<b>von Mises promediado en la placa</b> (r = {u.q('L', vmx['radius'])}) = "
+               f"{u.q('S', vmx['vm'])}  ·  " if vmx else "")
             + f"<b>von Mises pico puntual</b> = {u.q('S', res.vmmax)} (depende de la malla)  ·  "
-            + (f"equilibrio: {self.post3d.msg}<br>" if self.post3d else "<br>") +
+            + (f"equilibrio: {fem.msg}<br>" if fem.msg else "<br>") +
             f"Archivos en: {getattr(res, 'folder', '')}<br>"
             + ("<br><span style='color:#595959'>Malla rapida (2× el tamano automatico): en las "
                "comparaciones hechas difiere &lt; 3 % de la automatica en las magnitudes "
-               "reportadas, salvo el pico puntual.</span><br>" if mesh3d.is_fast_mesh(self.prj) else "")
+               "reportadas, salvo el pico puntual.</span><br>" if fem.fast else "")
             + "Los picos de von Mises en aristas vivas (borde de agujero, encuentro "
             "perfil-placa) son singularidades de malla: dependen del tamano de "
             "elemento y no deben leerse como esfuerzo real.")
-        self._attach_3d()
-        if self.res is not None:
-            self.fill_table()                   # la validez de la placa rigida pasa a verificarse con el 3D
+        self.recalc()                           # el 3D entra al veredicto y a la memoria
         self.cb_f3.blockSignals(True)
         self.cb_f3.setCurrentIndex(1)           # muestra von Mises al terminar el analisis
         self.cb_f3.blockSignals(False)
         self.draw_3d()
-        self.tabs_out.setCurrentIndex(4)
-
-    def _make_rep3d(self, res):
-        """Imagenes de von Mises y deformada (con etiqueta del maximo) para la memoria."""
-        try:
-            folder = Path(getattr(res, "folder", "") or tempfile.mkdtemp())
-            folder.mkdir(parents=True, exist_ok=True)
-            xs = [p for p in res.nodes.values()]
-            dim = max(max(q[i] for q in xs) - min(q[i] for q in xs) for i in range(3))
-            sc = 0.05 * dim / res.umax if res.umax > 0 else 0.0
-            sc = 0.0 if sc <= 0 else max(1.0, float(f"{min(sc, 5000.0):.1g}"))
-            vm = view3d.render_result_png(res, self.prj, "vm", str(folder / "reporte_vonmises.png"))
-            de = view3d.render_result_png(res, self.prj, "u", str(folder / "reporte_deformada.png"), sc)
-            if not vm and not de:
-                return None
-            nvm = max(res.vm, key=res.vm.get) if res.vm else None
-            return dict(fast=mesh3d.is_fast_mesh(self.prj), vm_avg=getattr(res, "vm_avg", None),
-                        vm=vm, u=de, scale=sc, n_nodes=res.n_nodes, n_elems=res.n_elems,
-                        umax=res.umax, vmmax=res.vmmax, vm_node=nvm)
-        except Exception:
-            traceback.print_exc()
-            return None
+        self.tabs_out.setCurrentIndex(3)
 
     def fill_3d_tables(self):
+        """Tablas del modelo 3D: soldadura por zona y traccion por perno (3D contra lineal)."""
         from .weld3d import summary_rows
-        import math as _m
-        post = getattr(self, "post3d", None)
+        fem = self._fem_now()
+        post = fem.post if fem is not None else None
         for tb in (self.tbl_w3, self.tbl_b3):
             tb.setRowCount(0)
         if post is None:
             return
-        welds, bolts = summary_rows(self.prj, post)
+        u = self.us
+        welds, _ = summary_rows(self.prj, post)
+        lin = getattr(self.res, "lin", None) if self.res is not None else None
+        tl = list(lin.bolt_T) if (lin is not None and getattr(lin, "ok", False)) else []
+        phi = None
+        try:
+            from .fem_checks import bolt_phiRnt
+            phi = bolt_phiRnt(self.prj)
+        except Exception:
+            pass
+        bolts = [["Perno", f"x ({u.L})", f"y ({u.L})", f"T 3D ({u.F})", f"T lineal ({u.F})",
+                  "3D / lineal", "D/C 3D"]]
+        for (k, x, y, T) in sorted(post.bolts, key=lambda b: -b[3]):
+            tlin = tl[k - 1] if 0 <= k - 1 < len(tl) else None
+            bolts.append([f"P{k}", u.fmt("L", x), u.fmt("L", y), u.fmt("F", T),
+                          "—" if tlin is None else u.fmt("F", tlin),
+                          "—" if (tlin is None or tlin < 1e-6 or T < 1e-6) else f"{T / tlin:.2f}",
+                          f"{T / phi:.3f}" if phi else "—"])
         red, green = QColor("#ffc7ce"), QColor("#c6efce")
-        for tb, rows, dc_cols in ((self.tbl_w3, welds, (5, 6)), (self.tbl_b3, bolts, ())):
+        for tb, rows, dc_cols in ((self.tbl_w3, welds, (5, 6)), (self.tbl_b3, bolts, (6,))):
             tb.setColumnCount(len(rows[0]))
             tb.setHorizontalHeaderLabels(rows[0])
             if tb is self.tbl_w3:
@@ -1390,41 +1271,6 @@ class MainWindow(QMainWindow):
             "repartida en su longitud, que es lo que supone el calculo DG1. La "
             "compresion se transmite por contacto; el cordon se verifica a traccion y "
             "cortante.")
-
-    def fill_bolts(self):
-        """Tabla resumen de tensiones perno por perno (resultado del FEA)."""
-        fr = self.res.fea if self.res else None
-        self.tbl_bolts.setRowCount(0)
-        if fr is None or not fr.ok:
-            return
-        u = self.us
-        self.tbl_bolts.setHorizontalHeaderLabels(
-            ["Perno", f"x ({u.L})", f"y ({u.L})", f"T ({u.F})",
-             f"σt ({u.S})", "D/C", f"T lineal ({u.F})", "T / T lineal"])
-        lin = getattr(self.res, "lin", None)
-        tlin = {}
-        if lin is not None and getattr(lin, "ok", False):
-            tlin = {(round(x, 2), round(y, 2)): T for (x, y), T in zip(lin.bolt_xy, lin.bolt_T)}
-        red, green = QColor("#ffc7ce"), QColor("#c6efce")
-        order = sorted(range(len(fr.bolt_T)), key=lambda i: -fr.bolt_T[i])
-        for i in order:
-            r = self.tbl_bolts.rowCount()
-            self.tbl_bolts.insertRow(r)
-            x, y = fr.bolt_xy[i]
-            tl = tlin.get((round(x, 2), round(y, 2)))
-            vals = [str(i + 1), u.fmt("L", x), u.fmt("L", y), u.fmt("F", fr.bolt_T[i]),
-                    u.fmt("S", fr.bolt_sig[i]), f"{fr.bolt_ratio[i]:.3f}",
-                    "—" if tl is None else u.fmt("F", tl),
-                    "—" if (tl is None or tl < 1e-6 or fr.bolt_T[i] < 1e-6)
-                    else f"{fr.bolt_T[i] / tl:.2f}"]
-            for j, v in enumerate(vals):
-                it = QTableWidgetItem(v)
-                if j:
-                    it.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                if j == 5:
-                    it.setBackground(green if fr.bolt_ratio[i] <= 1 else red)
-                    fo = it.font(); fo.setBold(True); it.setFont(fo)
-                self.tbl_bolts.setItem(r, j, it)
 
     def fill_table(self):
         r = self.res
@@ -1476,7 +1322,7 @@ class MainWindow(QMainWindow):
         self.prj.date = datetime.date.today().isoformat()
         self.book = [self.prj]
         self.cur = 0
-        self.cache3d = {}; self.rep3d_cache = {}; self.rep3d = None
+        self.fem_cache = {}
         self.path = None
         self._switch(0)
 
@@ -1487,7 +1333,7 @@ class MainWindow(QMainWindow):
             return
         try:
             self.book = load_book(fn)
-            self.cache3d = {}; self.rep3d_cache = {}; self.rep3d = None
+            self.fem_cache = {}
             self.path = fn
             self._refresh_material_combos()
             self._switch(0)
@@ -1527,24 +1373,11 @@ class MainWindow(QMainWindow):
 
     # ================================================================ exportar
     def _ensure_results(self):
-        if self.res is None or (self.prj.fea.enabled and self.res.fea is None):
-            self.recalc(fea=True)
-
-    def _attach_3d(self):
-        """El 3D entra al reporte solo si se corrio con el proyecto tal como esta."""
-        ok = (getattr(self, "post3d", None) is not None and
-              getattr(self, "_sig3d", None) == self.prj.to_json())
-        if self.res is not None:
-            self.res.post3d = self.post3d if ok else None
-            if ok:
-                from .linear_checks import apply_3d_validation
-                apply_3d_validation(self.prj, self.res)
-            rc = self.rep3d_cache.get(id(self.prj))
-            self.res.rep3d = rc[1] if (rc and rc[0] == self.prj.to_json()) else None
+        if self.res is None:
+            self.recalc()
 
     def export_pdf(self):
         self._ensure_results()
-        self._attach_3d()
         fn, _ = QFileDialog.getSaveFileName(self, "Memoria de calculo en PDF",
                                             f"Memoria_{self.prj.element}.pdf", "PDF (*.pdf)")
         if not fn:
@@ -1591,7 +1424,6 @@ class MainWindow(QMainWindow):
 
     def export_docx(self):
         self._ensure_results()
-        self._attach_3d()
         fn, _ = QFileDialog.getSaveFileName(self, "Memoria de calculo",
                                             f"Memoria_{self.prj.element}.docx", "Word (*.docx)")
         if not fn:
@@ -1611,33 +1443,6 @@ class MainWindow(QMainWindow):
             paths = report.save_figures(self.prj, self.res, d)
             self._done(f"{len(paths)} imagenes en {d}")
 
-    def export_ccx(self):
-        self.store_ui()
-        fn, _ = QFileDialog.getSaveFileName(self, "Modelo CalculiX",
-                                            f"{self.prj.element or 'placa'}.inp", "CalculiX (*.inp)")
-        if fn:
-            ccx.export_inp(self.prj, fn)
-            self._done(fn)
-
-    def run_ccx(self):
-        self.store_ui()
-        fn, _ = QFileDialog.getSaveFileName(self, "Modelo CalculiX",
-                                            f"{self.prj.element or 'placa'}.inp", "CalculiX (*.inp)")
-        if not fn:
-            return
-        ccx.export_inp(self.prj, fn)
-        QApplication.setOverrideCursor(Qt.WaitCursor)
-        ok, out = ccx.run_ccx(fn, mesh3d.ccx_exe(self.prj.fea.ccx_path))
-        QApplication.restoreOverrideCursor()
-        if ok:
-            u, s = ccx.read_frd_max(str(Path(fn).with_suffix(".frd")))
-            QMessageBox.information(
-                self, "CalculiX",
-                f"Analisis terminado.\n\n|U| max = {u:.4f} in\nvon Mises max = {s:.2f} ksi\n\n"
-                f"Abra el archivo .frd en PrePoMax o CGX para el post-proceso completo.")
-        else:
-            QMessageBox.warning(self, "CalculiX", out[-2500:])
-
     def _done(self, what):
         self.statusBar().showMessage(f"Exportado: {what}", 6000)
         QMessageBox.information(self, "Exportar", f"Archivo generado:\n{what}")
@@ -1648,8 +1453,8 @@ class MainWindow(QMainWindow):
             f"<b>PlacaBasePro {__version__}</b><br>"
             "Diseno y verificacion de placas base para perfiles W, HSS y Pipe.<br><br>"
             "AISC 360-22 · AISC Design Guide 1 (2ª Ed.) · ACI 318-19 Cap. 17<br>"
-            "FEA: placa MITC4 sobre fundacion elastica unilateral con los agujeros "
-            "de perno mallados, y modelo solido 3D via Gmsh + CalculiX.<br><br>"
+            "Reparto lineal de fuerzas en los pernos y modelo solido 3D (Gmsh + CalculiX) "
+            "con el concreto como resortes solo a compresion.<br><br>"
             "Los resultados deben ser revisados por un ingeniero responsable.")
 
     def closeEvent(self, ev):

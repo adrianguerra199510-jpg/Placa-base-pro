@@ -658,7 +658,7 @@ def build_inp(prj: Project, mesh_inp: str, out_inp: str, height: float = 0.0) ->
         return "\n".join(", ".join(str(x) for x in lst[i:i + per])
                          for i in range(0, len(lst), per))
 
-    from .fea import shear_arm
+    from .linear import shear_arm
     # con llave el cortante se devuelve a media altura de la llave (H/2 bajo la cara inferior)
     z_arm = shear_arm(prj) - (0.5 * prj.lug.H if prj.lug.enabled else 0.0)
 

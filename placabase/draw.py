@@ -176,55 +176,6 @@ def elevation_view(ax, prj: Project):
     ax.grid(True, ls=":", lw=0.4, color="#cccccc")
 
 
-def fea_view(ax, prj: Project, fr, field="vm"):
-    ax.clear()
-    if fr is None or not fr.ok:
-        ax.text(0.5, 0.5, "Ejecute el analisis de elementos finitos",
-                ha="center", va="center", transform=ax.transAxes, fontsize=10)
-        ax.set_xticks([]); ax.set_yticks([])
-        return None
-    _u = prj.units()
-    Z, title, cmap = {
-        "vm": (fr.vm_top / _u.fs, f"Esfuerzo de von Mises en la placa  ({_u.S})",
-               "inferno"),
-        "w": (fr.w / _u.fl, f"Deflexion  ({_u.L}, + hacia el concreto)", "viridis"),
-        "p": (fr.press / _u.fs, f"Presion de contacto  ({_u.S})", "YlOrRd"),
-        "mx": (fr.Mx / (_u.ff), f"Momento Mx  ({_u.F}·{_u.L}/{_u.L})", "coolwarm"),
-        "my": (fr.My / (_u.ff), f"Momento My  ({_u.F}·{_u.L}/{_u.L})", "coolwarm"),
-    }[field]
-    # los agujeros de perno y el recorte circular se dejan en blanco
-    Zm = np.array(Z, dtype=float)
-    if getattr(fr, "used", None) is not None:
-        Zm = np.where(fr.used, Zm, np.nan)
-    kk = _u.fl
-    cs = ax.contourf(fr.X / kk, fr.Y / kk, np.ma.masked_invalid(Zm),
-                     levels=24, cmap=cmap)
-    if getattr(fr, "holes_meshed", False):
-        g = prj.bolts.geom()
-        for (bx, by) in G.bolt_positions(prj):
-            ax.add_patch(Circle((bx / kk, by / kk), g.dh / 2 / kk, facecolor="white",
-                                edgecolor="#333333", lw=0.9, zorder=4))
-    out = G.plate_outline(prj)
-    ax.plot([q[0] / kk for q in out], [q[1] / kk for q in out], color="k", lw=1.5)
-    for poly in G.section_polys(prj):
-        ax.plot([q[0] / kk for q in poly], [q[1] / kk for q in poly], color="k",
-                lw=1.2, ls="--")
-    u = prj.units()
-    for i, ((x, y), T) in enumerate(zip(fr.bolt_xy, fr.bolt_T), start=1):
-        ax.plot([x / kk], [y / kk], "o", ms=6, mfc="none", mec="k", mew=1.2)
-        lab = f"P{i}"
-        if T > 1e-3:
-            lab += f"\n{u.fmt('F', T)}"
-        ax.annotate(lab, (x / kk, y / kk), textcoords="offset points", xytext=(0, 8),
-                    ha="center", fontsize=7, fontweight="bold", color="#00407a",
-                    bbox=dict(boxstyle="round,pad=0.12", fc="white", ec="none",
-                              alpha=0.8), zorder=9)
-    ax.set_aspect("equal", adjustable="datalim")
-    ax.set_title(title, fontsize=9, loc="left")
-    ax.set_xlabel(f"X ({u.L})"); ax.set_ylabel(f"Y ({u.L})")
-    return cs
-
-
 def stiffener_detail(ax, prj):
     """Detalle a escala de una pletina rigidizadora."""
     ax.clear()

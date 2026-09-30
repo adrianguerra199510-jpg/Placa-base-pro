@@ -8,90 +8,40 @@ esa distribucion es aplicable.
   · Espesor de la placa (AISC DG1 §3.1 y §3.3) con esa presion y esa traccion.
   · Validez de la hipotesis de placa rigida: el reparto lineal (secciones planas) solo es correcto si
     la placa es lo bastante rigida; ni AISC ni ACI 318 dan un limite numerico, asi que se comprueba
-    contra el analisis de la placa FLEXIBLE del propio programa (2D de Mindlin): la fuerza del perno
-    mas cargado y la traccion total del 2D no deben exceder a las lineales en mas de 10 % (o en mas
-    de 10 % de φRnt cuando la traccion es pequena).  `rigid_thickness` busca el espesor con el que
-    se cumple.
+    contra el modelo solido 3D (placa flexible con el perfil soldado): la fuerza del perno mas
+    cargado y la traccion total del 3D no deben exceder a las lineales en mas de 10 % (o en mas de
+    10 % de φRnt cuando la traccion es pequena).  Sin analisis 3D la comprobacion queda pendiente.
 """
 from __future__ import annotations
-import copy
 import dataclasses
-import math
 
 from .model import Project
 from . import geometry as G
 from .design import Check, Bearing, plate_thickness
 from .linear import LinearResult, linear_bolt_forces
+from .fem_checks import bolt_phiRnt
 
 TOL_REL = 0.10          # desviacion relativa admisible flexible/lineal
 TOL_ABS = 0.10          # ... o 10 % de φRnt (traccion pequena)
 
 
-def bolt_phiRnt(prj: Project) -> float:
-    g, mat = prj.bolts.geom(), prj.bolts.mat()
-    return 0.75 * 0.75 * mat.Fu * g.Ab                       # AISC J3-1: φ·Fnt·Ab, Fnt = 0.75·Fu
-
-
-def rigid_deviation(lin: LinearResult, fea, phiRnt: float) -> dict:
-    """Compara la placa flexible (2D) con la distribucion lineal."""
-    pos2 = {(round(x, 2), round(y, 2)): T for (x, y), T in zip(fea.bolt_xy, fea.bolt_T)}
-    t2 = [pos2.get((round(x, 2), round(y, 2)), 0.0) for (x, y) in lin.bolt_xy]
-    T2max, T2sum = (max(t2) if t2 else 0.0), sum(t2)
+def rigid_deviation(lin: LinearResult, post, phiRnt: float) -> dict:
+    """Compara la placa flexible (modelo 3D) con la distribucion lineal."""
+    t3 = {k - 1: T for (k, x, y, T) in post.bolts}
+    T3 = [t3.get(i, 0.0) for i in range(len(lin.bolt_xy))]
+    T3max, T3sum = (max(T3) if T3 else 0.0), sum(T3)
     Tlmax, Tlsum = lin.T_max, lin.T_sum
     cap_max = max((1 + TOL_REL) * Tlmax, Tlmax + TOL_ABS * phiRnt)
     cap_sum = max((1 + TOL_REL) * Tlsum, Tlsum + TOL_ABS * phiRnt)
-    ok = (T2max <= cap_max + 1e-9) and (T2sum <= cap_sum + 1e-9)
-    return dict(T2max=T2max, T2sum=T2sum, cap_max=cap_max, cap_sum=cap_sum, ok=ok,
-                dev_max=(T2max / Tlmax - 1.0) if Tlmax > 1e-9 else float("inf"),
-                dev_sum=(T2sum / Tlsum - 1.0) if Tlsum > 1e-9 else float("inf"),
-                per_bolt=t2, significant=max(T2max, Tlmax) >= TOL_ABS * phiRnt)
+    ok = (T3max <= cap_max + 1e-9) and (T3sum <= cap_sum + 1e-9)
+    return dict(T3max=T3max, T3sum=T3sum, cap_max=cap_max, cap_sum=cap_sum, ok=ok,
+                dev_max=(T3max / Tlmax - 1.0) if Tlmax > 1e-9 else float("inf"),
+                dev_sum=(T3sum / Tlsum - 1.0) if Tlsum > 1e-9 else float("inf"),
+                per_bolt=T3, significant=max(T3max, Tlmax) >= TOL_ABS * phiRnt)
 
 
-def rigid_thickness(prj: Project, max_factor: float = 8.0) -> dict:
-    """Menor espesor de placa con el que la distribucion lineal es aplicable (ver el criterio
-    de rigid_deviation).  Corre el 2D varias veces (unos segundos).
-    -> dict(tp, ok_actual, dev_actual, applicable)  ·  tp = None si no hay traccion significativa."""
-    from .fea import run_fea
-
-    def evalu(tp):
-        q = copy.deepcopy(prj)
-        q.plate.tp = tp
-        lin = linear_bolt_forces(q)
-        fea = run_fea(q)
-        if not (lin.ok and fea.ok):
-            return None
-        return rigid_deviation(lin, fea, bolt_phiRnt(q))
-
-    d0 = evalu(prj.plate.tp)
-    if d0 is None:
-        return dict(tp=None, ok_actual=False, dev_actual=None, applicable=False)
-    if not d0["significant"]:
-        return dict(tp=None, ok_actual=True, dev_actual=d0["dev_max"], applicable=False)
-    if d0["ok"]:
-        return dict(tp=prj.plate.tp, ok_actual=True, dev_actual=d0["dev_max"], applicable=True)
-    lo, hi = prj.plate.tp, None
-    t = prj.plate.tp
-    while t < max_factor * prj.plate.tp:
-        t *= 1.25
-        d = evalu(t)
-        if d is not None and d["ok"]:
-            hi = t
-            break
-        lo = t
-    if hi is None:
-        return dict(tp=None, ok_actual=False, dev_actual=d0["dev_max"], applicable=True)
-    for _ in range(6):
-        mid = 0.5 * (lo + hi)
-        d = evalu(mid)
-        if d is not None and d["ok"]:
-            hi = mid
-        else:
-            lo = mid
-    return dict(tp=hi, ok_actual=False, dev_actual=d0["dev_max"], applicable=True)
-
-
-def linear_checks(prj: Project, br: Bearing, fea=None, rec=None):
-    """-> (LinearResult, [Check]).  `fea` es el resultado del 2D (o None)."""
+def linear_checks(prj: Project, br: Bearing, fem=None, rec=None):
+    """-> (LinearResult, [Check]).  `fem` es el paquete del analisis 3D vigente (o None)."""
     u = prj.units()
     lin = linear_bolt_forces(prj)
     out: list[Check] = []
@@ -111,7 +61,7 @@ def linear_checks(prj: Project, br: Bearing, fea=None, rec=None):
         return lin, out
 
     if rec:
-        rec.add("ks", "Ec / max(6 in ; hped)", "", lin.ks, "K", "", "modulo de balasto (igual al del 2D y el 3D)")
+        rec.add("ks", "Ec / max(6 in ; hped)", "", lin.ks, "K", "", "modulo de balasto (el mismo del modelo 3D)")
         rec.add("kb", "Es·Ase / (hef + tp + mortero)", "", lin.kb, "LF", "", "rigidez axial de un perno")
         rec.add("e", "brazo del cortante", "", lin.arm, "L")
         rec.add("Mx'", "|Mux| − e·Vuy", "", lin.Mx, "M")
@@ -179,23 +129,24 @@ def linear_checks(prj: Project, br: Bearing, fea=None, rec=None):
         out.append(Check("lin_tp", "Espesor de la placa con la distribucion lineal (DG1)", 0.0, 1.0,
                          "in", "DG1", f"no evaluado: {e}", skip=True))
 
-    # ---- validez de la hipotesis de placa rigida
-    if fea is not None and getattr(fea, "ok", False):
-        d = rigid_deviation(lin, fea, phiRnt)
-        note = (f"Placa flexible (2D): perno max {u.q('F', d['T2max'])} contra {u.q('F', lin.T_max)} "
-                f"lineal ({100 * d['dev_max']:+.0f} %), ΣT {u.q('F', d['T2sum'])} contra "
+    # ---- validez de la hipotesis de placa rigida (contra el modelo solido 3D)
+    post = getattr(fem, "post", None)
+    if post is not None and getattr(post, "bolts", None):
+        d = rigid_deviation(lin, post, phiRnt)
+        note = (f"Modelo solido 3D (placa flexible con el perfil soldado): perno max "
+                f"{u.q('F', d['T3max'])} contra {u.q('F', lin.T_max)} lineal "
+                f"({100 * d['dev_max']:+.0f} %), ΣT {u.q('F', d['T3sum'])} contra "
                 f"{u.q('F', lin.T_sum)} ({100 * d['dev_sum']:+.0f} %). Admisible: ≤ 10 % "
                 f"(o ≤ 10 % de φRnt con traccion pequena). Si no se cumple, la placa no es rigida y "
-                f"la distribucion lineal SUBESTIMA la traccion: use la del 2D/3D o aumente tp.")
-        # relacion de la condicion mas desfavorable (perno mas cargado o traccion total)
-        r_eff = max(d["T2max"] / max(d["cap_max"], 1e-12), d["T2sum"] / max(d["cap_sum"], 1e-12))
-        out.append(Check("lin_rigid", "Validez de la distribucion lineal — placa rigida",
+                f"la distribucion lineal SUBESTIMA la traccion: use el metodo 'Modelo 3D' o aumente tp.")
+        r_eff = max(d["T3max"] / max(d["cap_max"], 1e-12), d["T3sum"] / max(d["cap_sum"], 1e-12))
+        out.append(Check("lin_rigid", "Validez de la distribucion lineal — placa rigida (verificada con el 3D)",
                          r_eff * d["cap_max"], d["cap_max"], "kip", "criterio del programa (ACI 318 Cap. 17 / "
                          "EN 1992-4: distribucion plana solo con placa rigida)", note,
                          skip=not d["significant"]))
         if rec:
-            rec.add("Tmax placa flexible", "analisis 2D de Mindlin", "", d["T2max"], "F")
-            rec.add("Desviacion", "Tmax,2D / Tmax,lineal − 1",
+            rec.add("Tmax modelo 3D", "reaccion en los resortes de los pernos", "", d["T3max"], "F")
+            rec.add("Desviacion", "Tmax,3D / Tmax,lineal − 1",
                     f"{100 * d['dev_max']:+.1f} %", None, "-", "",
                     "placa rigida si ≤ 10 % (o ≤ 10 % de φRnt)")
             rec.check("Distribucion lineal aplicable (placa rigida)", r_eff * d["cap_max"],
@@ -206,42 +157,3 @@ def linear_checks(prj: Project, br: Bearing, fea=None, rec=None):
         rec.check("Aplastamiento (distribucion lineal)", lin.p_max, br.fp_max, "S",
                   lin.p_max / br.fp_max if br.fp_max > 0 else 0, lin.p_max <= br.fp_max, "AISC J8")
     return lin, out
-
-
-def apply_3d_validation(prj: Project, res) -> bool:
-    """Si hay un analisis 3D vigente (res.post3d), valida la placa rigida contra EL 3D en vez del 2D.
-    El 2D no incluye la rigidez del perfil soldado sobre la placa y por eso sobrestima la flexibilidad;
-    el modelo solido si la incluye.  Reemplaza la fila `lin_rigid` de los resultados.  -> True si se aplico."""
-    lin, post = getattr(res, "lin", None), getattr(res, "post3d", None)
-    if lin is None or post is None or not getattr(lin, "ok", False) or not getattr(post, "bolts", None):
-        return False
-    u = prj.units()
-    phiRnt = bolt_phiRnt(prj)
-    t3 = {k - 1: T for (k, x, y, T) in post.bolts}
-    T3 = [t3.get(i, 0.0) for i in range(len(lin.bolt_xy))]
-    T3max, T3sum = max(T3) if T3 else 0.0, sum(T3)
-    cap_max = max((1 + TOL_REL) * lin.T_max, lin.T_max + TOL_ABS * phiRnt)
-    cap_sum = max((1 + TOL_REL) * lin.T_sum, lin.T_sum + TOL_ABS * phiRnt)
-    r_eff = max(T3max / max(cap_max, 1e-12), T3sum / max(cap_sum, 1e-12))
-    significant = max(T3max, lin.T_max) >= TOL_ABS * phiRnt
-    dev_max = (T3max / lin.T_max - 1.0) if lin.T_max > 1e-9 else float("inf")
-    dev_sum = (T3sum / lin.T_sum - 1.0) if lin.T_sum > 1e-9 else float("inf")
-    note = (f"Verificado con el modelo solido 3D (incluye el perfil soldado): perno max {u.q('F', T3max)} "
-            f"contra {u.q('F', lin.T_max)} lineal ({100 * dev_max:+.0f} %), ΣT {u.q('F', T3sum)} contra "
-            f"{u.q('F', lin.T_sum)} ({100 * dev_sum:+.0f} %). Admisible: ≤ 10 % "
-            f"(o ≤ 10 % de φRnt con traccion pequena).")
-    new = Check("lin_rigid", "Validez de la distribucion lineal — placa rigida (verificada con el 3D)",
-                r_eff * cap_max, cap_max, "kip", "criterio del programa (ACI 318 Cap. 17 / EN 1992-4: "
-                "distribucion plana solo con placa rigida)", note, skip=not significant)
-    done = False
-    for lst in (getattr(res, "checks", []), getattr(res, "lin_checks", [])):
-        for i, c in enumerate(lst):
-            if c.key == "lin_rigid":
-                lst[i] = new
-                done = True
-    if not done:
-        if prj.bolts.force_method.startswith("Lineal"):
-            res.checks.append(new)
-        else:
-            res.lin_checks.append(new)
-    return True

@@ -10,7 +10,8 @@ import dataclasses
 
 # --------------------------------------------------------------- catalogos
 BOLT_FORCE_METHODS = ["DG1 (Tu repartida por igual entre los pernos traccionados)",
-                      "Lineal elastico (placa rigida, secciones planas)"]
+                      "Lineal elastico (placa rigida, secciones planas)",
+                      "Modelo 3D (fuerza del perno del analisis solido)"]
 MESH3D_MODES = ["Rapida (recomendada, ~30 s)", "Automatica (fina, ~3 min)"]
 PATTERNS = ["Perimetral (4 lados)", "2 lados (eje mayor)",
             "2 lados (eje menor)", "Circular", "Coordenadas manuales"]
@@ -347,20 +348,16 @@ class Loads:
 
 @dataclass
 class FEAOpts:
-    enabled: bool = True
-    nx: int = 26                 # divisiones de malla en X
-    ny: int = 26
+    """Opciones del analisis de elementos finitos SOLIDO 3D (Gmsh + CalculiX) y de sus datos comunes
+    con el calculo lineal (modulo de balasto, brazo del cortante)."""
     ks_mode: str = "Ec/hped"     # o "manual"
     ks_manual: float = 1000.0    # kip/in^3
-    max_iter: int = 40
-    export_ccx: bool = False
     ccx_path: str = "ccx"
-    holes: bool = True           # modelar los agujeros de perno en la malla
     gmsh_path: str = "gmsh"
     mesh3d: float = 0.0          # tamano de malla 3D (0 = automatico)
     mesh3d_mode: str = "Rapida (recomendada, ~30 s)"   # ver MESH3D_MODES
     shear_arm: float = -1.0      # brazo del cortante sobre la placa, in (-1 = automatico)
-    vm_avg_factor: float = 1.0  # radio de promedio del von Mises 3D, en espesores de placa
+    vm_avg_factor: float = 1.0   # radio de promedio del von Mises 3D, en espesores de placa
 
 
 @dataclass
@@ -408,6 +405,18 @@ class Project:
     # ------------------------------------------------------------ io
     def to_json(self) -> str:
         return json.dumps(asdict(self), indent=1, ensure_ascii=False)
+
+    def sig3d(self) -> str:
+        """Firma de lo que define el modelo solido 3D: cambia si cambia la geometria, las cargas, los
+        materiales, las soldaduras o las opciones de malla; NO si solo cambian el nombre, el autor,
+        las unidades de presentacion o el metodo de reparto de fuerzas."""
+        d = asdict(self)
+        for k in ("name", "element", "author", "date", "metric", "u_len", "u_force", "u_stress", "u_moment"):
+            d.pop(k, None)
+        d.get("bolts", {}).pop("force_method", None)
+        d.get("fea", {}).pop("ccx_path", None)
+        d.get("fea", {}).pop("gmsh_path", None)
+        return json.dumps(d, sort_keys=True, ensure_ascii=False)
 
     @staticmethod
     def from_json(txt: str) -> "Project":

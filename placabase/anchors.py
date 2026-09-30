@@ -19,7 +19,7 @@ def _sqrt_fc_psi(fc_ksi: float) -> float:
 
 
 def anchor_checks(prj: Project, br: Bearing,
-                  rec: Recorder | None = None) -> list[Check]:
+                  rec: Recorder | None = None, fem=None) -> list[Check]:
     b, c, L = prj.bolts, prj.conc, prj.eloads
     g = b.geom()
     mat = b.mat()
@@ -51,9 +51,23 @@ def anchor_checks(prj: Project, br: Bearing,
         xtmin, xtmax, ytmin, ytmax = min(xs_), max(xs_), min(ys_), max(ys_)
         elastic = True
     linear_mode = False
-    if b.force_method.startswith("Lineal"):
-        # fuerza de cada perno por distribucion lineal (placa rigida): el grupo traccionado son
-        # los pernos con T > 0 y el perno de diseno es el mas cargado
+    force_src = ""
+    if b.force_method.startswith("Modelo 3D") and fem is not None and getattr(fem.post, "bolts", None):
+        # fuerza de cada perno del analisis solido 3D: el grupo traccionado son los pernos con T > 0
+        tb = {k - 1: T for (k, x, y, T) in fem.post.bolts}
+        Ts = [tb.get(i, 0.0) for i in range(len(pos))]
+        if max(Ts, default=0.0) > 1e-9:
+            grp = [q for q, t in zip(pos, Ts) if t > 1e-9]
+            n_t = len(grp)
+            Nua, Nua_b = sum(Ts), max(Ts)
+            xs_ = [q[0] for q in grp]; ys_ = [q[1] for q in grp]
+            xtmin, xtmax, ytmin, ytmax = min(xs_), max(xs_), min(ys_), max(ys_)
+            elastic = True
+            linear_mode = True
+            force_src = "3D"
+    elif b.force_method.startswith(("Lineal", "Modelo 3D")):
+        # fuerza de cada perno por distribucion lineal (placa rigida); con "Modelo 3D" es la
+        # aproximacion mientras no exista un analisis 3D vigente
         from .linear import linear_bolt_forces
         _lin = linear_bolt_forces(prj)
         if _lin.ok and _lin.T_max > 1e-9:
@@ -64,6 +78,7 @@ def anchor_checks(prj: Project, br: Bearing,
             xtmin, xtmax, ytmin, ytmax = min(xs_), max(xs_), min(ys_), max(ys_)
             elastic = True
             linear_mode = True
+            force_src = "lineal"
     Vua = 0.0 if prj.lug.enabled else prj.eloads.Vu
     if prj.eloads.friction and not prj.lug.enabled and L.Pu > 0:
         Vfric = prj.eloads.mu_fric * L.Pu
@@ -100,7 +115,11 @@ def anchor_checks(prj: Project, br: Bearing,
         rec.section("D.  PERNOS DE ANCLAJE — ACERO  (AISC 360 Cap. J3)")
         rec.add("Nua", "Tu (del equilibrio)", "", Nua, "F", "",
                 "traccion total del grupo")
-        if linear_mode:
+        if linear_mode and force_src == "3D":
+            rec.add("Nua,perno", "Tmax del analisis solido 3D",
+                    "ver seccion I: reaccion en los resortes de los pernos",
+                    Nua_b, "F", "", "el grupo traccionado son los pernos con T > 0")
+        elif linear_mode:
             rec.add("Nua,perno", "Tmax de la distribucion lineal (placa rigida)",
                     "ver seccion J: fuerza proporcional a la distancia al eje neutro",
                     Nua_b, "F", "", "el grupo traccionado son los pernos con T > 0")

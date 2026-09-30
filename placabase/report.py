@@ -78,42 +78,44 @@ def input_rows(prj: Project, us: UnitSet) -> list[tuple[str, str]]:
     ]
 
 
-def bolt_rows(res: Results, us: UnitSet):
-    """(encabezados, filas) de la tabla de tensiones perno por perno."""
-    fr = getattr(res, "fea", None)
-    if fr is None or not fr.ok or not getattr(fr, "bolt_T", None):
+def _fem_of(res):
+    return getattr(res, "fem", None)
+
+
+def bolt_rows(prj: Project, res: Results, us: UnitSet):
+    """(encabezados, filas) de la tabla de traccion por perno: modelo 3D contra distribucion lineal."""
+    fem = _fem_of(res)
+    post = getattr(fem, "post", None)
+    if post is None or not getattr(post, "bolts", None):
         return None, []
-    hdr = ["Perno", f"x ({us.L})", f"y ({us.L})", f"T ({us.F})",
-           f"σt ({us.S})", "D/C"]
-    orden = sorted(range(len(fr.bolt_T)), key=lambda i: -fr.bolt_T[i])
+    lin = getattr(res, "lin", None)
+    tl = list(lin.bolt_T) if (lin is not None and getattr(lin, "ok", False)) else []
+    hdr = ["Perno", f"x ({us.L})", f"y ({us.L})", f"T 3D ({us.F})", f"T lineal ({us.F})", "D/C 3D"]
+    from .fem_checks import bolt_phiRnt
+    phi = bolt_phiRnt(prj)
     filas = []
-    for i in orden:
-        x, y = fr.bolt_xy[i]
-        filas.append([f"P{i + 1}", us.fmt("L", x), us.fmt("L", y),
-                      us.fmt("F", fr.bolt_T[i]), us.fmt("S", fr.bolt_sig[i]),
-                      f"{fr.bolt_ratio[i]:.3f}"])
+    for (k, x, y, T) in sorted(post.bolts, key=lambda b_: -b_[3]):
+        t_l = tl[k - 1] if 0 <= k - 1 < len(tl) else None
+        filas.append([f"P{k}", us.fmt("L", x), us.fmt("L", y), us.fmt("F", T),
+                      "—" if t_l is None else us.fmt("F", t_l),
+                      f"{T / phi:.3f}" if phi else "—"])
     return hdr, filas
 
 
 def lin_section(prj: Project, res: Results, us: UnitSet):
     """Datos de la seccion 'Fuerza por perno — distribucion lineal (placa rigida)'.
-    -> None si no hay resultado, o dict(hdr, rows, checks, verdict, tp_rigid, lines)."""
+    -> None si no hay resultado, o dict(hdr, rows, checks, verdict, lines)."""
     lin = getattr(res, "lin", None)
     if lin is None or not getattr(lin, "ok", False):
         return None
-    from .linear_checks import bolt_phiRnt, rigid_thickness
+    from .fem_checks import bolt_phiRnt
     phi = bolt_phiRnt(prj)
-    fr = getattr(res, "fea", None)
-    t2 = {}
-    if fr is not None and fr.ok:
-        t2 = {(round(x, 2), round(y, 2)): T for (x, y), T in zip(fr.bolt_xy, fr.bolt_T)}
-    post = getattr(res, "post3d", None)
+    fem = _fem_of(res)
+    post = getattr(fem, "post", None)
     t3 = {}
     if post is not None:
         t3 = {k - 1: T for (k, x, y, T) in post.bolts}
     hdr = ["Perno", f"x ({us.L})", f"y ({us.L})", f"T lineal ({us.F})", "D/C lineal"]
-    if t2:
-        hdr.append(f"T 2D ({us.F})")
     if t3:
         hdr.append(f"T 3D ({us.F})")
     order = sorted(range(len(lin.bolt_T)), key=lambda i: -lin.bolt_T[i])
@@ -122,8 +124,6 @@ def lin_section(prj: Project, res: Results, us: UnitSet):
         x, y = lin.bolt_xy[i]
         row = [f"P{i + 1}", us.fmt("L", x), us.fmt("L", y), us.fmt("F", lin.bolt_T[i]),
                f"{lin.bolt_T[i] / phi:.3f}" if phi > 0 else "-"]
-        if t2:
-            row.append(us.fmt("F", t2.get((round(x, 2), round(y, 2)), 0.0)))
         if t3:
             row.append(us.fmt("F", t3.get(i, 0.0)))
         rows.append(row)
@@ -140,31 +140,49 @@ def lin_section(prj: Project, res: Results, us: UnitSet):
                          "n/a" if c.skip else ("CUMPLE" if c.ok else "NO CUMPLE")])
     rig = cks.get("lin_rigid")
     if rig is None:
-        verdict = ("Validez de la hipotesis de placa rigida: NO VERIFICADA (requiere el analisis 2D "
+        verdict = ("Validez de la hipotesis de placa rigida: NO VERIFICADA (requiere el analisis 3D "
                    "de la placa flexible).")
     elif rig.skip:
         verdict = ("La traccion en los pernos es pequena: la distribucion lineal no es determinante.")
     elif rig.ok:
-        verdict = ("La distribucion lineal ES APLICABLE: la placa flexible (2D) no excede a la "
+        verdict = ("La distribucion lineal ES APLICABLE: la placa flexible (modelo 3D) no excede a la "
                    "lineal en mas de 10 %.")
     else:
         verdict = ("La distribucion lineal NO ES APLICABLE con el espesor actual: la placa es flexible "
                    "y el reparto lineal SUBESTIMA la traccion. " + rig.note)
-    tpr = None
-    if rig is not None and not rig.skip:
-        try:
-            cache = getattr(res, "_tp_rigid", None)
-            if cache is None:
-                cache = rigid_thickness(prj)
-                res._tp_rigid = cache
-            tpr = cache
-        except Exception:
-            tpr = None
     lines = [lin.msg,
              (f"Hipotesis: w = a + b·x + c·y con a = {lin.a:.4g}, b = {lin.b:.4g}, c = {lin.c:.4g}; "
               f"ks = {us.q('K', lin.ks)}, kb = {us.q('LF', lin.kb)}, brazo del cortante e = "
               f"{us.q('L', lin.arm)}.")]
-    return dict(hdr=hdr, rows=rows, checks=chk_rows, verdict=verdict, tp_rigid=tpr, lines=lines)
+    return dict(hdr=hdr, rows=rows, checks=chk_rows, verdict=verdict, lines=lines)
+
+
+def fem_section(prj: Project, res: Results, us: UnitSet):
+    """Contenido de las secciones del modelo solido 3D.  -> None si no hay un 3D vigente."""
+    fem = _fem_of(res)
+    if fem is None or fem.post is None:
+        return None
+    from .weld3d import summary_rows
+    post, rep = fem.post, (fem.rep or {})
+    intro = ("Modelo solido de tetraedros cuadraticos (Gmsh + CalculiX): placa con los agujeros "
+             "taladrados, perfil, rigidizadores y llave; concreto como resortes de Winkler solo a "
+             "compresion y pernos como resortes solo a traccion (paso no lineal). La compresion "
+             "perfil-placa se transmite por contacto; el cordon se verifica a traccion y cortante "
+             "con el metodo vectorial de AISC J2.4. D/C pico = punto mas cargado (concentracion "
+             "elastica local); D/C media = fuerza de la pared repartida en su longitud.")
+    weld_rows, _ = summary_rows(prj, post)
+    b_hdr, b_rows = bolt_rows(prj, res, us)
+    plan = rep.get("plan") or {}
+    figs = [(plan.get("top"), "Placa aislada, cara superior: von Mises promediado (etiqueta: esfuerzo maximo)"),
+            (plan.get("bot"), "Placa aislada, cara inferior (apoyada en el mortero): von Mises promediado"),
+            (plan.get("press"), "Presion de contacto sobre el concreto y traccion en cada perno"),
+            (plan.get("uz"), "Desplazamiento vertical de la cara superior de la placa")]
+    figs = [(a, b) for a, b in figs if a]
+    persp = [(rep.get("vm"), "Vista 3D: esfuerzo de von Mises (etiqueta: esfuerzo maximo)"),
+             (rep.get("u"), "Vista 3D: desplazamiento |U| sobre la geometria deformada")]
+    persp = [(a, b) for a, b in persp if a]
+    return dict(intro=intro, msg=f"Equilibrio: {post.msg}.", weld_rows=weld_rows, b_hdr=b_hdr, b_rows=b_rows,
+                figs=figs, persp=persp, lines=_rep3d_lines(prj, us, rep) if rep else [])
 
 
 def render_3d_png(prj: Project, path: str, size=(6.4, 4.6), dpi=170) -> str | None:
@@ -214,6 +232,14 @@ def _rep3d_lines(prj: Project, us, rep: dict) -> list[str]:
     return out
 
 
+_FEM_PNGS = ("planta_vm_sup.png", "planta_vm_inf.png", "planta_presion.png", "planta_uz.png")
+
+
+def annex_figs(figs):
+    """Dibujos del anexo grafico: los mapas del 3D ya estan en su seccion, no se repiten."""
+    return [fp for fp in (figs or []) if Path(fp).name not in _FEM_PNGS]
+
+
 def save_figures(prj: Project, res: Results, folder: str) -> list[str]:
     f = Path(folder)
     f.mkdir(parents=True, exist_ok=True)
@@ -229,14 +255,18 @@ def save_figures(prj: Project, res: Results, folder: str) -> list[str]:
     fig.tight_layout()
     p2 = f / "elevacion.png"; fig.savefig(p2); plt.close(fig); paths.append(str(p2))
 
-    if res.fea is not None and res.fea.ok:
-        for key, name in (("vm", "fea_vonmises"), ("p", "fea_presion"), ("w", "fea_deflexion")):
-            fig, ax = plt.subplots(figsize=(6.5, 6.0), dpi=150)
-            cs = draw.fea_view(ax, prj, res.fea, key)
-            if cs is not None:
-                fig.colorbar(cs, ax=ax, shrink=0.85)
-            fig.tight_layout()
-            pp = f / f"{name}.png"; fig.savefig(pp); plt.close(fig); paths.append(str(pp))
+    fs = fem_section(prj, res, _units(prj))
+    if fs:
+        # placa aislada en planta con los resultados del modelo solido 3D
+        for i, (fp, cap) in enumerate(fs["figs"]):
+            try:
+                import shutil
+                dst = f / Path(fp).name
+                if Path(fp).resolve() != dst.resolve():
+                    shutil.copyfile(fp, dst)
+                paths.append(str(dst))
+            except Exception:
+                pass
     return paths
 
 
@@ -390,32 +420,34 @@ def export_xlsx(prj: Project, res: Results, path: str,
             except Exception:
                 pass
 
-    # --- hoja FEA
-    if res.fea is not None and res.fea.ok:
-        ws3 = wb.create_sheet("FEA")
+    # --- hoja FEM 3D
+    fem = getattr(res, "fem", None)
+    if fem is not None and fem.post is not None:
+        ws3 = wb.create_sheet("FEM 3D")
         ws3.sheet_view.showGridLines = False
         ws3.column_dimensions["B"].width = 46
         ws3.column_dimensions["C"].width = 18
-        rows = [("Malla", f"{prj.fea.nx} × {prj.fea.ny}"),
-                ("Iteraciones de contacto", res.fea.iters),
-                (f"Deflexion maxima ({usx.L})", usx.out("L", res.fea.w_max)),
-                (f"Presion de contacto maxima ({usx.S})", usx.out("S", res.fea.press_max)),
-                (f"von Mises maximo ({usx.S})", usx.out("S", res.fea.vm_max)),
-                (f"Reaccion del concreto ({usx.F})", usx.out("F", res.fea.R_found)),
-                (f"Traccion total en pernos ({usx.F})", usx.out("F", res.fea.R_bolts)),
-                (f"Carga aplicada ΣF ({usx.F})", usx.out("F", res.fea.sumF)),
-                (f"Demanda de soldadura ({usx.F}/{usx.L})",
-                 usx.out("LF", res.fea.weld_line_max))]
+        post = fem.post
+        va = fem.vm_avg
+        rows = [("Nodos", fem.n_nodes), ("Tetraedros", fem.n_elems),
+                (f"Desplazamiento maximo |U| ({usx.L})", usx.out("L", fem.umax)),
+                (f"Presion de contacto maxima ({usx.S})", usx.out("S", post.p_max)),
+                (f"von Mises puntual maximo ({usx.S}) — no converge", usx.out("S", fem.vmmax)),
+                (f"Reaccion del concreto ({usx.F})", usx.out("F", post.R_conc)),
+                (f"Traccion total en pernos ({usx.F})", usx.out("F", post.T_bolts))]
+        if va:
+            rows.insert(4, (f"von Mises PROMEDIADO maximo ({usx.S}), r = {usx.out('L', va['radius']):.3g} {usx.L}",
+                            usx.out("S", va["vm"])))
         rr = 2
-        ws3["B1"] = "ELEMENTOS FINITOS — RESULTADOS"; ws3["B1"].font = Font(name=F, size=12, bold=True)
+        ws3["B1"] = "MODELO SOLIDO 3D — RESULTADOS"; ws3["B1"].font = Font(name=F, size=12, bold=True)
         for k, v in rows:
             ws3[f"B{rr}"] = k; ws3[f"B{rr}"].font = N
             ws3[f"C{rr}"] = v; ws3[f"C{rr}"].font = B
             rr += 1
         rr += 1
-        ws3[f"B{rr}"] = "TENSIONES PERNO POR PERNO"; ws3[f"B{rr}"].font = B
+        ws3[f"B{rr}"] = "TRACCION PERNO POR PERNO"; ws3[f"B{rr}"].font = B
         rr += 1
-        hdr, filas = bolt_rows(res, usx)
+        hdr, filas = bolt_rows(prj, res, usx)
         if hdr:
             for j, htxt in enumerate(hdr):
                 cc = ws3.cell(row=rr, column=2 + j, value=htxt); cc.font = B
@@ -431,9 +463,9 @@ def export_xlsx(prj: Project, res: Results, path: str,
                         val = vtxt
                     cc = ws3.cell(row=rr, column=2 + j, value=val)
                     cc.font = N
-                    if j == 5:
+                    if j == 5 and isinstance(val, float):
                         cc.font = B
-                        cc.fill = grn if float(fila[5]) <= 1.0 else red
+                        cc.fill = grn if val <= 1.0 else red
                 rr += 1
 
     if detail and res.rec is not None:
@@ -546,6 +578,11 @@ def export_docx(prj: Project, res: Results, path: str,
     pv.add_run(f"   D/C maximo = {res.max_ratio:.3f}" +
                (f"   (gobierna: {gov.title})" if gov else ""))
 
+    if res.warnings:
+        doc.add_heading("4. Avisos", level=1)
+        for wmsg in res.warnings:
+            doc.add_paragraph(wmsg, style="List Bullet")
+
     _ls = lin_section(prj, res, us)
     if _ls:
         doc.add_heading("5. Fuerza por perno — distribucion lineal (placa rigida)", level=1)
@@ -573,70 +610,49 @@ def export_docx(prj: Project, res: Results, path: str,
         pv = doc.add_paragraph()
         pv.add_run("Validez: ").bold = True
         pv.add_run(_ls["verdict"])
-        if _ls["tp_rigid"] and _ls["tp_rigid"].get("tp"):
-            doc.add_paragraph(f"Espesor de placa con el que la distribucion lineal es aplicable: "
-                              f"tp ≥ {us.q('L', _ls['tp_rigid']['tp'])} (actual {us.q('L', prj.plate.tp)}).")
 
-    if res.warnings:
-        doc.add_heading("4. Avisos", level=1)
-        for wmsg in res.warnings:
-            doc.add_paragraph(wmsg, style="List Bullet")
-
-    if res.fea is not None and res.fea.ok:
-        doc.add_heading("6. Elementos finitos", level=1)
-        doc.add_paragraph(
-            f"Placa de Mindlin-Reissner (cuadrilateros de 4 nodos, integracion reducida "
-            f"selectiva) sobre fundacion elastica de Winkler solo a compresion, con resortes "
-            f"de perno solo a traccion.  Malla {prj.fea.nx}×{prj.fea.ny}.  {res.fea.msg}")
-        doc.add_paragraph(
-            f"Deflexion maxima = {us.q('L', res.fea.w_max)};  presion de contacto maxima = "
-            f"{us.q('S', res.fea.press_max)};  von Mises maximo = {us.q('S', res.fea.vm_max)};  "
-            f"traccion maxima en un perno = "
-            f"{us.q('F', max(res.fea.bolt_T) if res.fea.bolt_T else 0.0)}.")
-
-        hdr, filas = bolt_rows(res, us)
-        if hdr:
-            doc.add_paragraph().add_run("Tensiones perno por perno").bold = True
-            tb = doc.add_table(rows=1, cols=len(hdr))
+    _fs = fem_section(prj, res, us)
+    if _fs:
+        doc.add_heading("6. Modelo solido 3D — pernos y soldadura", level=1)
+        doc.add_paragraph(_fs["intro"])
+        doc.add_paragraph(_fs["msg"])
+        doc.add_paragraph().add_run("Soldadura perfil-placa").bold = True
+        rows_w = _fs["weld_rows"]
+        tb = doc.add_table(rows=0, cols=len(rows_w[0]))
+        tb.style = "Light Grid Accent 1"
+        for i, r in enumerate(rows_w):
+            cel = tb.add_row().cells
+            for j, v in enumerate(r):
+                cel[j].text = ""
+                run = cel[j].paragraphs[0].add_run(str(v))
+                run.font.size = Pt(8)
+                run.bold = (i == 0)
+        if _fs["b_hdr"]:
+            doc.add_paragraph().add_run("Traccion por perno").bold = True
+            tb = doc.add_table(rows=1, cols=len(_fs["b_hdr"]))
             tb.style = "Light Grid Accent 1"
-            for j, htxt in enumerate(hdr):
-                cel = tb.rows[0].cells[j]
-                cel.text = ""
-                cel.paragraphs[0].add_run(htxt).bold = True
-            for fila in filas:
+            for j, htxt in enumerate(_fs["b_hdr"]):
+                tb.rows[0].cells[j].text = ""
+                tb.rows[0].cells[j].paragraphs[0].add_run(htxt).bold = True
+            for fila in _fs["b_rows"]:
                 cel = tb.add_row().cells
                 for j, vtxt in enumerate(fila):
                     cel[j].text = ""
-                    run = cel[j].paragraphs[0].add_run(vtxt)
-                    run.font.size = Pt(8)
-                    if j == 5:
-                        run.bold = True
-
-    post = getattr(res, "post3d", None)
-    if post is not None:
-        from .weld3d import summary_rows
-        doc.add_heading("7. Modelo solido 3D — soldadura y pernos", level=1)
-        doc.add_paragraph("Modelo solido de tetraedros cuadraticos (Gmsh + CalculiX): placa con los agujeros "
-            "taladrados, perfil, rigidizadores y llave; concreto como resortes solo a "
-            "compresion y pernos solo a traccion (paso no lineal). La fuerza en la "
-            "soldadura se obtiene integrando en el espesor de cada pared los esfuerzos "
-            "del perfil justo por encima del pie del cordon. La compresion se transmite "
-            "por contacto (DG1); el cordon se verifica a traccion y cortante con el "
-            "metodo vectorial de AISC J2.4. D/C pico = punto mas cargado (concentracion "
-            "elastica local); D/C media = fuerza de la pared repartida en su longitud.")
-        doc.add_paragraph(f"Equilibrio: {post.msg}.")
-        for titulo, rows in zip(("Soldadura perfil-placa", "Traccion por perno"),
-                                summary_rows(prj, post)):
-            doc.add_paragraph().add_run(titulo).bold = True
-            tb = doc.add_table(rows=0, cols=len(rows[0]))
-            tb.style = "Light Grid Accent 1"
-            for i, r in enumerate(rows):
-                cel = tb.add_row().cells
-                for j, v in enumerate(r):
-                    cel[j].text = ""
-                    run = cel[j].paragraphs[0].add_run(str(v))
-                    run.font.size = Pt(8)
-                    run.bold = (i == 0)
+                    cel[j].paragraphs[0].add_run(vtxt).font.size = Pt(8)
+        doc.add_heading("7. Placa base aislada — resultados del modelo 3D en planta", level=1)
+        for i, ln in enumerate(_fs["lines"]):
+            run = doc.add_paragraph().add_run(ln)
+            if ln.startswith("ESFUERZO MAXIMO"):
+                run.bold = True
+        for fp, cap in _fs["figs"] + _fs["persp"]:
+            try:
+                doc.add_picture(fp, width=Inches(5.6))
+                doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                c_ = doc.add_paragraph(cap)
+                c_.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                c_.runs[0].italic = True
+            except Exception:
+                pass
 
     if detail and res.rec is not None:
         doc.add_page_break()
@@ -658,28 +674,7 @@ def export_docx(prj: Project, res: Results, path: str,
                 run.italic = True
                 run.font.color.rgb = RGBColor(0x55, 0x55, 0x55)
 
-    rep3d = getattr(res, "rep3d", None)
-    if rep3d:
-        n_sec = 8 if getattr(res, "post3d", None) is not None else 7
-        doc.add_heading(f"{n_sec}. Modelo solido 3D — esfuerzos de von Mises y deformaciones",
-                        level=1)
-        for i, ln in enumerate(_rep3d_lines(prj, us, rep3d)):
-            pp = doc.add_paragraph()
-            run = pp.add_run(ln)
-            if ln.startswith("ESFUERZO MAXIMO"):
-                run.bold = True
-        for key, cap in (("vm", "Esfuerzo de von Mises (etiqueta: esfuerzo maximo)"),
-                         ("u", "Desplazamiento |U| sobre la geometria deformada")):
-            if rep3d.get(key):
-                try:
-                    doc.add_picture(rep3d[key], width=Inches(5.6))
-                    doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    c_ = doc.add_paragraph(cap)
-                    c_.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    c_.runs[0].italic = True
-                except Exception:
-                    pass
-
+    figs = annex_figs(figs)
     if figs:
         doc.add_page_break()
         doc.add_heading("Anexo B — Dibujos y resultados graficos", level=1)
@@ -877,44 +872,14 @@ def export_pdf(prj: Project, res: Results, path: str,
                              cst))
         story.append(Spacer(1, 4))
         story.append(Paragraph(f"<b>Validez:</b> {_ls['verdict']}", BODY))
-        if _ls["tp_rigid"] and _ls["tp_rigid"].get("tp"):
-            story.append(Paragraph(
-                f"Espesor de placa con el que la distribucion lineal es aplicable: "
-                f"<b>tp ≥ {us.q('L', _ls['tp_rigid']['tp'])}</b> (actual {us.q('L', prj.plate.tp)}).", BODY))
 
-    # --------------------------------------------- 6. FEA
-    if res.fea is not None and res.fea.ok:
-        fr = res.fea
-        story.append(Paragraph("6. Elementos finitos", H1))
-        story.append(Paragraph(
-            "Placa de Mindlin-Reissner con elemento MITC4 sobre fundacion elastica de "
-            "Winkler solo a compresion; pernos como resortes solo a traccion repartidos "
-            "en el anillo de apoyo de la tuerca; rigidizadores como banda de espesor "
-            f"equivalente. Malla {prj.fea.nx}×{prj.fea.ny}"
-            + (f", con los {fr.n_holes} agujeros de perno recortados de la malla."
-               if fr.holes_meshed else ", sin mallar los agujeros.") + f" {fr.msg}", BODY))
-        story.append(Paragraph(
-            f"Deflexion maxima = {us.q('L', fr.w_max)}; presion de contacto maxima = "
-            f"{us.q('S', fr.press_max)}; von Mises maximo = {us.q('S', fr.vm_max)}.", BODY))
-        story.append(Spacer(1, 4))
-        story.append(Paragraph("<b>Tensiones por perno</b>", BODY))
-        story.append(_bolt_table_pdf(prj, res, tbl, BODY, inch, colors))
-
-    post = getattr(res, "post3d", None)
-    if post is not None:
-        from .weld3d import summary_rows
-        import math as _m
-        story.append(Paragraph("7. Modelo solido 3D — soldadura y pernos", H1))
-        story.append(Paragraph("Modelo solido de tetraedros cuadraticos (Gmsh + CalculiX): placa con los agujeros "
-            "taladrados, perfil, rigidizadores y llave; concreto como resortes solo a "
-            "compresion y pernos solo a traccion (paso no lineal). La fuerza en la "
-            "soldadura se obtiene integrando en el espesor de cada pared los esfuerzos "
-            "del perfil justo por encima del pie del cordon. La compresion se transmite "
-            "por contacto (DG1); el cordon se verifica a traccion y cortante con el "
-            "metodo vectorial de AISC J2.4. D/C pico = punto mas cargado (concentracion "
-            "elastica local); D/C media = fuerza de la pared repartida en su longitud.", BODY))
-        story.append(Paragraph(f"Equilibrio: {post.msg}.", BODY))
-        wr, br_ = summary_rows(prj, post)
+    # --------------------------------------------- 6-7. modelo solido 3D
+    _fs = fem_section(prj, res, us)
+    if _fs:
+        story.append(Paragraph("6. Modelo solido 3D — pernos y soldadura", H1))
+        story.append(Paragraph(_fs["intro"], BODY))
+        story.append(Paragraph(_fs["msg"], BODY))
+        wr = _fs["weld_rows"]
         st = []
         for i, r in enumerate(wr[1:], start=1):
             for j in (5, 6):
@@ -928,10 +893,33 @@ def export_pdf(prj: Project, res: Results, path: str,
         story.append(Paragraph("<b>Soldadura perfil-placa</b>", BODY))
         story.append(tbl([[Paragraph(str(c), BODY) for c in r] for r in wr],
                          [0.8 * inch, 1.9 * inch] + [0.8 * inch] * 5, st))
-        story.append(Spacer(1, 4))
-        story.append(Paragraph("<b>Traccion por perno (3D)</b>", BODY))
-        story.append(tbl(br_, [0.6 * inch] + [1.0 * inch] * 3,
-                         [("ALIGN", (1, 1), (-1, -1), "RIGHT")]))
+        if _fs["b_hdr"]:
+            story.append(Spacer(1, 4))
+            story.append(Paragraph("<b>Traccion por perno</b>", BODY))
+            bst = []
+            for k_, r in enumerate(_fs["b_rows"], start=1):
+                try:
+                    okb = float(r[5]) <= 1.0
+                except ValueError:
+                    continue
+                bst.append(("BACKGROUND", (5, k_), (5, k_),
+                            colors.HexColor("#C6EFCE" if okb else "#FFC7CE")))
+            story.append(tbl([_fs["b_hdr"]] + _fs["b_rows"], [0.6 * inch] + [0.95 * inch] * 5,
+                             [("ALIGN", (1, 1), (-1, -1), "RIGHT")] + bst))
+        story.append(PageBreak())
+        story.append(Paragraph("7. Placa base aislada — resultados del modelo 3D en planta", H1))
+        for ln in _fs["lines"]:
+            story.append(Paragraph(f"<b>{ln}</b>" if ln.startswith("ESFUERZO MAXIMO") else ln, BODY))
+        from PIL import Image as _PIL2
+        for fp, cap in _fs["figs"] + _fs["persp"]:
+            try:
+                iw, ih = _PIL2.open(fp).size
+                w = 4.9 * inch
+                story.append(Spacer(1, 6))
+                story.append(RLImage(fp, width=w, height=w * ih / iw))
+                story.append(Paragraph(cap, CEN))
+            except Exception:
+                pass
 
     # ------------------------------------- desarrollo de las ecuaciones
     if detail and res.rec is not None:
@@ -956,28 +944,8 @@ def export_pdf(prj: Project, res: Results, path: str,
             st = {"sec": SEC, "txt": NT, "chk": CH}.get(kind, EQ)
             story.append(Paragraph(_esc(txt), st))
 
-    rep3d = getattr(res, "rep3d", None)
-    if rep3d:
-        n_sec = 8 if getattr(res, "post3d", None) is not None else 7
-        story.append(PageBreak())
-        story.append(Paragraph(
-            f"{n_sec}. Modelo solido 3D — esfuerzos de von Mises y deformaciones", H1))
-        for i, ln in enumerate(_rep3d_lines(prj, us, rep3d)):
-            story.append(Paragraph(f"<b>{ln}</b>" if ln.startswith("ESFUERZO MAXIMO") else ln, BODY))
-        from PIL import Image as _PIL2
-        for key, cap in (("vm", "Esfuerzo de von Mises (etiqueta: esfuerzo maximo)"),
-                         ("u", "Desplazamiento |U| sobre la geometria deformada")):
-            if rep3d.get(key):
-                try:
-                    iw, ih = _PIL2.open(rep3d[key]).size
-                    w = 5.0 * inch
-                    story.append(Spacer(1, 6))
-                    story.append(RLImage(rep3d[key], width=w, height=w * ih / iw))
-                    story.append(Paragraph(cap, CEN))
-                except Exception:
-                    pass
-
     # --------------------------------------------- anexo grafico
+    figs = annex_figs(figs)
     if figs:
         story.append(PageBreak())
         story.append(Paragraph("Anexo — Dibujos y resultados graficos", H1))
@@ -1009,21 +977,3 @@ def export_pdf(prj: Project, res: Results, path: str,
 
     doc.build(story, onFirstPage=_footer, onLaterPages=_footer)
     return path
-
-
-def _bolt_table_pdf(prj, res, tbl, BODY, inch, colors):
-    us = _units(prj)
-    fr = res.fea
-    data = [["#", f"x ({us.L})", f"y ({us.L})", f"T ({us.F})",
-             f"σt ({us.S})", "D/C"]]
-    style = []
-    order = sorted(range(len(fr.bolt_T)), key=lambda i: -fr.bolt_T[i])
-    for k, i in enumerate(order, start=1):
-        x, y = fr.bolt_xy[i]
-        data.append([f"P{i + 1}", us.fmt("L", x), us.fmt("L", y),
-                     us.fmt("F", fr.bolt_T[i]), us.fmt("S", fr.bolt_sig[i]),
-                     f"{fr.bolt_ratio[i]:.3f}"])
-        col = colors.HexColor("#C6EFCE") if fr.bolt_ratio[i] <= 1 else colors.HexColor("#FFC7CE")
-        style.append(("BACKGROUND", (5, k), (5, k), col))
-    style.append(("ALIGN", (1, 1), (-1, -1), "RIGHT"))
-    return tbl(data, [0.4 * inch] + [0.85 * inch] * 5, style)

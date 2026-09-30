@@ -169,6 +169,21 @@ class LinearResult:
     resid: float = 0.0              # residuo de equilibrio, kip
 
 
+def shear_arm(prj: Project) -> float:
+    """Brazo e (in) entre donde el cortante entra en la placa (cara superior) y donde lo
+    devuelven los pernos o la llave.  Manual si fea.shear_arm >= 0; si no:
+      sin llave : tp/2 + mortero  (el perno apoya en el centro del espesor y, con mortero,
+                  trabaja a esa altura sobre el concreto)
+      con llave : tp + H/2        (la llave reacciona en el centro de su altura de apoyo)."""
+    a = float(getattr(prj.fea, "shear_arm", -1.0))
+    if a >= 0:
+        return a
+    p = prj.plate
+    if prj.lug.enabled:
+        return p.tp + 0.5 * prj.lug.H
+    return 0.5 * p.tp + max(0.0, p.grout)
+
+
 def foundation_ks(prj: Project) -> float:
     if prj.fea.ks_mode == "manual":
         return max(1.0, prj.fea.ks_manual)
@@ -183,7 +198,6 @@ def bolt_kb(prj: Project) -> float:
 
 def linear_bolt_forces(prj: Project) -> LinearResult:
     """Fuerza de cada perno con la distribucion lineal de la placa rigida."""
-    from .fea import shear_arm
     r = LinearResult()
     p, L = prj.plate, prj.eloads
     circ = (p.shape == "Circular")

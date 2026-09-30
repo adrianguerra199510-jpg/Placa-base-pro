@@ -11,8 +11,8 @@ from . import geometry as G
 from . import materials as M
 from .design import Check, Bearing
 from .explain import Recorder
-from .fea import run_fea, FEAResult
 from .linear_checks import linear_checks
+from .fem_checks import fem_checks
 
 
 @dataclass
@@ -21,7 +21,7 @@ class Results:
     treq: float = 0.0
     tdet: dict = field(default_factory=dict)
     checks: list = field(default_factory=list)
-    fea: FEAResult = None
+    fem: object = None              # fem_checks.Fem3D vigente (o None)
     lin: object = None              # LinearResult: fuerza por perno con distribucion lineal
     lin_checks: list = field(default_factory=list)      # verificaciones informativas (metodo DG1)
     warnings: list = field(default_factory=list)
@@ -46,8 +46,10 @@ class Results:
         return any(w.startswith("**") for w in self.warnings)
 
 
-def solve(prj: Project, with_fea: bool = True, detail: bool = True) -> Results:
+def solve(prj: Project, detail: bool = True, fem=None) -> Results:
+    """`fem`: paquete Fem3D del analisis 3D hecho con ESTE proyecto (o None si no hay uno vigente)."""
     R = Results()
+    R.fem = fem
     notes = prj.normalize()
     R.rec = Recorder(prj.units()) if detail else None
     rec = R.rec
@@ -107,7 +109,7 @@ def solve(prj: Project, with_fea: bool = True, detail: bool = True) -> Results:
     if abs(prj.section.rotation) > 1e-6 and abs(abs(prj.section.rotation) - 90) > 1e-6:
         R.warnings.append("Rotacion del perfil distinta de 0° o 90°: las formulas cerradas de "
                           "DG1 usan el rectangulo envolvente del perfil (conservador). "
-                          "El modelo de elementos finitos si usa la geometria real.")
+                          "El modelo de elementos finitos 3D si usa la geometria real.")
     if p.shape == "Circular":
         R.warnings.append("Placa circular: las formulas cerradas usan el cuadrado equivalente de "
                           "igual area (Leq = 0.8862·Dp).")
@@ -165,67 +167,38 @@ def solve(prj: Project, with_fea: bool = True, detail: bool = True) -> Results:
     if rec:
         rec.check("Espesor de la placa", R.treq, p.tp, "L",
                   R.treq / max(p.tp, 1e-9), R.treq <= p.tp, "DG1 §3.1")
-    ck += A.anchor_checks(prj, br, rec)
+    ck += A.anchor_checks(prj, br, rec, fem)
     ck += D.welds(prj, br, rec)
     ck += D.shear_lug(prj, rec)
     ck += D.stiffeners(prj, br, rec)
     ck += D.column_base(prj)
     R.checks = ck
 
-    # ------------------------------------------------------------ FEA
-    if with_fea and prj.fea.enabled:
-        R.fea = run_fea(prj)
-        if R.fea.ok:
-            Fy = p.mat().Fy
-            R.checks.append(Check("fea_vm", "FEA — von Mises en la placa",
-                                  R.fea.vm_max, 0.90 * Fy, "ksi",
-                                  "AISC F11 / criterio de fluencia",
-                                  f"malla {prj.fea.nx}×{prj.fea.ny}, {R.fea.msg}"))
-            R.checks.append(Check("fea_press", "FEA — presion de contacto maxima",
-                                  R.fea.press_max, br.fp_max, "ksi", "AISC J8",
-                                  "Distribucion real obtenida del modelo, no el bloque rectangular."))
-            g = b.geom()
-            Tmax = max(R.fea.bolt_T) if R.fea.bolt_T else 0.0
-            R.checks.append(Check("fea_bolt", "FEA — traccion maxima en un perno",
-                                  Tmax, 0.75 * 0.75 * b.mat().Fu * g.Ab, "kip",
-                                  "AISC J3", "Reparto real segun la rigidez de la placa."))
-            if rec:
-                uu = prj.units()
-                rec.section("I.  ELEMENTOS FINITOS DE LA PLACA")
-                rec.text("Placa de Mindlin-Reissner, elemento MITC4, sobre resortes "
-                         "de Winkler solo a compresion; los pernos son resortes solo "
-                         "a traccion repartidos en el anillo de apoyo de la tuerca.")
-                rec.add("malla", f"{prj.fea.nx} × {prj.fea.ny}",
-                        ("agujeros de perno mallados" if R.fea.holes_meshed
-                         else "agujeros no mallados"), None)
-                rec.add("Brazo del cortante e", "donde entra V (cara sup. de la placa) − donde lo "
-                        "devuelven pernos/llave", "", R.fea.shear_arm, "L", "",
-                        "sin llave: tp/2 + mortero; con llave: tp + H/2 (manual en Elementos finitos)")
-                rec.add("Mx' , My'", "Mx' = |Mux| − e·Vuy ;  My' = Muy + e·Vux",
-                        f"{rec.n('M', R.fea.Mx_tot)} , {rec.n('M', R.fea.My_tot)}", None, "-",
-                        "", "momentos sobre la placa con el par del cortante; My' > 0 tracciona −X")
-                rec.add("w max", "deflexion maxima", "", R.fea.w_max, "L")
-                rec.add("p max", "presion de contacto maxima", "", R.fea.press_max, "S")
-                rec.add("σ von Mises max", "6·M/t² en la superficie", "",
-                        R.fea.vm_max, "S")
-                rec.add("equilibrio", "R concreto − R pernos − ΣF",
-                        f"{rec.n('F', R.fea.R_found)} − {rec.n('F', R.fea.R_bolts)} − "
-                        f"{rec.n('F', R.fea.sumF)}",
-                        R.fea.R_found - R.fea.R_bolts - R.fea.sumF, "F",
-                        "", "residuo de equilibrio del modelo")
+    # ------------------------------------------------------------ FEM 3D
+    if fem is not None:
+        try:
+            R.checks += fem_checks(prj, br, fem, rec)
+        except Exception as e:                              # pragma: no cover
+            R.warnings.append(f"No se pudieron evaluar los resultados del FEM 3D: {e}")
+    else:
+        R.warnings.append("Verificaciones FEM 3D pendientes: corra el analisis solido 3D (F8). "
+                          "Hasta entonces el veredicto solo incluye el calculo cerrado.")
 
     # ------------------------------------------------ fuerza por perno, distribucion lineal
     # Siempre se calcula; solo entra en el veredicto si el metodo elegido es el lineal (con el
     # metodo DG1 queda como informacion y en la memoria).
     try:
-        R.lin, lck = linear_checks(prj, br, R.fea, rec)
+        R.lin, lck = linear_checks(prj, br, fem, rec)
         if b.force_method.startswith("Lineal"):
             R.checks += lck
-            if not (with_fea and prj.fea.enabled and R.fea is not None and R.fea.ok):
+            if fem is None:
                 R.warnings.append("Metodo lineal: la validez de la hipotesis de placa rigida "
-                                  "requiere el analisis 2D (F5); aun no se ha verificado.")
+                                  "requiere el analisis 3D (F8); aun no se ha verificado.")
         else:
             R.lin_checks = lck
     except Exception as e:                                  # pragma: no cover
         R.warnings.append(f"No se pudo calcular la distribucion lineal: {e}")
+    if b.force_method.startswith("Modelo 3D") and fem is None:
+        R.warnings.append("Metodo 'Modelo 3D': sin analisis 3D vigente la fuerza de los pernos se toma "
+                          "de la distribucion lineal (aproximada); corra el 3D (F8).")
     return R
