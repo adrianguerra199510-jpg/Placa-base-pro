@@ -133,6 +133,21 @@ def _elem_k(xe, ye, t, E, nu):
     return K
 
 
+def shear_arm(prj: Project) -> float:
+    """Brazo e (in) entre donde el cortante entra en la placa (cara superior) y donde lo
+    devuelven los pernos o la llave.  Manual si fea.shear_arm >= 0; si no:
+      sin llave : tp/2 + mortero  (el perno apoya en el centro del espesor y, con mortero,
+                  trabaja a esa altura sobre el concreto)
+      con llave : tp + H/2        (la llave reacciona en el centro de su altura de apoyo)."""
+    a = float(getattr(prj.fea, "shear_arm", -1.0))
+    if a >= 0:
+        return a
+    p = prj.plate
+    if prj.lug.enabled:
+        return p.tp + 0.5 * prj.lug.H
+    return 0.5 * p.tp + max(0.0, p.grout)
+
+
 def run_fea(prj: Project) -> FEAResult:
     r = FEAResult()
     if not HAVE_SCIPY:
@@ -290,12 +305,21 @@ def run_fea(prj: Project) -> FEAResult:
     wj = 1.0 / m
     Iyy = sum(wj * q[1] ** 2 for q in fp)
     Ixx = sum(wj * q[0] ** 2 for q in fp)
+    # El cortante entra en la cara superior de la placa y los pernos (o la llave) lo
+    # devuelven a otra altura: el par V·e es un momento sobre la placa.  Convencion de
+    # mano derecha (la misma que usa el modelo 3D): fuerza (Vx, Vy) a la altura e sobre
+    # el plano de reaccion -> Mx = −e·Vy, My = +e·Vx.  Mux > 0 tracciona +Y; My > 0
+    # tracciona −X (mas compresion en +X).
+    e_arm = shear_arm(prj)
+    Mx_tot = abs(L.Mux) - e_arm * L.Vuy
+    My_tot = L.Muy + e_arm * L.Vux
+    r.shear_arm, r.Mx_tot, r.My_tot = e_arm, Mx_tot, My_tot
     for (qx, qy) in fp:
         fz = wj * L.Pu
         if Iyy > 1e-9:
-            fz -= abs(L.Mux) * wj * qy / Iyy
+            fz -= Mx_tot * wj * qy / Iyy
         if Ixx > 1e-9:
-            fz -= L.Muy * wj * qx / Ixx
+            fz += My_tot * wj * qx / Ixx
         # reparto bilineal al elemento contenedor
         fi = (qx + Bx / 2) / dx
         fj = (qy + Ny / 2) / dy

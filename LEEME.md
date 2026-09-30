@@ -21,6 +21,17 @@ que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
 | **Todo** sale en las unidades elegidas: también la columna de observaciones, los ejes de los dibujos y los títulos | Toda la aplicación |
 | **Descripción de cada dato de entrada** en un panel al pie de cada pestaña, más la convención de signos de las cargas | Los 65 campos de entrada |
 
+## Correccion del 2D: cortante y asimetria
+
+- El 2D ahora incluye el par del cortante: V entra en la cara superior de la placa y los pernos
+  (o la llave) lo devuelven a otra altura; el brazo e es automatico (sin llave: tp/2 + mortero;
+  con llave: tp + H/2) o manual en Elementos finitos. Mx' = |Mux| − e·Vuy, My' = Muy + e·Vux.
+  Con Vux ≠ 0 los pernos de un lado quedan mas cargados que los del otro (con Vux = 0 sigue
+  simetrico), como se ve en el 3D. e = 0 anula el efecto. El 3D aplica el cortante en la cara
+  superior de la placa (brazo 0): con e automatico el 2D marca mas asimetria que el 3D.
+- CORREGIDO un error de signo: en el 2D Muy > 0 traccionaba el lado +X; ahora tracciona −X,
+  igual que el modelo 3D (mano derecha; comprobado con el 3D: 27 kip en los pernos de −X).
+
 ## Novedades: malla 3D rapida (predeterminada) y von Mises promediado
 
 Pestaña Elementos finitos → "Calidad de la malla 3D": **Rapida** (predeterminada; tetraedros del

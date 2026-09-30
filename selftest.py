@@ -182,6 +182,27 @@ print(f"{'W soldado solo en el alma':34} weld_part D/C = {_cp[0].ratio if _cp el
 if not _cp or not any("NO esta soldada" in w for w in _rw.warnings):
     FAIL.append("soldadura parcial: falta la verificacion o el aviso")
 
+# 2D: signo de Muy (mano derecha, como el 3D) y asimetria por cortante
+from placabase.fea import run_fea
+_f = Project(); _f.loads.Mux = 0.0; _f.loads.Vux = 0.0; _f.loads.Muy = 3000.0
+_r = run_fea(_f)
+_tm = sum(T for (x, y), T in zip(_r.bolt_xy, _r.bolt_T) if x < 0)
+_tp_ = sum(T for (x, y), T in zip(_r.bolt_xy, _r.bolt_T) if x > 0)
+print(f"{'2D Muy>0 tracciona -X':34} T(-X) = {_tm:.1f}  T(+X) = {_tp_:.1f}")
+if not (_tm > 5.0 and _tp_ < 0.5):
+    FAIL.append("2D: Muy > 0 debe traccionar el lado -X (convencion del 3D)")
+_g = Project(); _g.loads.Vux = 30.0
+_rg = run_fea(_g)
+_a = sum(T for (x, y), T in zip(_rg.bolt_xy, _rg.bolt_T) if x < 0)
+_b = sum(T for (x, y), T in zip(_rg.bolt_xy, _rg.bolt_T) if x > 0)
+_g.loads.Vux = 0.0
+_r0 = run_fea(_g)
+_s0 = [T for (x, y), T in zip(_r0.bolt_xy, _r0.bolt_T) if x < 0]
+_s1 = [T for (x, y), T in zip(_r0.bolt_xy, _r0.bolt_T) if x > 0]
+print(f"{'2D cortante Vux>0':34} T(-X) = {_a:.2f}  T(+X) = {_b:.2f}   (Vux=0: {sum(_s0):.2f} / {sum(_s1):.2f})")
+if not (_a > _b + 0.1 and abs(sum(_s0) - sum(_s1)) < 1e-6):
+    FAIL.append("2D: el cortante debe cargar mas el lado -X y sin cortante debe ser simetrico")
+
 print()
 print("CASOS LIMITE")
 case("placa insuficiente", **{"loads.Mux": 26000.0})

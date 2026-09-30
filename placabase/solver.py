@@ -195,6 +195,12 @@ def solve(prj: Project, with_fea: bool = True, detail: bool = True) -> Results:
                 rec.add("malla", f"{prj.fea.nx} × {prj.fea.ny}",
                         ("agujeros de perno mallados" if R.fea.holes_meshed
                          else "agujeros no mallados"), None)
+                rec.add("Brazo del cortante e", "donde entra V (cara sup. de la placa) − donde lo "
+                        "devuelven pernos/llave", "", R.fea.shear_arm, "L", "",
+                        "sin llave: tp/2 + mortero; con llave: tp + H/2 (manual en Elementos finitos)")
+                rec.add("Mx' , My'", "Mx' = |Mux| − e·Vuy ;  My' = Muy + e·Vux",
+                        f"{rec.n('M', R.fea.Mx_tot)} , {rec.n('M', R.fea.My_tot)}", None, "-",
+                        "", "momentos sobre la placa con el par del cortante; My' > 0 tracciona −X")
                 rec.add("w max", "deflexion maxima", "", R.fea.w_max, "L")
                 rec.add("p max", "presion de contacto maxima", "", R.fea.press_max, "S")
                 rec.add("σ von Mises max", "6·M/t² en la superficie", "",

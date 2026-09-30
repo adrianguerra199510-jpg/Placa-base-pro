@@ -356,7 +356,8 @@ class FEAOpts:
     gmsh_path: str = "gmsh"
     mesh3d: float = 0.0          # tamano de malla 3D (0 = automatico)
     mesh3d_mode: str = "Rapida (recomendada, ~30 s)"   # ver MESH3D_MODES
-    vm_avg_factor: float = 1.0   # radio de promedio del von Mises 3D, en espesores de placa
+    shear_arm: float = -1.0      # brazo del cortante sobre la placa, in (-1 = automatico)
+    vm_avg_factor: float = 1.0  # radio de promedio del von Mises 3D, en espesores de placa
 
 
 @dataclass
