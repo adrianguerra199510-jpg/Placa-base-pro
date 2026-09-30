@@ -312,6 +312,30 @@ if "--3d" in sys.argv:
             FAIL.append("3D: no debe quedar el aviso de pendiente")
         if not (_fem.rep or {}).get("plan", {}).get("top"):
             FAIL.append("3D: no se generaron las vistas en planta")
+        # soldadura con conectores: equilibrio vertical (contacto − cordones = Pu) y de cortante
+        _eqw = _post.F_bear - _post.Fz_weld - _p3.eloads.Pu
+        print(f"{'  soldadura: contacto − cordones − Pu':34} {_eqw:+.3f} kip   (modelo {_post.weld_model}, "
+              f"contacto {_post.F_bear:.1f}, cordones {_post.Fz_weld:.1f})")
+        if _post.weld_model != "conectores" or abs(_eqw) > 0.02 * abs(_p3.eloads.Pu):
+            FAIL.append("3D: equilibrio vertical del cordon con conectores")
+        # traccion pura: todo el axial pasa por los cordones y por los pernos
+        _pt = Project(); _pt.loads.Pu = -100.0; _pt.loads.Mux = 0.0; _pt.loads.Vux = 0.0
+        _rt, _mt = mesh3d.full_3d(_pt, tempfile.mkdtemp(prefix="pb3d_"))
+        if _rt is None:
+            FAIL.append(f"3D traccion pura: no corrio: {_mt[-200:]}")
+        else:
+            _pp = _rt.post
+            print(f"{'  traccion pura 100 kip':34} cordones {_pp.Fz_weld:.2f} kip  contacto {_pp.F_bear:.3f}  "
+                  f"pernos {_pp.T_bolts:.2f}")
+            if not (abs(_pp.Fz_weld - 100.0) < 2.0 and _pp.F_bear < 1.0 and abs(_pp.T_bolts - 100.0) < 2.0):
+                FAIL.append("3D traccion pura: el axial debe pasar por cordones y pernos")
+        # respaldo fusionado: corre y entrega zonas
+        _pf = Project(); _pf.fea.weld_model = "Fusionado (union monolitica, equivale a CJP)"
+        _rf, _mf = mesh3d.full_3d(_pf, tempfile.mkdtemp(prefix="pb3d_"))
+        if _rf is None or not _rf.post or not _rf.post.zones or _rf.post.weld_model != "fusionado":
+            FAIL.append("3D fusionado: no entrego zonas de soldadura")
+        else:
+            print(f"{'  modelo fusionado (respaldo)':34} zonas = {[z.name for z in _rf.post.zones]}")
 
 print()
 print("=" * 150)

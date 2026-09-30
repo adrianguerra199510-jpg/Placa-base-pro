@@ -11,6 +11,76 @@ kN / N / tonf / kgf, momento y esfuerzo por separado. Se aplican a las entradas,
 tabla de resultados y a los reportes. El cálculo interno siempre corre en in-kip-ksi,
 que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
 
+## Novedades: un solo analisis de elementos finitos (el solido 3D) y soldadura con conectores
+
+**Se elimino el FEM 2D interno** (placa de Mindlin, `fea.py`), su pestaña, sus mapas y la exportacion de
+cascarones. El unico analisis de elementos finitos es el **modelo solido 3D** (Gmsh + CalculiX), y las
+verificaciones FEM salen de el:
+
+| Fila del veredicto | Que verifica | Criterio |
+|---|---|---|
+| `fem_bolt` | traccion del perno mas cargado (reaccion de los resortes del anillo de la tuerca) | AISC J3.6, φ·0.75·Fu·Ab |
+| `fem_press` | presion de contacto maxima sobre el concreto | AISC J8 |
+| `fem_vm` | von Mises **promediado** en la placa (r = 1 espesor; el pico puntual no converge) | ≤ 0.90·Fy (criterio del programa) |
+| `fem_weld…` | una fila por zona de soldadura perfil-placa | AISC J2.4 |
+
+Sin un 3D vigente (hecho con el proyecto tal como esta ahora; la firma ignora nombre, autor y unidades)
+el programa avisa "Verificaciones FEM 3D pendientes" y el veredicto solo incluye el calculo cerrado.
+Corra el 3D con **F8** (malla rapida, ~30 s); al terminar se recalcula todo solo. `Pestaña Pernos → Metodo de
+fuerza en los pernos` tiene ahora tres opciones: DG1, lineal elastico y **Modelo 3D** (la fuerza de cada
+perno sale del solido). La validez de la distribucion lineal (placa rigida) se verifica contra el 3D.
+
+**Memoria de calculo.** La seccion 6 trae la soldadura por zona y la traccion por perno (3D contra lineal); la
+seccion 7 aisla la PLACA y muestra en planta: von Mises promediado de la cara superior y de la inferior
+(con la etiqueta del maximo y la curva 0.90·Fy), presion de contacto con la traccion de cada perno, y el
+desplazamiento vertical; despues las dos vistas 3D en perspectiva.
+
+### Soldadura perfil-placa: conectores entre cuerpos separados (`placabase/weldfe.py`)
+
+En el modelo fusionado anterior la union era monolitica (una CJP ideal): una zona sin soldar transmitia
+igual, la compresion pasaba por el cordon y la fuerza del cordon habia que deducirla de los esfuerzos del
+perfil (concentraciones de esquina que dependen de la malla). Ahora, por defecto (`Elementos finitos →
+Modelo de la soldadura`), despues de mallar (malla conforme) se **separan** el cuerpo superior (perfil y
+rigidizadores) y el inferior (placa y llave) duplicando los nodos de la interfaz, y solo se comunican por:
+
+- **Contacto solo-compresion** en toda la huella (un resorte por nodo, rigidez por area tributaria). El
+  cordon no trabaja a compresion (DG1).
+- **Conectores de cordon** en cada linea soldada: borde de la huella del perfil (cara exterior o interior
+  de cada pared, segun "a uno o dos lados") y base de cada rigidizador. Por nodo: un resorte normal
+  **solo-traccion** y dos de cortante. Rigidez por unidad de longitud = garganta de acero sobre una
+  longitud igual al cateto: filete 0.707·E y 0.707·G; PJP E y G; CJP 5·E y 5·G. Un lado sin cordon o una
+  zona "sin soldadura" **no** tiene conector.
+- Los resortes normales usan un nodo auxiliar ligado con `*EQUATION` (z del nodo superior, x-y del inferior)
+  para que midan solo el movimiento vertical aunque el perfil se deslice: sin el, CalculiX inclina el
+  resorte con el deslizamiento y el alargamiento se contamina con Δ²/2δ (llegaba a falsear 40 % la
+  compresion de los nodos de punta de ala).
+
+La fuerza del cordon se lee **directa del conector** (F = k·Δ), sin integrar esfuerzos. Se suaviza por linea
+en una ventana movil de 4 veces el cateto (nunca menos de 3 elementos; equivale a la redistribucion por
+ductilidad de un cordon real) y se compara, por linea, con `φ·0.60·FEXX·garganta·kd` (AISC J2.4, kd de
+J2-5) y, con la suma de las lineas de la pared, con la rotura del metal base. D/C pico = maximo de la curva
+suavizada; D/C media = fuerza de la linea repartida en su longitud. El modelo fusionado sigue disponible
+como respaldo.
+
+Comprobaciones (`python selftest.py --3d`, y corridas de prueba con W14X90, HSS con rigidizadores y tubo
+redondo): equilibrio vertical del cuerpo superior contacto − cordones = Pu (−0.1 kip en 400); en **traccion
+pura** de 100 kip los cordones toman 100.08 kip, el contacto 0.000 y los pernos 100.00; el cortante de los
+cordones suma 29.9 kip contra Vux = 30; el equilibrio de momentos cierra en 1 % (la diferencia es el P-Δ
+del giro del nodo de carga). Con la web sin soldar, el alma no transmite y su carga pasa a las alas. En
+PB-01 (malla rapida) el pico suavizado de la ala mas cargada es 5.8 kip/in contra 8.9 del metodo fusionado
+por esfuerzos (que incluye la concentracion de esquina). Tarda lo mismo que antes (~25-30 s).
+
+**Convergencia de malla de la soldadura** (PB-01): malla rapida (16 mil nodos, 24 s) contra automatica (58 mil
+nodos, 3 min): pico suavizado del ala mas cargada 5.82 contra 5.94 kip/in (−2 %), del ala opuesta 1.97
+contra 1.90, del alma 1.18 contra 1.20; medias dentro de 1-2 %; traccion en pernos 0.33 contra 0.31 kip.
+El metodo fusionado por esfuerzos no convergia en los picos; la flexibilidad finita del conector es la que
+regulariza la esquina.
+
+**Limitaciones.** La rigidez del cordon es una idealizacion (garganta sobre una longitud = cateto), no una
+curva carga-deformacion de soldadura; el contacto es sin friccion; el CalculiX incluido para Windows
+(2.14) no se probo con estas tarjetas (`*EQUATION`, `SPRING2`, `SPRINGA` no lineal): se probo con 2.21. Si
+falla, use "Fusionado" en `Modelo de la soldadura`.
+
 ## Novedades de la 1.2
 
 | Cambio | Dónde |
@@ -35,14 +105,14 @@ elastico (`placabase/linear.py`). Hipotesis: la placa es rigida y sus secciones 
 de modo que la fuerza del perno es proporcional a su distancia al eje neutro (w = 0). a, b y c salen
 de un Newton con Jacobiano exacto (es el minimo de una energia convexa: converge siempre); las
 integrales sobre la zona comprimida (placa recortada por w > 0, menos agujeros y menos la huella de
-la llave de corte) son exactas (momentos de poligonos). ks y kb son los mismos del 2D y del 3D
+la llave de corte) son exactas (momentos de poligonos). ks y kb son los mismos del modelo 3D
 (Ec/hped y E·Ase/(hef + tp + mortero)). Funciona con placa rectangular o circular y cualquier
 disposicion de pernos, con momento en una o dos direcciones.
 
 Pestaña Pernos → **Metodo de fuerza en los pernos**: "DG1" (predeterminado) o "Lineal elastico". Con el
 lineal, el perno de diseño es el mas cargado y el grupo traccionado son los pernos con T > 0 (acero
 AISC J3, arrancamiento, extraccion, etc.). La memoria (seccion J y seccion 5 del PDF/Word) y la tabla
-del FEA muestran siempre la fuerza lineal de cada perno junto a la del 2D (y del 3D si hay).
+del modelo 3D muestran siempre la fuerza lineal de cada perno junto a la del 3D (si hay).
 
 **Verificaciones AISC con la distribucion lineal**: resistencia a traccion del perno mas cargado
 (J3.6, φ·0.75·Fu·Ab) e interaccion traccion-cortante (J3.7); aplastamiento del concreto con la
@@ -53,17 +123,16 @@ anclajes con una distribucion plana solo si la placa es rigida, pero ni ellos ni
 numerico de rigidez; con una placa flexible aparece el efecto palanca y la distribucion lineal
 SUBESTIMA la traccion. El programa lo comprueba (fila `lin_rigid`): el perno mas cargado y la
 traccion total de la placa flexible no deben exceder a las lineales en mas de 10 % (o en mas de 10 %
-de φRnt si la traccion es pequeña). Se compara con el 2D y, si hay un analisis 3D vigente, con el 3D
-(que incluye el perfil soldado y por eso es menos flexible que el 2D). Con el metodo lineal esta
-verificacion forma parte del veredicto; con DG1 queda solo en la memoria. El boton "Espesor de placa
-rigida..." (pestaña Elementos finitos) busca el espesor con el que se cumple.
+de φRnt si la traccion es pequeña). Se compara con el analisis 3D vigente (placa flexible con el perfil
+soldado); sin 3D la validez queda pendiente (aviso). Con el metodo lineal esta verificacion forma
+parte del veredicto; con DG1 queda solo en la memoria. (El boton "Espesor de placa rigida..." y el 2D
+que lo alimentaba se eliminaron.)
 
 Comprobaciones del solver: axial puro → T = 0 y p = Pu/A; equilibrio de fuerzas y momentos exacto; y
-con una placa muy gruesa (tp = 12 in) el 2D de Mindlin converge a la solucion lineal (ΣT 86.84 contra
-86.86 kip; perno a perno ≤ 5 %, en placas rectangulares y circulares con pernos radiales).
+y una integracion INDEPENDIENTE en malla (600×600) con el plano a, b, c devuelto por el solver
+reproduce la reaccion y el momento del equilibrio (≤ 1 %). Con una placa gruesa (tp = 8 in) el 3D converge
+a la solucion lineal (ver la calibracion).
 
-Se retiro el engrosamiento de la placa bajo el perfil (y los demas factores de calibracion) que se
-habia añadido al 2D: el 2D es de nuevo una placa de Mindlin sin ajustes empiricos.
 
 ## Calibracion del 3D contra el calculo lineal
 
@@ -81,13 +150,14 @@ Defectos encontrados y corregidos en el 3D:
    la traccion salia 40 % baja; con tp = 2 in el efecto era 0.2 %). Ahora estan en la cara inferior
    (interfaz con el mortero, centro de giro de la placa); la traccion/compresion del perno sigue en
    el anillo de la tuerca (cara superior).
-2. El cortante actua a la altura e (el mismo brazo del 2D y del calculo lineal) sobre ese plano de
+2. El cortante actua a la altura e (el mismo brazo del calculo lineal) sobre ese plano de
    reaccion (con llave, sobre la mitad de su altura).
 3. La seleccion del anillo de apoyo de cada perno es robusta con mallas gruesas.
 4. Bajo la llave de corte no hay resortes del concreto (su cara superior queda pegada a la placa);
-   ahora el 2D y el calculo lineal excluyen igual esa huella, asi los tres modelos comparten area.
+   ahora el calculo lineal excluye igual esa huella, asi ambos modelos comparten area.
 
-Placas reales (tp entre 1.5 y 3.25 in, malla rapida), relacion respecto al 3D:
+Placas reales (tp entre 1.5 y 3.25 in, malla rapida), relacion respecto al 3D (las columnas "2D" son historicas:
+ese modelo ya se elimino):
 
 | Caso | ΣT lineal | ΣT 2D | Tmax lineal | Tmax 2D | p lineal | p 2D |
 |---|---|---|---|---|---|---|
@@ -99,17 +169,15 @@ Placas reales (tp entre 1.5 y 3.25 in, malla rapida), relacion respecto al 3D:
 | R3 circular, 10 pernos, tp = 2 | 0.76 | 1.06 | 0.79 | 1.08 | 1.02 | 1.02 |
 
 La distribucion lineal queda 20-35 % por debajo del 3D en placas de espesor de diseño DG1
-(placa flexible: efecto palanca) y coincide con placas gruesas (PB-03); el 2D queda 6-29 % por
+(placa flexible: efecto palanca) y coincide con placas gruesas (PB-03); el antiguo 2D quedaba 6-29 % por
 encima. Por eso el metodo lineal solo se acepta si pasa la verificacion de placa rigida.
-Nota: el 2D vs 3D del von Mises (maximo del 2D contra el promediado del 3D) no se calibro.
 
-## Cortante y asimetria en el 2D y el 3D
+## Cortante y asimetria (calculo lineal y 3D)
 
-- El par del cortante entra en el 2D y el calculo lineal: Mx' = |Mux| − e·Vuy, My' = Muy + e·Vux, con e
+- El par del cortante entra en el calculo lineal y el 3D: Mx' = |Mux| − e·Vuy, My' = Muy + e·Vux, con e
   automatico (sin llave: tp/2 + mortero; con llave: tp + H/2) o manual en Elementos finitos. Con
   Vux ≠ 0 los pernos de un lado quedan mas cargados (con Vux = 0 el reparto es simetrico), como en el 3D.
-- CORREGIDO un error de signo: en el 2D Muy > 0 traccionaba el lado +X; ahora tracciona −X, igual
-  que el modelo 3D (mano derecha; comprobado con el 3D).
+- Convencion de signo: Muy > 0 tracciona el lado −X (mano derecha), comprobado contra el 3D.
 
 ## Novedades: malla 3D rapida (predeterminada) y von Mises promediado
 
@@ -409,70 +477,40 @@ tamaño, electrodo y si va a uno o ambos lados.
 
 ### 2.7 Elementos finitos
 
-Pestaña **Elementos finitos**. Dos niveles:
-
-**(a) Modelo integrado de la placa** — siempre disponible, sin dependencias
-externas. Elemento **MITC4** de Mindlin-Reissner (deformaciones de corte supuestas
-y ligadas en los puntos medios de los bordes), que evita a la vez el bloqueo por
-cortante y los modos de energía nula. Sobre:
-
-- resortes de Winkler nodo a nodo **solo a compresión** (iterativo, contacto
-  unilateral) con `ks = Ec/h_pedestal` o manual;
-- resortes de perno **solo a tracción**, `kb = E·Ase/(hef + tp + mortero)`;
-- rigidizadores como banda de espesor equivalente
-  `t_eq = (tp³ + 12·I_pletina/ancho_banda)^⅓` — rigidizan la placa, no la sostienen
-  contra el suelo;
-- carga repartida sobre la **huella real** del perfil (alas y alma, o paredes del
-  HSS), no como una carga puntual.
-
-- los **agujeros de perno recortados de la malla**, con el perno apoyando sobre el
-  anillo de la tuerca (corona entre el agujero y el ancho de la hexagonal pesada) en
-  vez de sobre un nodo puntual, que es como trabaja de verdad.
-
-Salidas: deflexión, presión de contacto, von Mises, Mx, My, la **tabla de tensiones
-perno por perno** (posición, tracción, esfuerzo sobre Ase y D/C frente a AISC J3) y
-la demanda de soldadura por pulgada en la interfaz perfil-placa. El reparto real
-entre pernos suele ser muy distinto del que supone el método de DG1: en el ejemplo
-por defecto, el perno central de la fila traccionada toma más carga que los de
-esquina. Cada corrida reporta el **residuo de equilibrio**; en la batería de 45
-casos de prueba es ±0.000 kip.
-
-**(b) Modelo SÓLIDO 3D, dentro del programa** — pestaña **Modelo 3D**, botón
-*Ejecutar análisis 3D*, o `Cálculo > Análisis SÓLIDO 3D` (F8). Esto sí es
-tridimensional de verdad: escribe un `.geo` con kernel OpenCASCADE que construye
+Pestaña **Elementos finitos** (opciones) y pestaña **Modelo 3D** (analisis y resultados). El programa tiene
+un solo analisis de elementos finitos: el **modelo SOLIDO 3D**, dentro del programa (boton *Ejecutar
+analisis 3D* o `Cálculo > Análisis SÓLIDO 3D`, F8). Escribe un `.geo` con kernel OpenCASCADE que construye
 
 - la placa base con los **agujeros taladrados** como cilindros restados,
 - el perfil extruido como sólido con el espesor real de sus paredes y alas,
 - las pletinas rigidizadoras con su forma (triangular, recortada, etc.),
 - la llave de corte por debajo de la placa,
 
-todo fusionado con `BooleanFragments`. La unión perfil-placa queda fusionada, que es
-lo que representa una soldadura CJP y el idealizado habitual para un modelo global;
-el filete se verifica aparte en forma cerrada por AISC J2.
+todo fusionado con `BooleanFragments` para obtener una malla conforme. Despues de mallar, la union
+perfil-placa se modela con **conectores** entre cuerpos separados (ver arriba, `weldfe.py`); el modelo
+"Fusionado" (union monolitica equivalente a CJP) queda como opcion.
 
-El programa encadena todo el proceso en segundo plano, sin congelar la ventana:
-malla con Gmsh en tetraedros de segundo orden, localiza por coordenadas los nodos
-del apoyo, del tope y de cada anillo de perno, escribe el `.inp` de CalculiX con los
-resortes de balasto, los resortes de perno (axiales **y** horizontales, que son los
-que equilibran el cortante) y las cargas P-M-V en un nodo de referencia, lo resuelve,
-y lee el `.frd` para dibujar el resultado en la pestaña. Puede alternar entre von
-Mises, |U| y Uz, y amplificar la deformada con un factor de escala.
+El programa encadena todo el proceso en segundo plano, sin congelar la ventana: malla con Gmsh en
+tetraedros de segundo orden, localiza por coordenadas los nodos del apoyo, del tope y de cada anillo de
+perno, escribe el `.inp` de CalculiX con el concreto como resortes de Winkler **solo a compresion**
+(rigidez `ks` por area tributaria de cada nodo), los pernos como resortes **solo a traccion** en el anillo
+de la tuerca (mas los horizontales que equilibran el cortante), el contacto y los conectores del cordon,
+y las cargas P-M-V en un nodo de referencia; lo resuelve, y lee el `.frd` para dibujar el resultado.
+Puede alternar entre von Mises, |U| y Uz, y amplificar la deformada.
 
-Junto al `.geo` se deja también **`correr_3d.py`** por si prefiere lanzarlo fuera de
-la aplicación, y todos los archivos quedan en la carpeta que elija, listos para abrir
-en PrePoMax o CGX.
+Salidas: la **tabla de traccion por perno** (3D contra lineal, posicion, D/C frente a AISC J3), la tabla
+de **soldadura por zona** (pico y media, con la capacidad AISC J2.4), la presion de contacto, el von Mises
+promediado y el residuo de equilibrio (reaccion del concreto − pernos − Pu). Todas entran al veredicto
+como filas `fem_*` y a la memoria (secciones 6 y 7, con la placa aislada en planta).
 
-Requiere Gmsh y CalculiX; indique sus rutas en la pestaña Elementos finitos.
+Junto al `.geo` se deja tambien **`correr_3d.py`** por si prefiere lanzarlo fuera de la aplicacion, y todos
+los archivos quedan en la carpeta del proyecto, listos para abrir en PrePoMax o CGX. Gmsh y CalculiX vienen
+incluidos; indique otras rutas en la pestaña Elementos finitos si quiere.
 
-Una advertencia de lectura: los picos de von Mises en aristas vivas — borde del
-agujero, encuentro perfil-placa — son **singularidades de malla**. Su valor crece
-indefinidamente al refinar y no debe interpretarse como esfuerzo real. Lo que sí es
-confiable del modelo 3D es la distribución global, la deformada y el equilibrio de
-reacciones, que el programa reporta para que usted lo verifique.
-
-**(c) Modelo de cascarones CalculiX** — la exportación anterior, más liviana:
-placa y perfil como `S4` con la unión por `*EQUATION` bilineales. Sigue disponible en
-`Exportar > Modelo de cascaras CalculiX`.
+Una advertencia de lectura: los picos de von Mises PUNTUALES en aristas vivas — borde del agujero,
+encuentro perfil-placa — son **singularidades de malla**: crecen al refinar y no deben interpretarse como
+esfuerzo real. Por eso se verifica el von Mises promediado, y lo confiable del 3D es la distribucion
+global, la deformada y el equilibrio.
 
 ### 2.8 Rigidizadores de pletina
 
@@ -512,7 +550,7 @@ verifican por separado.
 | Llave | Aplastamiento, flexión, cortante, soldadura, breakout | ACI 17.11, AISC F11/J2 |
 | Rigidizador | Geometría, esbeltez, flexión, cortante, dos soldaduras | AISC B4.1a, F11, J2 |
 | Perfil | Esfuerzo normal combinado y cortante en la base | AISC H1, G2 |
-| FEA | von Mises, presión de contacto, tracción máxima por perno | — |
+| FEM 3D | tracción máxima por perno, presión de contacto, von Mises promediado en la placa, soldadura por zona | AISC J3.6, J8, J2.4 / criterio del programa |
 
 Opciones globales: concreto fisurado/no fisurado, condición A/B de refuerzo
 suplementario, diseño sísmico (factor 0.75 de ACI 17.10.5.2), concreto liviano λa,
@@ -546,9 +584,10 @@ pestaña) y hay un botón para copiarla al portapapeles.
   perno incluida.
 - **Memoria de cálculo Word** — datos de entrada, desarrollo del equilibrio de DG1,
   tabla de verificaciones con los D/C en rojo cuando no cumplen, avisos, resumen
-  del FEA y anexo con planta, elevación y mapas de von Mises, presión y deflexión.
+  del modelo 3D (soldadura y pernos), la placa aislada en planta con von Mises de ambas caras, presión de
+  contacto y deflexión, y anexo con planta y elevación.
 - **Imágenes PNG** sueltas.
-- **Modelo `.inp` de CalculiX**.
+- **Modelo 3D para Gmsh/CalculiX** (`.geo` y `correr_3d.py`).
 - **Proyecto `.pbase`** (JSON legible) para reabrir o correr por lotes.
 
 Todos los reportes salen en el sistema de unidades que haya elegido en la pestaña
@@ -564,19 +603,19 @@ Léalas antes de firmar nada con esto.
    mejor, reemplazarse importando la base oficial v14.1. Es un subconjunto
    transcrito, no la base certificada.
 2. **Placa circular**: las fórmulas cerradas usan el cuadrado equivalente de igual
-   área (`Leq = 0.8862·Dp`). Es una aproximación de diseño; el FEA sí modela el
-   contorno circular real.
+   área (`Leq = 0.8862·Dp`). Es una aproximación de diseño; el modelo 3D sí
+   modela el contorno circular real.
 3. **Rotaciones distintas de 0° y 90°**: las fórmulas de DG1 usan el rectángulo
    envolvente del perfil girado. Conservador, pero conservador.
 4. **Momento biaxial**: `Muy` entra en el esfuerzo del perfil, en la soldadura y en
-   el FEA, pero el equilibrio cerrado de aplastamiento de DG1 es uniaxial (usa
-   `Mux`). Con biaxial importante, gobierne por el FEA.
+   el modelo 3D, pero el equilibrio cerrado de aplastamiento de DG1 es uniaxial (usa
+   `Mux`). Con biaxial importante, gobierne por el 3D (o el metodo lineal).
 5. `ψec,N` y `ψec,V` de ACI se dejan en 1.0; si la resultante de tracción o el
    cortante son excéntricos respecto al grupo, ajústelos a mano.
 6. No se verifica: fatiga, efecto de palanca (*prying*) por flexibilidad de la
    placa, anclajes post-instalados adheridos, ni el refuerzo del pedestal.
-7. El FEA integrado es **lineal elástico** con contacto unilateral. No hay
-   plasticidad ni pandeo. Para eso está la exportación a CalculiX.
+7. El modelo 3D es **lineal elástico** con contacto y pernos unilaterales (resortes). No hay
+   plasticidad ni pandeo; la rigidez del cordon es una idealizacion.
 8. Para diseño sísmico, ACI 17.10 además exige que el anclaje sea gobernado por la
    fluencia dúctil del acero; el programa aplica el 0.75 pero **no** verifica ese
    requisito de jerarquía por usted.
@@ -597,23 +636,29 @@ placabase/
                         rigidizadores, detección de interferencias
   design.py             aplastamiento, espesor, soldadura, llave, rigidizadores
   anchors.py            ACI 318-19 Cap. 17 y AISC J3
-  fea.py                elemento MITC4, agujeros mallados, contacto unilateral
-  ccx.py                exportación de cascarones a CalculiX
+  linear.py             reparto lineal de fuerzas por perno (placa rigida)
+  linear_checks.py      verificaciones AISC del reparto lineal y validez de la placa rigida
+  fem_checks.py         verificaciones FEM a partir del 3D (Fem3D, fem_bolt/press/vm/weld)
   mesh3d.py             modelo sólido 3D: .geo de Gmsh, .inp de CalculiX y pipeline
-  view3d.py             lectura del .frd y dibujo 3D de resultados
+  view3d.py             lectura del .frd, dibujo 3D y von Mises promediado
+  plan3d.py             placa aislada en planta (mapas de la memoria)
+  rep3d.py              empaqueta el resultado 3D (Fem3D, imagenes) para el veredicto
+  weldfe.py             soldadura como conectores entre cuerpos separados
   explain.py            registro de ecuaciones para la memoria detallada
-  draw.py               planta, elevación y mapas del FEA
+  draw.py               planta, elevación y detalle del rigidizador
   report.py             PDF y DOCX
-  weld3d.py             soldadura, pernos y contacto leidos del modelo 3D
+  weld3d.py             postproceso 3D: pernos, contacto y soldadura (fusionado)
   dialogs.py            seccion personalizada y biblioteca de materiales
   data/aisc_shapes.json catalogo AISC integrado (1,660 perfiles)
   ui.py, ui_widgets.py  interfaz PySide6
 ejemplos/               tres proyectos resueltos
 ```
 
-Para tocar el motor sin abrir la GUI: `python run.py --selftest` corre los 45
-casos y verifica, entre otras cosas, que el residuo de equilibrio del FEA sea nulo
-en todos.
+Para tocar el motor sin abrir la GUI: `python run.py --selftest` corre los casos y
+verifica, entre otras cosas, el equilibrio del reparto lineal en todos y una integracion independiente en
+malla; con `--3d` (o `python selftest.py --3d`) corre ademas el analisis solido de PB-01, la traccion pura
+y el respaldo fusionado. `python run.py proyecto.pbase --3d carpeta --pdf memoria.pdf` hace el calculo
+completo por lotes.
 
 ---
 
@@ -633,30 +678,25 @@ una herramienta de cálculo, no un sustituto del criterio profesional.*
 
 ## Modelo solido 3D: como se lee la soldadura
 
-La union perfil-placa esta fusionada en el solido. Para cada pared del perfil (alas
-y alma de un W, caras de un HSS, perimetro de un tubo) se recorre su linea media en
-tramos; en cada tramo se promedian los esfuerzos de una franja situada justo por
-encima del pie del cordon (para no leer la singularidad de la esquina) y se
-integran en el espesor de la pared:
+Con el modelo de **conectores** (predeterminado) la fuerza del cordon se lee directamente de los resortes
+entre el perfil y la placa (ver "Soldadura perfil-placa" arriba). Como en la DG1, la compresion se transmite
+por contacto y el cordon se verifica a traccion y cortante: f = raiz(max(f_n,0)² + f_l² + f_t²) por unidad
+de longitud de cada linea, contra la resistencia del metodo vectorial de AISC J2.4 (con el incremento
+direccional si esta activado en la pestaña Soldadura) y, con la suma de las lineas de la pared, contra la
+rotura del metal base.
 
-    f_n = t · σzz      normal al cordon (+ traccion)
-    f_l = t · τ        cortante a lo largo del cordon
-    f_t = t · τ        cortante transversal
+Se reportan dos valores por zona:
 
-Como en la DG1, la compresion se transmite por contacto y el cordon se verifica a
-traccion y cortante: f = raiz(max(f_n,0)² + f_l² + f_t²), contra la resistencia del
-metodo vectorial de AISC J2.4 (con el incremento direccional si esta activado en la
-pestana Soldadura) limitada por el metal base.
+- **D/C pico** — el punto mas cargado de la curva suavizada (ventana de 4 veces el cateto). Suele estar donde
+  el alma llega al ala o en los extremos: la placa es flexible y la fuerza se concentra ahi.
+- **D/C media** — la fuerza de la linea repartida en su longitud, que es lo que supone el calculo de forma
+  cerrada.
 
-Se reportan dos valores:
+Con el modelo **fusionado** (respaldo) la union es monolitica y la fuerza se deduce de los esfuerzos del
+perfil justo por encima del pie del cordon (franja delgada, integrada en el espesor de la pared):
+f_n = t·σzz, f_l = t·τ(z,t), f_t = t·τ(z,n). Ahi los picos incluyen la concentracion de esquina y una
+zona sin soldar transmite igual; por eso se prefiere el modelo de conectores.
 
-- **D/C pico** — el tramo mas cargado. Suele estar donde el alma llega al ala: la
-  placa es flexible y la traccion se concentra ahi. Es una concentracion elastica
-  local; las soldaduras tienen cierta capacidad de redistribuir, pero conviene
-  mirarla.
-- **D/C media** — la fuerza de toda la pared repartida en su longitud, que es lo
-  que supone el calculo de forma cerrada.
-
-Verificacion: la fuerza vertical integrada en el pie del perfil reproduce la carga
-axial aplicada (en el caso de prueba, −149.8 kip contra Pu = −150 kip), y la
-reaccion del concreto menos la traccion de los pernos cierra con Pu.
+Verificacion: la reaccion del concreto menos la traccion de los pernos cierra con Pu; con conectores,
+ademas, el contacto menos la traccion de los cordones cierra con Pu y la suma del cortante de los cordones
+cierra con V.

@@ -12,6 +12,8 @@ import dataclasses
 BOLT_FORCE_METHODS = ["DG1 (Tu repartida por igual entre los pernos traccionados)",
                       "Lineal elastico (placa rigida, secciones planas)",
                       "Modelo 3D (fuerza del perno del analisis solido)"]
+WELD_MODELS = ["Conectores (cordon como resortes entre cuerpos separados)",
+               "Fusionado (union monolitica, equivale a CJP)"]
 MESH3D_MODES = ["Rapida (recomendada, ~30 s)", "Automatica (fina, ~3 min)"]
 PATTERNS = ["Perimetral (4 lados)", "2 lados (eje mayor)",
             "2 lados (eje menor)", "Circular", "Coordenadas manuales"]
@@ -358,6 +360,7 @@ class FEAOpts:
     mesh3d_mode: str = "Rapida (recomendada, ~30 s)"   # ver MESH3D_MODES
     shear_arm: float = -1.0      # brazo del cortante sobre la placa, in (-1 = automatico)
     vm_avg_factor: float = 1.0   # radio de promedio del von Mises 3D, en espesores de placa
+    weld_model: str = "Conectores (cordon como resortes entre cuerpos separados)"   # ver WELD_MODELS
 
 
 @dataclass

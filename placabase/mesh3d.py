@@ -578,6 +578,16 @@ def build_inp(prj: Project, mesh_inp: str, out_inp: str, height: float = 0.0) ->
     Gs = ES_KSI / (2.0 * (1.0 + NU_STEEL))
     kbh = Gs * g.Ase / Lb
 
+    # soldadura: con el modelo de conectores se separan el cuerpo superior (perfil, rigidizadores) y el
+    # inferior (placa, llave) duplicando los nodos de la interfaz (ver weldfe)
+    split = None
+    if str(getattr(prj.fea, "weld_model", "")).startswith("Conectores"):
+        from . import weldfe
+        sp = str(Path(mesh_inp).with_name(Path(mesh_inp).stem + "_split.inp"))
+        split = weldfe.split_interface(mesh_inp, sp, p.tp)
+        if split is not None:
+            mesh_inp = sp
+
     nodes, elems = read_mesh_inp(mesh_inp)
     if not nodes or not elems:
         raise RuntimeError("La malla no contiene nodos o elementos solidos.")
@@ -762,6 +772,14 @@ def build_inp(prj: Project, mesh_inp: str, out_inp: str, height: float = 0.0) ->
             eid += 1
         L += [f"*SPRING, ELSET=EFRIC{dof}", str(dof), f"{kfric:.8f}"]
 
+    # --- soldadura perfil-placa como conectores entre los cuerpos separados
+    wmeta = None
+    if split is not None:
+        from . import weldfe
+        recs, _walls_, _ = weldfe.match_lines(prj, split, weldfe.boundary_edges(split))
+        wcards, eid, wmeta = weldfe.write_cards(prj, split, recs, eid)
+        L += wcards
+
     ld = prj.eloads
     # En CalculiX los giros de un cuerpo rigido viven en un nodo aparte
     # (ROT NODE): sus grados 1, 2, 3 son las rotaciones y ahi van los momentos.
@@ -786,7 +804,9 @@ def build_inp(prj: Project, mesh_inp: str, out_inp: str, height: float = 0.0) ->
             "rings": {str(k): v for k, v in rings.items()},
             "ring_ground": {str(k): [g for _, g in v] for k, v in ring_pairs.items()},
             "base": base, "base_ground": [g for _, g in conc_pairs],
-            "n_bolts": len(G.bolt_positions(prj))}
+            "n_bolts": len(G.bolt_positions(prj)), "mesh_used": os.path.basename(mesh_inp)}
+    if wmeta is not None:
+        meta["conn"] = wmeta
     Path(out_inp).with_suffix(".meta.json").write_text(json.dumps(meta),
                                                         encoding="utf-8")
     return out_inp
@@ -850,9 +870,23 @@ def full_3d(prj: Project, folder: str, stem: str = "modelo3d", progress=None):
     say("Leyendo resultados y revisando la soldadura ...")
     from .view3d import load_results
     from .weld3d import postprocess
+    import json as _json
+    try:                                            # con conectores la malla es la separada
+        mu = _json.loads(Path(inp).with_suffix(".meta.json").read_text(encoding="utf-8")).get("mesh_used")
+        if mu:
+            mesh_inp = str(Path(mesh_inp).with_name(mu))
+    except Exception:
+        pass
     res = load_results(mesh_inp, frd)
     if not res.ok:
         return None, res.msg
+    try:                                            # caras de la interfaz: no son superficie visible
+        dup = set(_json.loads(Path(inp).with_suffix(".meta.json").read_text(encoding="utf-8"))
+                  .get("conn", {}).get("dup", {}).values())
+        if dup:
+            res.tris = [t for t in res.tris if not all(n in dup for n in t)]
+    except Exception:
+        pass
     try:
         res.post = postprocess(prj, res, str(Path(inp).with_suffix(".meta.json")))
     except Exception as e:

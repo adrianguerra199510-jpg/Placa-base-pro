@@ -2,23 +2,25 @@
 """
 Postproceso del modelo solido 3D.
 
-1. SOLDADURA PERFIL-PLACA.  En el solido la union esta fusionada, asi que la
-   fuerza que cruza el cordon se obtiene de los esfuerzos del propio perfil
-   justo por encima de la placa.  Para cada pared (alas y alma de un W, caras de
-   un HSS, perimetro de un tubo) se recorre su linea media en tramos; en cada
-   tramo se promedian los esfuerzos nodales de una franja delgada situada por
-   encima del pie de la soldadura (para no leer la singularidad de la esquina) y
-   se integra en el espesor de la pared:
+1. SOLDADURA PERFIL-PLACA.  Dos modelos (opciones del proyecto, fea.weld_model):
+
+   · CONECTORES (predeterminado, ver weldfe.py).  Perfil y placa son cuerpos separados unidos por contacto
+     solo-compresion y por conectores de cordon (normal solo-traccion + cortante) en cada linea soldada; la
+     fuerza del cordon se lee directo de los resortes, se suaviza en una ventana movil y se compara con AISC
+     J2.4 por linea y con la rotura del metal base de la pared.
+
+   · FUSIONADO (respaldo).  La union es monolitica (equivale a una CJP), asi que la fuerza que cruza el
+     cordon se deduce de los esfuerzos del propio perfil justo por encima de la placa: para cada pared se
+     promedian los esfuerzos nodales de una franja delgada por encima del pie de la soldadura y se integra
+     en el espesor:
 
        f_n = t · σzz        (normal al plano del cordon; + traccion)
        f_l = t · τ(z,t)     (cortante longitudinal, a lo largo del cordon)
        f_t = t · τ(z,n)     (cortante transversal)
 
-   Siguiendo la practica de la DG1, la compresion se transmite por contacto
-   directo (extremo del perfil preparado) y el cordon se verifica para
-   traccion y cortante:  f = raiz( max(f_n,0)² + f_l² + f_t² ).
-   La capacidad es la del metodo vectorial elastico de AISC J2.4 sin incremento
-   direccional (conservador), limitada por el metal base (J4.2).
+   En ambos, siguiendo la DG1, la compresion se transmite por contacto y el cordon se verifica a traccion y
+   cortante:  f = raiz( max(f_n,0)² + f_l² + f_t² ), con el metodo vectorial elastico de AISC J2.4 y el limite
+   del metal base (J4.2).
 
 2. PERNOS.  Traccion de cada anclaje = reaccion en los resortes de su anillo.
 
@@ -71,6 +73,9 @@ class Post3D:
     T_bolts: float = 0.0
     Fz_weld: float = 0.0     # resultante vertical en el pie del perfil
     weld_ratio: float = 0.0
+    F_bear: float = 0.0          # compresion transmitida por contacto perfil-placa (modelo de conectores)
+    p_bear: float = 0.0          # presion de contacto maxima perfil-placa, ksi
+    weld_model: str = ""
     msg: str = ""
 
 
@@ -178,27 +183,9 @@ def _spec_txt(spec, u):
 
 
 # ================================================================ calculo
-def postprocess(prj: Project, res, meta_path: str) -> Post3D:
-    out = Post3D()
-    u = prj.units()
-    meta = json.loads(Path(meta_path).read_text(encoding="utf-8"))
-    tp = meta["tp"]
-    nodes, stress, disp, forc = res.nodes, res.stress, res.disp, res.forc
-
-    # ------------------------------------------------------------- pernos
-    pos = G.bolt_positions(prj)
-    for k in range(1, len(pos) + 1):
-        gs = meta.get("ring_ground", {}).get(str(k), [])
-        T = -sum(forc.get(g, (0, 0, 0))[2] for g in gs)
-        out.bolts.append((k, pos[k - 1][0], pos[k - 1][1], max(0.0, T)))
-    out.T_bolts = sum(b[3] for b in out.bolts)
-
-    # ----------------------------------------------------------- concreto
-    out.R_conc = sum(forc.get(g, (0, 0, 0))[2] for g in meta.get("base_ground", []))
-    uzmin = min((disp[n][2] for n in meta.get("base", []) if n in disp), default=0.0)
-    out.p_max = meta["ks"] * max(0.0, -uzmin)
-
-    # ----------------------------------------------------------- soldadura
+def _zones_fused(prj, res, meta, out, tp, u):
+    """Modelo fusionado: la fuerza del cordon se deduce de los esfuerzos del perfil sobre el pie."""
+    nodes, stress = res.nodes, res.stress
     # nodos del perfil cerca de la placa (una sola pasada)
     cand = [(n, x, y, z) for n, (x, y, z) in nodes.items()
             if tp + 1e-4 < z < tp + 4.0 and n in stress]
@@ -265,6 +252,41 @@ def postprocess(prj: Project, res, meta_path: str) -> Post3D:
     out.zones = list(zones.values())
     out.Fz_weld = Fz_total
     out.weld_ratio = max((z.ratio for z in out.zones), default=0.0)
+
+
+
+def postprocess(prj: Project, res, meta_path: str) -> Post3D:
+    out = Post3D()
+    u = prj.units()
+    meta = json.loads(Path(meta_path).read_text(encoding="utf-8"))
+    tp = meta["tp"]
+    nodes, stress, disp, forc = res.nodes, res.stress, res.disp, res.forc
+
+    # ------------------------------------------------------------- pernos
+    pos = G.bolt_positions(prj)
+    for k in range(1, len(pos) + 1):
+        gs = meta.get("ring_ground", {}).get(str(k), [])
+        T = -sum(forc.get(g, (0, 0, 0))[2] for g in gs)
+        out.bolts.append((k, pos[k - 1][0], pos[k - 1][1], max(0.0, T)))
+    out.T_bolts = sum(b[3] for b in out.bolts)
+
+    # ----------------------------------------------------------- concreto
+    out.R_conc = sum(forc.get(g, (0, 0, 0))[2] for g in meta.get("base_ground", []))
+    uzmin = min((disp[n][2] for n in meta.get("base", []) if n in disp), default=0.0)
+    out.p_max = meta["ks"] * max(0.0, -uzmin)
+
+    # ----------------------------------------------------------- soldadura
+    if meta.get("conn"):
+        # modelo de conectores: la fuerza del cordon se lee directo de los resortes
+        from . import weldfe
+        out.zones, tot = weldfe.postprocess_conn(prj, res, meta["conn"], WeldZone, lambda sp: _spec_txt(sp, u))
+        out.Fz_weld = tot["F_weld_n"]
+        out.F_bear, out.p_bear = tot["F_bear"], tot["p_bear"]
+        out.weld_model = "conectores"
+        out.weld_ratio = max((z.ratio for z in out.zones), default=0.0)
+    else:
+        _zones_fused(prj, res, meta, out, tp, u)
+        out.weld_model = "fusionado"
 
     L = prj.eloads
     out.msg = (f"Concreto {u.q('F', out.R_conc)}  −  pernos {u.q('F', out.T_bolts)}  =  "

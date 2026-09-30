@@ -83,9 +83,22 @@ def fem_checks(prj: Project, br: Bearing, fem: Fem3D, rec=None) -> list:
         rec.section("I.  ELEMENTOS FINITOS SOLIDOS 3D  (Gmsh + CalculiX)")
         rec.text("Modelo solido de tetraedros cuadraticos: placa con los agujeros taladrados, perfil, "
                  "rigidizadores y llave; concreto como resortes de Winkler solo a compresion y pernos como "
-                 "resortes solo a traccion (paso no lineal). La compresion perfil-placa se transmite por "
-                 "contacto y el cordon se verifica a traccion y cortante (AISC J2.4).")
+                 "resortes solo a traccion (paso no lineal).")
+        if getattr(post, "weld_model", "") == "conectores":
+            rec.text("Soldadura: el perfil y la placa son cuerpos separados. La compresion pasa por contacto "
+                     "(resortes solo-compresion) y cada linea de cordon es un conector de traccion y cortante "
+                     "cuya fuerza se lee directo del resorte (F = k·Δ); un lado sin cordon no transmite. La "
+                     "fuerza por unidad de longitud se suaviza en una ventana de 4 veces el cateto y se compara "
+                     "con φ·0.60·FEXX·garganta·kd por linea (AISC J2.4) y con la rotura del metal base.")
+        else:
+            rec.text("Soldadura: union perfil-placa monolitica (equivale a CJP); la fuerza del cordon se deduce "
+                     "de los esfuerzos del perfil sobre el pie y se verifica con AISC J2.4.")
         rec.add("malla", mesh_txt, "", None, "-")
+        if getattr(post, "weld_model", "") == "conectores":
+            rec.add("Compresion por contacto", "Σ fuerza de los resortes de contacto perfil-placa", "",
+                    post.F_bear, "F", "", "la compresion no pasa por el cordon (DG1)")
+            rec.add("Traccion en cordones", "Σ fuerza normal de los conectores de cordon", "",
+                    post.Fz_weld, "F", "", "equilibrio vertical: contacto − cordones = Pu")
         rec.add("Tmax perno", "reaccion en los resortes del anillo de la tuerca", "",
                 max((b[3] for b in bolts), default=0.0), "F", "AISC J3.6")
         rec.add("pmax", "ks · hundimiento maximo", "", post.p_max, "S", "AISC J8")

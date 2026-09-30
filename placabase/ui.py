@@ -27,7 +27,7 @@ from .model import (Project, PATTERNS, ANCHOR_TYPES, WELD_TYPES, PLATE_SHAPES,
                     LUG_DIRS, STIFF_POSITIONS, STIFF_SHAPES, STIFF_SPACING)
 from . import materials as M
 from .shapes import CATALOG, W_SHAPE, HSS_RECT, HSS_ROUND, PIPE, KIND_LABELS
-from .model import LUG_TYPES, save_book, load_book, MESH3D_MODES, BOLT_FORCE_METHODS
+from .model import LUG_TYPES, save_book, load_book, MESH3D_MODES, BOLT_FORCE_METHODS, WELD_MODELS
 from .dialogs import SectionDialog, MaterialsDialog
 from PySide6.QtWidgets import QListWidget, QInputDialog
 from .solver import solve
@@ -558,6 +558,7 @@ class MainWindow(QMainWindow):
         f.group("Modelo SOLIDO 3D (Gmsh + CalculiX)")
         f.text("CalculiX propio (opcional)", "fea.ccx_path", help="Dejelo vacio: el programa usa el CalculiX incluido en la carpeta solvers. Solo escriba una ruta si quiere usar otra version de ccx.exe.")
         f.combo("Calidad de la malla 3D", "fea.mesh3d_mode", MESH3D_MODES, help="Rapida (predeterminada): tetraedros del doble de tamano que la automatica (~30 s en lugar de ~3 min). En el estudio de convergencia (3 conexiones) difiere menos de 3 % de la automatica en traccion en pernos, presion, deflexion y von Mises PROMEDIADO. El pico puntual de von Mises no converge con ninguna malla. Automatica: mas fina y lenta. Un tamano manual mayor que 0 (abajo) tiene prioridad.")
+        f.combo("Modelo de la soldadura", "fea.weld_model", WELD_MODELS, help="Conectores (recomendado): el perfil y la placa son cuerpos separados; la compresion pasa por contacto y cada linea de cordon es un conector de traccion y cortante cuya fuerza se lee directo del resorte (una zona sin soldar o un lado sin cordon no transmite). Fusionado: union monolitica que equivale a una CJP; la fuerza del cordon se deduce de los esfuerzos del perfil y una zona sin soldar transmite igual.")
         f.num("Radio de promedio del von Mises 3D (× espesor)", "fea.vm_avg_factor", 0.1, 3.0, 0.1, 2, help="El von Mises puntual del modelo solido crece sin limite al refinar la malla (singularidades en el borde de los agujeros y en el pie del perfil). El programa verifica el maximo PROMEDIADO: promedio del tensor de esfuerzos, ponderado por area, en un circulo de este radio (en espesores de placa) sobre la misma cara. Predeterminado 1.0. Un radio menor da valores mas altos y mas sensibles a la malla; el radio nunca baja del tamano del elemento. Este valor si converge con la malla.")
         f.num("Tamano de malla 3D (0 = automatico)", "fea.mesh3d", 0, 20, uk="L", help="Tamano caracteristico de los tetraedros. Valores pequenos dan mas detalle y mucho mas tiempo de calculo. Deje 0 para que lo estime el programa.")
         f.note("El analisis solido 3D es el unico analisis de elementos finitos del programa: sus "

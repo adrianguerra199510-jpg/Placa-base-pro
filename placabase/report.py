@@ -164,12 +164,28 @@ def fem_section(prj: Project, res: Results, us: UnitSet):
         return None
     from .weld3d import summary_rows
     post, rep = fem.post, (fem.rep or {})
+    conn = getattr(post, "weld_model", "") == "conectores"
     intro = ("Modelo solido de tetraedros cuadraticos (Gmsh + CalculiX): placa con los agujeros "
              "taladrados, perfil, rigidizadores y llave; concreto como resortes de Winkler solo a "
-             "compresion y pernos como resortes solo a traccion (paso no lineal). La compresion "
-             "perfil-placa se transmite por contacto; el cordon se verifica a traccion y cortante "
-             "con el metodo vectorial de AISC J2.4. D/C pico = punto mas cargado (concentracion "
-             "elastica local); D/C media = fuerza de la pared repartida en su longitud.")
+             "compresion y pernos como resortes solo a traccion (paso no lineal). ")
+    if conn:
+        intro += ("SOLDADURA: el perfil y la placa se modelan como cuerpos separados. La compresion pasa por "
+                  "contacto (resortes solo-compresion en toda la huella) y cada linea de cordon (cara exterior "
+                  "o interior de cada pared, y la base de los rigidizadores) es un conector de traccion y "
+                  "cortante con la rigidez de la garganta; su fuerza se lee directamente del resorte, y un "
+                  "lado sin cordon no transmite carga. La fuerza por unidad de longitud se suaviza en una "
+                  "ventana movil de 4 veces el cateto (redistribucion por ductilidad del cordon) y se "
+                  "compara, por linea, con φ·0.60·FEXX·garganta·kd (AISC J2.4) y, con la suma de las lineas "
+                  "de la pared, con la rotura del metal base. D/C pico = maximo de la curva suavizada; "
+                  "D/C media = fuerza de la linea repartida en su longitud.")
+    else:
+        intro += ("SOLDADURA: union monolitica (equivale a CJP); la fuerza del cordon se obtiene integrando en "
+                  "el espesor de cada pared los esfuerzos del perfil justo por encima del pie del cordon y se "
+                  "verifica con el metodo vectorial de AISC J2.4. D/C pico = punto mas cargado; D/C media = "
+                  "fuerza de la pared repartida en su longitud.")
+    if conn:
+        intro += (f" Compresion por contacto perfil-placa = {us.q('F', post.F_bear)}; traccion tomada por los "
+                  f"cordones = {us.q('F', post.Fz_weld)}.")
     weld_rows, _ = summary_rows(prj, post)
     b_hdr, b_rows = bolt_rows(prj, res, us)
     plan = rep.get("plan") or {}
