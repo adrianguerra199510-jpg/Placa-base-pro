@@ -11,6 +11,7 @@ import dataclasses
 # --------------------------------------------------------------- catalogos
 WELD_MODELS = ["Conectores (cordon como resortes entre cuerpos separados)",
                "Fusionado (union monolitica, equivale a CJP)"]
+ENGINES = ["Placas (shell S6, recomendado)", "Solido 3D (tetraedros, referencia)"]
 MESH3D_MODES = ["Automatica (recomendada)", "Fina (mas lenta)"]
 PATTERNS = ["Perimetral (4 lados)", "2 lados (eje mayor)",
             "2 lados (eje menor)", "Circular", "Coordenadas manuales"]
@@ -355,6 +356,7 @@ class FEAOpts:
     ccx_path: str = "ccx"
     gmsh_path: str = "gmsh"
     mesh3d: float = 0.0          # tamano de malla 3D (0 = automatico)
+    engine: str = "Placas (shell S6, recomendado)"   # ver ENGINES
     mesh3d_mode: str = "Automatica (recomendada)"   # ver MESH3D_MODES
     shear_arm: float = -1.0      # brazo del cortante sobre la placa, in (-1 = automatico)
     vm_avg_factor: float = 1.0   # radio de promedio del von Mises 3D, en espesores de placa

@@ -27,7 +27,7 @@ from .model import (Project, PATTERNS, ANCHOR_TYPES, WELD_TYPES, PLATE_SHAPES,
                     LUG_DIRS, STIFF_POSITIONS, STIFF_SHAPES, STIFF_SPACING)
 from . import materials as M
 from .shapes import CATALOG, W_SHAPE, HSS_RECT, HSS_ROUND, PIPE, KIND_LABELS
-from .model import LUG_TYPES, save_book, load_book, MESH3D_MODES, WELD_MODELS
+from .model import LUG_TYPES, save_book, load_book, MESH3D_MODES, WELD_MODELS, ENGINES
 from .dialogs import SectionDialog, MaterialsDialog
 from PySide6.QtWidgets import QListWidget, QInputDialog
 from .solver import solve
@@ -380,7 +380,7 @@ class MainWindow(QMainWindow):
                      "Ø5/8 in lleva agujero de 1-3/16 in = 30.2 mm. Si el grupo se "
                      "coloca con plantilla se justifica uno menor: la regla F844 (nota "
                      "al pie de la tabla) da db+5/16 hasta 1 in, y la ajustada db+1/16.")
-        f.num("Diametro de arandela (0 = automatico)", "bolts.washer_d", 0, 20, uk="L", help="Diametro exterior de la arandela o de la zona donde la tuerca apoya sobre la placa. 0 = automatico: el mayor entre el ancho de la tuerca hex pesada y 2.2 veces el diametro del perno. El modelo 3D aplica la carga del perno sobre esa corona (no en el borde del agujero).")
+        f.num("Diametro de arandela (0 = automatico)", "bolts.washer_d", 0, 20, uk="L", help="Diametro exterior de la arandela o de la zona donde la tuerca apoya sobre la placa. 0 = automatico: el mayor entre el ancho de la tuerca hex pesada y 2.2 veces el diametro del perno. (Solo modelo solido; el de placas aplica la carga en el anillo del perno.) El modelo 3D aplica la carga del perno sobre esa corona (no en el borde del agujero).")
         f.num("Espesor de arandela (-1 = auto, 0 = sin)", "bolts.washer_t", -1, 5, uk="L", help="Espesor de la arandela del modelo 3D, unida a la placa: rigidiza la zona del agujero y reparte la carga del perno. -1 = automatico (0.25·db); 0 = sin arandela (la carga entra en la corona de la propia placa). Una arandela de placa gruesa se acerca a una zona rigida.")
         f.num("Abrg manual (0 = hex pesada)", "bolts.Abrg_user", 0, 100, uk="A", help="Area neta de aplastamiento de la cabeza. Deje 0 para que se calcule de la tuerca hexagonal pesada; indique un valor si usa una placa de anclaje soldada en la punta.")
         f.group("Anclaje adhesivo (postinstalado)")
@@ -561,7 +561,8 @@ class MainWindow(QMainWindow):
         f.combo("Modulo de balasto", "fea.ks_mode", ["Ec/hped", "manual"], help="Ec/hped estima el modulo de balasto como el modulo elastico del concreto dividido entre la altura del pedestal (minimo 6 in). Con manual usted lo impone. Lo usa el modelo solido 3D.")
         f.num("ks manual", "fea.ks_manual", 1, 1e5, uk="K", help="Modulo de balasto del apoyo de concreto. Solo se usa en modo manual.")
         f.num("Brazo del cortante (-1 = automatico)", "fea.shear_arm", -1, 60, uk="L", help="Distancia entre donde el cortante entra en la placa (cara superior) y donde lo devuelven los pernos o la llave. El par V·e es un momento sobre la placa: hace que los pernos de un lado tengan mas traccion que los del otro. -1 = automatico: tp/2 + mortero sin llave; tp + H/2 con llave. 0 = sin efecto del cortante. Lo usa el modelo 3D (altura del punto de aplicacion de las cargas).")
-        f.group("Modelo SOLIDO 3D (Gmsh + CalculiX)")
+        f.group("Analisis de elementos finitos (Gmsh + CalculiX)")
+        f.combo("Tipo de elementos", "fea.engine", ENGINES, help="Placas (recomendado): cada pieza de acero se modela por su superficie media con elementos de placa (shell S6, Reissner-Mindlin), como hacen los programas de conexiones: modelo mas liviano y malla mas robusta. La placa bajo el ala/pared del perfil se liga a su linea media para representar el espesor. Contra el solido: traccion en pernos -9 a +5 %, presion ±5 %. Solido 3D: tetraedros cuadraticos de cada pieza (referencia; incluye arandelas y cordones como conectores).")
         f.text("CalculiX propio (opcional)", "fea.ccx_path", help="Dejelo vacio: el programa usa el CalculiX incluido en la carpeta solvers. Solo escriba una ruta si quiere usar otra version de ccx.exe.")
         f.combo("Calidad de la malla 3D", "fea.mesh3d_mode", MESH3D_MODES, help="Automatica (recomendada): el programa calcula el tamano de elemento del proyecto: el mayor entre 1.2 veces el radio de promedio del von Mises (con eso el esfuerzo promediado converge, ±2 % en el estudio de convergencia) y la raiz del area de la placa / 400 (limita el costo en placas grandes, ~70-90 mil nodos). Fina: 0.65 veces ese tamano (mas lenta). Si el calculo falla, el programa reintenta solo con una malla mas gruesa. Un tamano manual mayor que 0 (abajo) tiene prioridad.")
         f.combo("Modelo de la soldadura", "fea.weld_model", WELD_MODELS, help="Conectores (recomendado): el perfil y la placa son cuerpos separados; la compresion pasa por contacto y cada linea de cordon es un conector de traccion y cortante cuya fuerza se lee directo del resorte (una zona sin soldar o un lado sin cordon no transmite). Fusionado: union monolitica que equivale a una CJP; la fuerza del cordon se deduce de los esfuerzos del perfil y una zona sin soldar transmite igual.")

@@ -1,4 +1,4 @@
-# PlacaBasePro 1.2
+# PlacaBasePro 2.0
 
 Diseño y verificación de placas base para perfiles **W, HSS cuadrado/rectangular,
 HSS circular y Pipe**, con dibujo paramétrico, anclajes ACI 318-19, llave de corte,
@@ -10,6 +10,36 @@ Normas: **AISC 360-22**, **AISC Design Guide 1 (2ª Ed.)**, **ACI 318-19 Cap. 17
 kN / N / tonf / kgf, momento y esfuerzo por separado. Se aplican a las entradas, a la
 tabla de resultados y a los reportes. El cálculo interno siempre corre en in-kip-ksi,
 que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
+
+## Novedades de la 2.0: modelo de placas (shell) en lugar de solido 3D
+
+El analisis de elementos finitos usa ahora **elementos tipo placa** (triangulos cuadraticos S6, Reissner-Mindlin,
+CalculiX) por defecto (`Tipo de elementos` en la pestana de elementos finitos). El solido de tetraedros sigue
+disponible como referencia (`Solido 3D (tetraedros, referencia)`).
+
+- Se modelan a media superficie: placa base, alas/alma/caras del perfil y rigidizadores (poligono prolongado hasta
+  el eje de la pared). La huella del perfil y de los rigidizadores se une a la placa con ecuaciones lineales
+  solo en los nodos que caen sobre sus bordes (unir toda la huella rigidiza de mas).
+- Concreto: resortes Winkler solo a compresion; pernos: resortes solo a traccion en el anillo de la arandela;
+  llave de corte: resortes horizontales. Acoplamiento superior por MPC lineal (cuerpo rigido).
+- Paso no lineal con NLGEOM (necesario para que CalculiX itere los resortes unilaterales).
+- Soldadura: se extrae del campo de esfuerzos (union fusionada); los conectores y las arandelas solo existen en
+  el modelo solido.
+
+Validacion contra el solido (malla rapida), mismos casos:
+
+| Caso | ΣT pernos (placas / solido) | p max (ksi) | von Mises promediado (ksi) |
+|---|---|---|---|
+| PB-02 | 43.8 / 45.9 | 1.734 / 1.736 | 24.1 / 22.9 |
+| PB-01 (sin llave) | 93.9 / 99.6 | 3.56 / 3.74 | 42.4 / 26.9 (cara inferior 27.1) |
+| IDEA 1000 kN (kN, 3 pernos tipicos) | 127/92/155 / 121/100/158 (IDEA 112/104/172) | — | ~593 / ~517-540 MPa |
+
+Los pernos salen entre −9 % y +5 % del solido (tendencia ligeramente no conservadora, ~5-9 %); la presion
+coincide ±5 %; el von Mises es conservador (+5 a +57 %) junto a la huella del perfil.
+**Limitaciones:** no usar placas con espesor muy grande frente a su vuelo (regimen de viga de gran peralte; con
+tp = 8 in el resultado no es valido: use el solido); no modela arandelas ni conectores de soldadura; la llave
+de corte es un conjunto de resortes. La compatibilidad del CalculiX 2.14 incluido en Windows no se ha probado
+con ecuaciones/resortes; con CalculiX 2.21 se probo completo.
 
 ## Novedades: malla 3D automatica, reintentos y boton para cancelar
 

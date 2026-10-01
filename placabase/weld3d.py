@@ -260,6 +260,7 @@ def postprocess(prj: Project, res, meta_path: str) -> Post3D:
     u = prj.units()
     meta = json.loads(Path(meta_path).read_text(encoding="utf-8"))
     tp = meta["tp"]
+    z_wall = meta.get("z_wall", tp)           # cota donde arrancan las paredes (en el modelo de placas, tp/2)
     nodes, stress, disp, forc = res.nodes, res.stress, res.disp, res.forc
 
     # ------------------------------------------------------------- pernos
@@ -285,7 +286,7 @@ def postprocess(prj: Project, res, meta_path: str) -> Post3D:
         out.weld_model = "conectores"
         out.weld_ratio = max((z.ratio for z in out.zones), default=0.0)
     else:
-        _zones_fused(prj, res, meta, out, tp, u)
+        _zones_fused(prj, res, meta, out, z_wall, u)
         out.weld_model = "fusionado"
 
     L = prj.eloads

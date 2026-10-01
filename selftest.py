@@ -267,8 +267,9 @@ if "--3d" in sys.argv:
     from placabase import mesh3d
     from placabase.rep3d import make_fem
     print()
+    from placabase.model import ENGINES
     print("ANALISIS SOLIDO 3D (--3d)")
-    _p3 = Project()
+    _p3 = Project(); _p3.fea.engine = ENGINES[1]
     _res, _msg = mesh3d.full_3d(_p3, tempfile.mkdtemp(prefix="pb3d_"))
     if _res is None:
         FAIL.append(f"3D: no corrio: {_msg[-300:]}")
@@ -294,7 +295,7 @@ if "--3d" in sys.argv:
         if _post.weld_model != "conectores" or abs(_eqw) > 0.02 * abs(_p3.eloads.Pu):
             FAIL.append("3D: equilibrio vertical del cordon con conectores")
         # traccion pura: todo el axial pasa por los cordones y por los pernos
-        _pt = Project(); _pt.loads.Pu = -100.0; _pt.loads.Mux = 0.0; _pt.loads.Vux = 0.0
+        _pt = Project(); _pt.fea.engine = ENGINES[1]; _pt.loads.Pu = -100.0; _pt.loads.Mux = 0.0; _pt.loads.Vux = 0.0
         _rt, _mt = mesh3d.full_3d(_pt, tempfile.mkdtemp(prefix="pb3d_"))
         if _rt is None:
             FAIL.append(f"3D traccion pura: no corrio: {_mt[-200:]}")
@@ -305,12 +306,33 @@ if "--3d" in sys.argv:
             if not (abs(_pp.Fz_weld - 100.0) < 2.0 and _pp.F_bear < 1.0 and abs(_pp.T_bolts - 100.0) < 2.0):
                 FAIL.append("3D traccion pura: el axial debe pasar por cordones y pernos")
         # respaldo fusionado: corre y entrega zonas
-        _pf = Project(); _pf.fea.weld_model = "Fusionado (union monolitica, equivale a CJP)"
+        _pf = Project(); _pf.fea.engine = ENGINES[1]; _pf.fea.weld_model = "Fusionado (union monolitica, equivale a CJP)"
         _rf, _mf = mesh3d.full_3d(_pf, tempfile.mkdtemp(prefix="pb3d_"))
         if _rf is None or not _rf.post or not _rf.post.zones or _rf.post.weld_model != "fusionado":
             FAIL.append("3D fusionado: no entrego zonas de soldadura")
         else:
             print(f"{'  modelo fusionado (respaldo)':34} zonas = {[z.name for z in _rf.post.zones]}")
+
+    # motor de placas (shell): corre, equilibra y entrega vistas y filas
+    print()
+    print("ANALISIS CON PLACAS (--3d)")
+    _ps = Project(); _ps.fea.engine = ENGINES[0]
+    _rs, _ms = mesh3d.full_3d(_ps, tempfile.mkdtemp(prefix="pbsh_"))
+    if _rs is None:
+        FAIL.append(f"placas: no corrio: {_ms[-300:]}")
+    else:
+        _fs = make_fem(_ps, _rs)
+        _Rs = solve(_ps, fem=_fs)
+        _ps_ = _fs.post
+        _eqs = _ps_.R_conc - _ps_.T_bolts - _ps.eloads.Pu
+        _ks = [c.key for c in _Rs.checks if c.key.startswith("fem_")]
+        print(f"{'placas PB-01':34} nodos={_fs.n_nodes:,}  R−ΣT−Pu = {_eqs:+.3f} kip  filas: {_ks}")
+        if abs(_eqs) > 0.02 * max(1.0, abs(_ps.eloads.Pu)):
+            FAIL.append(f"placas: equilibrio fuera de tolerancia ({_eqs:+.2f} kip)")
+        if not {"fem_bolt", "fem_press", "fem_vm"} <= set(_ks):
+            FAIL.append("placas: faltan filas de verificacion FEM")
+        if not (_fs.rep or {}).get("plan", {}).get("top"):
+            FAIL.append("placas: no se generaron las vistas en planta")
 
 print()
 print("=" * 150)

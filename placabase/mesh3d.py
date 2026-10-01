@@ -941,6 +941,10 @@ def full_3d(prj: Project, folder: str, stem: str = "modelo3d", progress=None, ca
         if progress:
             progress(m_)
 
+    if str(getattr(prj.fea, "engine", "")).startswith("Placas"):
+        from . import shell3d
+        return shell3d.full_shell(prj, folder, "modelo_placas", progress, cancel)
+
     lc0 = mesh_size_for(prj)
     last = "No se pudo completar el analisis."
     for k, f in enumerate((1.0, 1.35, 1.8)):

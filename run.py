@@ -82,6 +82,9 @@ def main():
     args = sys.argv[1:]
     if args and args[0] == "--mesh":
         return mesh_child(args[1], args[2])
+    if args and args[0] == "--shell":
+        from placabase.shell3d import mesh_child as _mc
+        return _mc(args[1], args[2])
     if args and args[0] == "--selftest":
         import runpy
         st = os.path.join(BUNDLE, "selftest.py")
