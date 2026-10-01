@@ -590,6 +590,16 @@ class MainWindow(QMainWindow):
                              "Desplazamiento Uz"])
         self.cb_f3.currentIndexChanged.connect(self.draw_3d)
         t3.addWidget(self.cb_f3)
+        t3.addWidget(QLabel("Elemento:"))
+        self.cb_part = QComboBox()
+        self.PARTS = [("all", "Todo el conjunto"), ("plate", "Placa base"), ("column", "Columna (perfil)"),
+                      ("stiff", "Rigidizadores"), ("lug", "Llave de corte")]
+        self.cb_part.addItems([b for _, b in self.PARTS])
+        self.cb_part.setToolTip("Muestra el esfuerzo (o el desplazamiento) de una sola pieza, con su propia escala "
+                                "de colores. El maximo promediado corresponde a la placa; en las demas piezas "
+                                "se marca el pico puntual (depende de la malla).")
+        self.cb_part.currentIndexChanged.connect(self.draw_3d)
+        t3.addWidget(self.cb_part)
         t3.addWidget(QLabel("Escala de deformada:"))
         self.sp_sc = QDoubleSpinBox()
         self.sp_sc.setRange(0, 100000); self.sp_sc.setDecimals(0)
@@ -1155,7 +1165,7 @@ class MainWindow(QMainWindow):
             return
         fld = ["vm", "u", "uz"][k - 1]
         m = view3d.plot3d(self.cv_3d.ax, self.res3d, self.prj, fld,
-                          float(self.sp_sc.value()))
+                          float(self.sp_sc.value()), part=self.PARTS[self.cb_part.currentIndex()][0])
         if m is not None:
             cax = self.cv_3d.fig.add_axes([0.90, 0.18, 0.018, 0.64])
             self.cv_3d.fig.colorbar(m, cax=cax)

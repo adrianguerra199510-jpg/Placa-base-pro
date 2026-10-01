@@ -880,6 +880,11 @@ def full_3d(prj: Project, folder: str, stem: str = "modelo3d", progress=None):
     res = load_results(mesh_inp, frd)
     if not res.ok:
         return None, res.msg
+    try:
+        from .view3d import classify_parts
+        res.parts = classify_parts(res, prj)
+    except Exception:
+        res.parts = {}
     try:                                            # caras de la interfaz: no son superficie visible
         dup = set(_json.loads(Path(inp).with_suffix(".meta.json").read_text(encoding="utf-8"))
                   .get("conn", {}).get("dup", {}).values())

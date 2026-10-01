@@ -33,6 +33,8 @@ class Result3D:
     vmmax: float = 0.0
     rf_sum: tuple = (0.0, 0.0, 0.0)
     vm_avg: dict = None                             # ver smoothed_plate_vm
+    elems: list = field(default_factory=list)       # nodos de cada elemento solido (para separar piezas)
+    parts: dict = field(default_factory=dict)       # pieza -> caras exteriores de esa pieza (ver classify_parts)
 
 
 # ============================================================ malla (.inp)
@@ -145,6 +147,7 @@ def load_results(mesh_inp: str, frd: str) -> Result3D:
 
     r.nodes = nodes
     r.tris = skin(elems)
+    r.elems = elems
     r.disp = disp
     r.vm = {n: von_mises(*s) for n, s in stress.items()}
     r.stress = stress
@@ -210,8 +213,8 @@ def _soft_cmap(diverging=False):
     return LinearSegmentedColormap.from_list("pb_suave", cols, N=256)
 
 
-def plot3d(ax, res: Result3D, prj, field="vm", scale=0.0, shrink_tris=12000, tag_max=True):
-    """Dibuja la piel del solido coloreada por el campo elegido."""
+def plot3d(ax, res: Result3D, prj, field="vm", scale=0.0, shrink_tris=12000, tag_max=True, part="all"):
+    """Dibuja la piel del solido coloreada por el campo elegido.  `part`: all | plate | column | stiff | lug."""
     from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
     ax.clear()
@@ -225,7 +228,14 @@ def plot3d(ax, res: Result3D, prj, field="vm", scale=0.0, shrink_tris=12000, tag
     u = prj.units()
     kl, ks = u.fl, u.fs
 
-    ids = list(res.nodes.keys())
+    tris = res.tris if part == "all" else res.parts.get(part, [])
+    if not tris:
+        ax.text2D(0.5, 0.5, f"Sin elementos de tipo '{PART_LABELS.get(part, part)}' en este modelo.",
+                  ha="center", va="center", transform=ax.transAxes, fontsize=11, color="#777777")
+        ax.set_axis_off()
+        return None
+    used = sorted({n for t in tris for n in t})
+    ids = used
     idx = {n: i for i, n in enumerate(ids)}
     P = np.array([res.nodes[n] for n in ids], dtype=float)
     if scale > 0 and res.disp:
@@ -244,7 +254,6 @@ def plot3d(ax, res: Result3D, prj, field="vm", scale=0.0, shrink_tris=12000, tag
         val = np.array([res.vm.get(n, 0.0) for n in ids]) / ks
         title, cmap, unit = "Esfuerzo de von Mises", _soft_cmap(), u.S
 
-    tris = res.tris
     if len(tris) > shrink_tris:                 # muestreo para que la vista fluya
         step = max(1, len(tris) // shrink_tris)
         tris = tris[::step]
@@ -282,7 +291,8 @@ def plot3d(ax, res: Result3D, prj, field="vm", scale=0.0, shrink_tris=12000, tag
             pass
         k = int(np.argmax(val))
         mx, my_, mz = Pm[k]
-        avg = res.vm_avg if (field == "vm" and getattr(res, "vm_avg", None)) else None
+        # el promediado se calculo sobre la placa: vale para el conjunto y para la placa
+        avg = res.vm_avg if (field == "vm" and part in ("all", "plate") and getattr(res, "vm_avg", None)) else None
         if avg:                               # maximo PROMEDIADO (converge con la malla)
             mx, my_, mz = avg["x"] / kl, avg["y"] / kl, avg["z"] / kl
         ax.scatter([mx], [my_], [mz], s=170, color="#d62728", marker="*", edgecolors="black",
@@ -294,12 +304,13 @@ def plot3d(ax, res: Result3D, prj, field="vm", scale=0.0, shrink_tris=12000, tag
                    f"{avg['vm'] / ks:.4g} {unit}\npico puntual {avg['vm_point'] / ks:.4g} {unit} "
                    f"(depende de la malla)")
         else:
-            txt = f"{lbl} = {val[k]:.4g} {unit}   (nodo {ids[k]})"
+            txt = (f"{lbl}" + (f" — {PART_LABELS[part]}" if part != "all" else "") + f" = {val[k]:.4g} {unit}"
+                   + ("   (pico puntual: depende de la malla)" if field == "vm" else f"   (nodo {ids[k]})"))
         ax.text2D(0.02, 0.93, txt,
                   transform=ax.transAxes, fontsize=9, color="#7a1010", fontweight="bold",
                   va="top", bbox=dict(boxstyle="round,pad=0.35", fc="#fff3e0", ec="#d62728", lw=1.0))
     ax.set_axis_off()                     # sin ejes ni reglas
-    ax.set_title(f"{title}  ({unit})"
+    ax.set_title(f"{title}  ({unit})" + (f" — {PART_LABELS[part]}" if part != "all" else "")
                  + (f"   —  deformada ×{scale:g}" if scale > 0 else ""),
                  fontsize=9, loc="left")
     mapper.set_array(face_val)
@@ -628,6 +639,35 @@ def _covered_by_profile(prj, x, y):
     if not G._inside(x, y, ext):
         return False
     return not (inn and G._inside(x, y, inn))
+
+
+PART_LABELS = {"all": "Todo el conjunto", "plate": "Placa base", "column": "Columna (perfil)",
+               "stiff": "Rigidizadores", "lug": "Llave de corte"}
+
+
+def classify_parts(res: "Result3D", prj) -> dict:
+    """Separa los elementos del solido por pieza segun la posicion de su centroide:
+        z < 0                 llave de corte
+        0 <= z < tp           placa
+        z > tp, bajo el perfil  columna;  z > tp, fuera de la huella del perfil  rigidizadores
+    -> {pieza: [caras exteriores de la pieza]} (solo las piezas que existen)."""
+    tp = prj.plate.tp
+    groups = {"plate": [], "column": [], "stiff": [], "lug": []}
+    N = res.nodes
+    for e in res.elems:
+        c = e[:4]
+        xc = sum(N[n][0] for n in c) / 4.0
+        yc = sum(N[n][1] for n in c) / 4.0
+        zc = sum(N[n][2] for n in c) / 4.0
+        if zc < 0:
+            groups["lug"].append(e)
+        elif zc < tp:
+            groups["plate"].append(e)
+        elif _covered_by_profile(prj, xc, yc):
+            groups["column"].append(e)
+        else:
+            groups["stiff"].append(e)
+    return {k: skin(v) for k, v in groups.items() if v}
 
 
 def smoothed_face_fields(res: "Result3D", prj, radius: float = 0.0):
