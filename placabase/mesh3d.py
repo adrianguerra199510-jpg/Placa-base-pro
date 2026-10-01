@@ -33,6 +33,7 @@ import sys
 from .model import Project
 from . import geometry as G
 from .units import ES_KSI, NU_STEEL, Ec_ksi
+from .params3d import washer_radius, washer_thickness
 from .shapes import W_SHAPE, HSS_RECT
 
 
@@ -131,6 +132,21 @@ def write_geo(prj: Project, path: str, mesh_size: float = 0.0,
     if holes:
         L.append(f"BooleanDifference{{ Volume{{{plate_v[0]}}}; Delete; }}"
                  f"{{ Volume{{{','.join(map(str, holes))}}}; Delete; }}")
+
+    # ------------------------------------------------ arandelas (apoyo de la tuerca)
+    #   La tuerca no actua en el borde del agujero sino sobre la corona de la arandela; un disco anular
+    #   unido a la placa rigidiza esa zona y reparte la carga del perno en una superficie pequena.
+    tw = washer_thickness(prj)
+    rw = washer_radius(prj)
+    if tw > 0:
+        L.append("// ---------------- ARANDELAS")
+        vol_w = 3000
+        for (bx, by) in G.bolt_positions(prj):
+            L.append(f"Cylinder({vol_w}) = {{{bx:.6f}, {by:.6f}, {p.tp:.6f}, 0,0,{tw:.6f}, {rw:.6f}}};")
+            L.append(f"Cylinder({vol_w + 1}) = {{{bx:.6f}, {by:.6f}, {p.tp - 0.5:.6f}, 0,0,{tw + 1.0:.6f}, "
+                     f"{g.dh/2:.6f}}};")
+            L.append(f"BooleanDifference{{ Volume{{{vol_w}}}; Delete; }}{{ Volume{{{vol_w + 1}}}; Delete; }}")
+            vol_w += 2
 
     # --------------------------------------------------------------- perfil
     L.append("// ---------------- PERFIL")
@@ -248,7 +264,21 @@ def write_geo(prj: Project, path: str, mesh_size: float = 0.0,
     L.append("Field[2] = Threshold; Field[2].InField = 1;")
     L.append(f"Field[2].SizeMin = {hmin:.4f}; Field[2].SizeMax = lc;")
     L.append(f"Field[2].DistMin = {1.2*tmin:.4f}; Field[2].DistMax = {4*tmin+1.5:.4f};")
-    L.append("Background Field = 2;")
+    # refinamiento alrededor de cada agujero y arandela: la corona de apoyo debe tener varios elementos
+    rh_ = g.dh / 2.0
+    # tamano en la corona: ~3 elementos en su ancho y ~1.2 en el espesor de la arandela, sin pasar de lc/8
+    hh = max(0.06, (rw - rh_) / 3.0, (tw / 1.2 if tw > 0 else 0.0), lc / 8.0)
+    L.append("hc[] = {};")
+    for (bx, by) in G.bolt_positions(prj):
+        L.append(f"hc[] += Curve In BoundingBox{{{bx - rw - 0.02:.4f},{by - rw - 0.02:.4f},{p.tp - 0.001:.4f},"
+                 f"{bx + rw + 0.02:.4f},{by + rw + 0.02:.4f},{p.tp + max(tw, 0.0) + 0.001:.4f}}};")
+    L.append("Field[3] = Distance; Field[3].CurvesList = {hc[]}; Field[3].Sampling = 40;")
+    L.append("Field[4] = Threshold; Field[4].InField = 3;")
+    L.append(f"Field[4].SizeMin = {hh:.4f}; Field[4].SizeMax = {lc:.4f};")
+    L.append(f"Field[4].DistMin = {0.15:.4f}; Field[4].DistMax = {0.15 + 4 * hh:.4f};")
+    L.append("Field[5] = Min; Field[5].FieldsList = {2, 4};")
+    hmin = min(hmin, 0.8 * hh)
+    L.append("Background Field = 5;")
     L.append("Mesh.MeshSizeExtendFromBoundary = 0;")
     L.append("Mesh.CharacteristicLengthMax = lc;")
     L.append(f"Mesh.CharacteristicLengthMin = {hmin*0.8:.4f};")
@@ -257,6 +287,7 @@ def write_geo(prj: Project, path: str, mesh_size: float = 0.0,
     L.append("Geometry.Tolerance = 1e-6;")
     L.append("Mesh.ElementOrder = 2;")
     L.append("Mesh.SecondOrderIncomplete = 1;")
+    L.append("Mesh.SecondOrderLinear = 1;   // nodos medios en el punto medio de la arista recta: evita jacobianos negativos en tetraedros delgados junto a superficies curvas")
     L.append("Mesh.Algorithm3D = 1;    // Delaunay: mas tolerante con geometrias fusionadas")
     L.append("Mesh.Optimize = 1;")
 
@@ -584,7 +615,7 @@ def build_inp(prj: Project, mesh_inp: str, out_inp: str, height: float = 0.0) ->
     if str(getattr(prj.fea, "weld_model", "")).startswith("Conectores"):
         from . import weldfe
         sp = str(Path(mesh_inp).with_name(Path(mesh_inp).stem + "_split.inp"))
-        split = weldfe.split_interface(mesh_inp, sp, p.tp)
+        split = weldfe.split_interface(mesh_inp, sp, p.tp, prj)
         if split is not None:
             mesh_inp = sp
 
@@ -618,8 +649,9 @@ def build_inp(prj: Project, mesh_inp: str, out_inp: str, height: float = 0.0) ->
                            "malla.  Revise la altura del perfil en el .geo.")
 
     r_hole = g.dh / 2.0
-    r_wash = max(g.Fhex, 2.2 * g.db) / 2.0
-    sup = [(n, x, y) for n, (x, y, z) in nodes.items() if abs(z - p.tp) < 1e-4]     # cara superior
+    r_wash = washer_radius(prj)
+    z_nut = p.tp + max(washer_thickness(prj), 0.0)             # cara superior donde apoya la tuerca
+    sup = [(n, x, y) for n, (x, y, z) in nodes.items() if abs(z - z_nut) < 1e-4]    # cara de apoyo de la tuerca
     inf = [(n, x, y) for n, (x, y, z) in nodes.items() if abs(z) < 1e-4]            # cara inferior
 
     def ring_of(cands, bx, by, nmin=4):

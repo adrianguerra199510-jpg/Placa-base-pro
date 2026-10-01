@@ -647,6 +647,8 @@ def _covered_by_profile(prj, x, y):
     return not (inn and G._inside(x, y, inn))
 
 
+from .params3d import washer_elements
+
 PART_LABELS = {"all": "Todo el conjunto", "plate": "Placa base", "column": "Columna (perfil)",
                "stiff": "Rigidizadores", "lug": "Llave de corte"}
 
@@ -667,7 +669,7 @@ def classify_parts(res: "Result3D", prj) -> dict:
         zc = sum(N[n][2] for n in c) / 4.0
         if zc < 0:
             groups["lug"].append(e)
-        elif zc < tp:
+        elif zc < tp or washer_elements(prj, xc, yc, zc):          # las arandelas pertenecen a la placa
             groups["plate"].append(e)
         elif _covered_by_profile(prj, xc, yc):
             groups["column"].append(e)

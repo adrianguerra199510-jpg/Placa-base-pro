@@ -43,6 +43,7 @@ from pathlib import Path
 
 from .units import ES_KSI, NU_STEEL
 from . import geometry as G
+from .params3d import washer_elements
 
 DELTA = 0.02                       # separacion inicial de los nodos duplicados, in (direccion del resorte)
 AUX_BASE = 100000                  # los nodos auxiliares H se numeran desde max(nodo) + AUX_BASE
@@ -89,7 +90,7 @@ class Split:
         self.mesh_path = ""
 
 
-def split_interface(mesh_in: str, mesh_out: str, tp: float):
+def split_interface(mesh_in: str, mesh_out: str, tp: float, prj=None):
     """Duplica los nodos de la interfaz z = tp entre el cuerpo superior (centroide z > tp) y el inferior.
     Escribe `mesh_out` (malla con los elementos superiores reconectados) y devuelve un `Split`, o None si
     no hay interfaz."""
@@ -97,7 +98,9 @@ def split_interface(mesh_in: str, mesh_out: str, tp: float):
     up_l, lo_nodes, up_nodes = [], set(), set()
     for i, (eid, nn) in el.items():
         zc = sum(nodes[n][2] for n in nn[:4]) / 4.0
-        if zc > tp + 1e-6:
+        xc = sum(nodes[n][0] for n in nn[:4]) / 4.0
+        yc = sum(nodes[n][1] for n in nn[:4]) / 4.0
+        if zc > tp + 1e-6 and not (prj is not None and washer_elements(prj, xc, yc, zc)):
             up_l.append(i)
             up_nodes.update(nn)
         else:
@@ -374,7 +377,7 @@ def write_cards(prj, S: Split, recs, eid: int):
 
 def prepare_and_cards(prj, mesh_in, mesh_split, eid_start):
     """Separacion de cuerpos + tarjetas.  -> (Split, lineas, eid, meta) o None si no hay interfaz."""
-    S = split_interface(mesh_in, mesh_split, prj.plate.tp)
+    S = split_interface(mesh_in, mesh_split, prj.plate.tp, prj)
     if S is None:
         return None
     edges = boundary_edges(S)

@@ -375,6 +375,8 @@ class MainWindow(QMainWindow):
                      "Ø5/8 in lleva agujero de 1-3/16 in = 30.2 mm. Si el grupo se "
                      "coloca con plantilla se justifica uno menor: la regla F844 (nota "
                      "al pie de la tabla) da db+5/16 hasta 1 in, y la ajustada db+1/16.")
+        f.num("Diametro de arandela (0 = automatico)", "bolts.washer_d", 0, 20, uk="L", help="Diametro exterior de la arandela o de la zona donde la tuerca apoya sobre la placa. 0 = automatico: el mayor entre el ancho de la tuerca hex pesada y 2.2 veces el diametro del perno. El modelo 3D aplica la carga del perno sobre esa corona (no en el borde del agujero).")
+        f.num("Espesor de arandela (-1 = auto, 0 = sin)", "bolts.washer_t", -1, 5, uk="L", help="Espesor de la arandela del modelo 3D, unida a la placa: rigidiza la zona del agujero y reparte la carga del perno. -1 = automatico (0.25·db); 0 = sin arandela (la carga entra en la corona de la propia placa). Una arandela de placa gruesa se acerca a una zona rigida.")
         f.num("Abrg manual (0 = hex pesada)", "bolts.Abrg_user", 0, 100, uk="A", help="Area neta de aplastamiento de la cabeza. Deje 0 para que se calcule de la tuerca hexagonal pesada; indique un valor si usa una placa de anclaje soldada en la punta.")
         f.group("Anclaje adhesivo (postinstalado)")
         f.combo("Adherencia caracteristica", "bolts.adh_env", ADH_ENV,

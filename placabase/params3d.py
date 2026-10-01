@@ -31,3 +31,27 @@ def bolt_kb(prj: Project) -> float:
     g = prj.bolts.geom()
     Lb = prj.bolts.hef + prj.plate.tp + prj.plate.grout
     return ES_KSI * g.Ase / max(Lb, 1.0)
+
+
+def washer_radius(prj: Project) -> float:
+    """Radio exterior de la arandela (zona de apoyo de la tuerca sobre la placa): el diametro indicado o, en
+    automatico, el mayor entre el ancho de la tuerca hex pesada y 2.2 veces el diametro del perno."""
+    g = prj.bolts.geom()
+    d = prj.bolts.washer_d if prj.bolts.washer_d > 0 else max(g.Fhex, 2.2 * g.db)
+    return max(d / 2.0, g.dh / 2.0 + 0.05)
+
+
+def washer_thickness(prj: Project) -> float:
+    """Espesor de la arandela, in.  < 0 en el proyecto = automatico (0.25·db); 0 = sin arandela."""
+    t = prj.bolts.washer_t
+    return 0.25 * prj.bolts.geom().db if t < 0 else float(t)
+
+
+def washer_elements(prj: Project, x: float, y: float, z: float) -> bool:
+    """True si el punto (x, y, z) esta dentro del volumen de una arandela (sobre la placa, junto a un perno)."""
+    from . import geometry as G
+    tw = washer_thickness(prj)
+    if tw <= 0 or z < prj.plate.tp - 1e-6 or z > prj.plate.tp + tw + 1e-6:
+        return False
+    rw = washer_radius(prj)
+    return any((x - bx) ** 2 + (y - by) ** 2 <= (rw + 1e-4) ** 2 for bx, by in G.bolt_positions(prj))

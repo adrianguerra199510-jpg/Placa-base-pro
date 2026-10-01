@@ -131,6 +131,8 @@ class BoltGroup:
     hef: float = 24.0            # embebido efectivo
     eh: float = 0.0              # longitud del gancho (L/J); 0 = 3*db
     Abrg_user: float = 0.0       # 0 = calculado de la cabeza hex
+    washer_d: float = 0.0        # diametro de la arandela / zona de apoyo de la tuerca, in (0 = automatico)
+    washer_t: float = -1.0       # espesor de la arandela, in (-1 = automatico 0.25·db; 0 = sin arandela)
     hole_rule: str = "AISC Tabla 14-2 (maximo recomendado)"
     # --- instalacion (solo varilla recta)
     install: str = "Preinstalado (vaciado en sitio)"
