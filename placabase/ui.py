@@ -600,7 +600,7 @@ class MainWindow(QMainWindow):
         t3.addWidget(QLabel("Elemento:"))
         self.cb_part = QComboBox()
         self.PARTS = [("all", "Todo el conjunto"), ("plate", "Placa base"), ("column", "Columna (perfil)"),
-                      ("stiff", "Rigidizadores"), ("lug", "Llave de corte")]
+                      ("stiff", "Rigidizadores"), ("lug", "Llave de corte"), ("washer", "Arandelas")]
         self.cb_part.addItems([b for _, b in self.PARTS])
         self.cb_part.setToolTip("Muestra el esfuerzo (o el desplazamiento) de una sola pieza, con su propia escala "
                                 "de colores. El maximo promediado corresponde a la placa; en las demas piezas "

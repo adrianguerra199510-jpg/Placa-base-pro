@@ -166,41 +166,52 @@ def load_results(mesh_inp: str, frd: str) -> Result3D:
 
 
 # ==================================================================== dibujo
-def set_aspect(ax, aspect, zoom=0.72):
-    """Proporciones reales del modelo + zoom inicial conservador (luego se ajusta)."""
+def set_aspect(ax, aspect, zoom=0.72, pts=None):
+    """Proporciones reales del modelo + zoom inicial conservador (luego fit_to_axes lo ajusta).
+    `pts`: puntos (N, 3) del modelo, para encuadrar lo que realmente se dibuja."""
     ax._pb_aspect, ax._pb_zoom = aspect, zoom
+    if pts is not None and len(pts) > 6000:
+        pts = pts[:: max(1, len(pts) // 6000)]
+    ax._pb_pts = None if pts is None else np.asarray(pts, dtype=float)
     try:
         ax.set_box_aspect(aspect, zoom=zoom)
     except TypeError:
         ax.set_box_aspect(aspect)
 
 
-def fit_to_axes(ax, margin=0.04):
-    """Encuadra el modelo completo dentro del area del grafico, sea cual sea su tamano.
+def fit_to_axes(ax, margin=0.05):
+    """Encuadra el modelo dentro del area del grafico: ocupa el 90 % del ancho o del alto disponible (el
+    que limite) y queda centrado, sin cortarse, para cualquier tamano de ventana y cualquier vista.
 
-    El eje 3D dibuja en un cuadrado centrado cuyo lado es el menor de (ancho, alto) de la ventana, asi que
-    el modelo se expande y se contrae solo con la ventana; lo unico que hay que fijar es el zoom con el que
-    la caja del modelo (sus 8 esquinas proyectadas) llena ese cuadrado.  Se calcula desde cero (zoom = 1) en
-    coordenadas del propio eje, no en pixeles: es idempotente y no depende de un dibujado previo."""
+    Se proyectan los puntos del modelo (o las 8 esquinas de su caja) a pixeles con la transformacion real
+    del eje y se calcula el zoom con que el mayor alejamiento del centro cabe en la mitad del area:
+    ancho y alto por separado, sin suponer que el area de dibujo es cuadrada.  Es iterativo (2 pasadas) y
+    el zoom se calcula de forma absoluta, asi que no se acumula al redimensionar."""
     asp = getattr(ax, "_pb_aspect", None)
     if asp is None:
         return
     from mpl_toolkits.mplot3d import proj3d
     try:
-        ax.set_box_aspect(asp, zoom=1.0)
-        ax.apply_aspect()                    # fija el cuadrado de dibujo para el tamano actual de la ventana
-        (x0, x1), (y0, y1), (z0, z1) = ax.get_xlim3d(), ax.get_ylim3d(), ax.get_zlim3d()
-        cs = [(x, y, z) for x in (x0, x1) for y in (y0, y1) for z in (z0, z1)]
-        X, Y, _z = proj3d.proj_transform([c[0] for c in cs], [c[1] for c in cs],
-                                         [c[2] for c in cs], ax.get_proj())
-        px = ax.transData.transform(np.column_stack([X, Y]))
-        bb = ax.bbox
-        side = min(bb.width, bb.height)
-        if side <= 1:
-            return
-        cx, cy = 0.5 * (bb.x0 + bb.x1), 0.5 * (bb.y0 + bb.y1)
-        ext = max(np.abs(px[:, 0] - cx).max(), np.abs(px[:, 1] - cy).max(), 1e-9)
-        ax._pb_zoom = float(np.clip((1 - 2 * margin) * 0.5 * side / ext, 0.1, 5.0))
+        pts = getattr(ax, "_pb_pts", None)
+        if pts is None:
+            (x0, x1), (y0, y1), (z0, z1) = ax.get_xlim3d(), ax.get_ylim3d(), ax.get_zlim3d()
+            pts = np.array([(x, y, z) for x in (x0, x1) for y in (y0, y1) for z in (z0, z1)], dtype=float)
+        for _ in range(2):
+            ax.set_box_aspect(asp, zoom=ax._pb_zoom)
+            ax.apply_aspect()                # area de dibujo vigente para el tamano actual de la ventana
+            X, Y, _z = proj3d.proj_transform(pts[:, 0], pts[:, 1], pts[:, 2], ax.get_proj())
+            px = ax.transData.transform(np.column_stack([X, Y]))
+            # area DISPONIBLE = todo el rectangulo asignado al eje (no el cuadrado que usa el eje 3D para
+            # dibujar): los artistas se dibujan sin recorte, asi el modelo puede usar todo el ancho
+            (bx0, by0), (bx1, by1) = ax.figure.transFigure.transform(ax.get_position(original=True).get_points())
+            bw, bh = bx1 - bx0, by1 - by0
+            if bw <= 1 or bh <= 1:
+                return
+            cx, cy = 0.5 * (bx0 + bx1), 0.5 * (by0 + by1)
+            ex = max(np.abs(px[:, 0] - cx).max(), 1e-9)
+            ey = max(np.abs(px[:, 1] - cy).max(), 1e-9)
+            k = min((1 - 2 * margin) * 0.5 * bw / ex, (1 - 2 * margin) * 0.5 * bh / ey)
+            ax._pb_zoom = float(np.clip(ax._pb_zoom * k, 0.05, 6.0))
         ax.set_box_aspect(asp, zoom=ax._pb_zoom)
     except Exception:
         pass
@@ -273,6 +284,7 @@ def plot3d(ax, res: Result3D, prj, field="vm", scale=0.0, shrink_tris=12000, tag
 
     coll = Poly3DCollection(verts, facecolors=mapper.to_rgba(face_val),
                             edgecolors=(0, 0, 0, 0.06), linewidths=0.1)
+    coll.set_clip_on(False)                     # el eje 3D recorta a un cuadrado: sin recorte usa todo el ancho
     ax.add_collection3d(coll)
 
     Pm = P / kl
@@ -284,7 +296,7 @@ def plot3d(ax, res: Result3D, prj, field="vm", scale=0.0, shrink_tris=12000, tag
     ax.set_xlim(mins[0] - pad, maxs[0] + pad)
     ax.set_ylim(mins[1] - pad, maxs[1] + pad)
     ax.set_zlim(mins[2] - pad, maxs[2] + pad)
-    set_aspect(ax, tuple(float(v) + 2 * pad for v in spans))
+    set_aspect(ax, tuple(float(v) + 2 * pad for v in spans), pts=Pm)
     if tag_max and len(val):
         try:
             ax.computed_zorder = False
@@ -299,7 +311,7 @@ def plot3d(ax, res: Result3D, prj, field="vm", scale=0.0, shrink_tris=12000, tag
         if avg:                               # maximo PROMEDIADO (converge con la malla)
             mx, my_, mz = avg["x"] / kl, avg["y"] / kl, avg["z"] / kl
         ax.scatter([mx], [my_], [mz], s=170, color="#d62728", marker="*", edgecolors="black",
-                   linewidths=0.8, depthshade=False, zorder=20)
+                   linewidths=0.8, depthshade=False, zorder=20, clip_on=False)
         lbl = {"vm": "Esfuerzo maximo", "u": "Desplazamiento maximo",
                "uz": "Uz maximo"}.get(field, "Maximo")
         if avg:
@@ -594,6 +606,7 @@ def plot_geometry(ax, prj, show_concrete=True):
         edge = (*rgb, 1.0) if flat else ((0, 0, 0, 0.35) if alpha > 0.5 else (0.3, 0.35, 0.4, 0.35))
         coll = Poly3DCollection(v, facecolors=(*rgb, alpha), edgecolors=edge,
                                 linewidths=0.35)
+        coll.set_clip_on(False)
         ax.add_collection3d(coll)
         groups.append((grp, coll))
     ax._pb_groups = groups
@@ -606,7 +619,7 @@ def plot_geometry(ax, prj, show_concrete=True):
     ax.set_xlim(mins[0] - pad, maxs[0] + pad)
     ax.set_ylim(mins[1] - pad, maxs[1] + pad)
     ax.set_zlim(mins[2] - pad, maxs[2] + pad)
-    set_aspect(ax, tuple(float(v) + 2 * pad for v in spans))
+    set_aspect(ax, tuple(float(v) + 2 * pad for v in spans), pts=P)
     ax.set_axis_off()                     # sin ejes ni reglas
     tl = prj.loads
     ax.set_title("Geometria de la conexion"
@@ -650,7 +663,7 @@ def _covered_by_profile(prj, x, y):
 from .params3d import washer_elements
 
 PART_LABELS = {"all": "Todo el conjunto", "plate": "Placa base", "column": "Columna (perfil)",
-               "stiff": "Rigidizadores", "lug": "Llave de corte"}
+               "stiff": "Rigidizadores", "lug": "Llave de corte", "washer": "Arandelas"}
 
 
 def classify_parts(res: "Result3D", prj) -> dict:
@@ -660,7 +673,7 @@ def classify_parts(res: "Result3D", prj) -> dict:
         z > tp, bajo el perfil  columna;  z > tp, fuera de la huella del perfil  rigidizadores
     -> {pieza: [caras exteriores de la pieza]} (solo las piezas que existen)."""
     tp = prj.plate.tp
-    groups = {"plate": [], "column": [], "stiff": [], "lug": []}
+    groups = {"plate": [], "column": [], "stiff": [], "lug": [], "washer": []}
     N = res.nodes
     for e in res.elems:
         c = e[:4]
@@ -669,8 +682,10 @@ def classify_parts(res: "Result3D", prj) -> dict:
         zc = sum(N[n][2] for n in c) / 4.0
         if zc < 0:
             groups["lug"].append(e)
-        elif zc < tp or washer_elements(prj, xc, yc, zc):          # las arandelas pertenecen a la placa
+        elif zc < tp:
             groups["plate"].append(e)
+        elif washer_elements(prj, xc, yc, zc):                     # arandelas: pieza aparte (no se ven en la placa)
+            groups["washer"].append(e)
         elif _covered_by_profile(prj, xc, yc):
             groups["column"].append(e)
         else:

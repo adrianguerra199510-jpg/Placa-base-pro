@@ -217,6 +217,33 @@ if not (_q1.sig3d() == _q2.sig3d() and _q1.sig3d() != _q3.sig3d()):
     FAIL.append("firma del 3D: debe ignorar nombre/autor y detectar cambios de geometria")
 print(f"{'firma del modelo 3D':34} ok")
 
+# vista 3D: el modelo cabe completo (sin tocar los bordes) en ventanas anchas, altas y chicas
+import matplotlib
+matplotlib.use("Agg")
+import numpy as np
+from matplotlib.figure import Figure
+from PIL import Image
+import io
+from placabase import view3d
+_vp = Project()
+_ok_view = True
+for _w, _h in ((10.2, 5.0), (7, 6), (4, 8), (3, 2.5)):
+    _fig = Figure(figsize=(_w, _h), dpi=100)
+    _ax = _fig.add_axes([0, 0, 1, 1], projection="3d")
+    view3d.plot_geometry(_ax, _vp)
+    _ax.set_title("", loc="left")
+    _ax.view_init(elev=24, azim=-58)
+    view3d.fit_to_axes(_ax)
+    _buf = io.BytesIO(); _fig.savefig(_buf, format="png"); _buf.seek(0)
+    _im = np.array(Image.open(_buf).convert("L"))
+    _ys, _xs = np.where(_im < 245)
+    _ok = _xs.min() > 1 and _ys.min() > 1 and _xs.max() < _im.shape[1] - 2 and _ys.max() < _im.shape[0] - 2
+    _fill = max((_xs.max() - _xs.min()) / _im.shape[1], (_ys.max() - _ys.min()) / _im.shape[0])
+    _ok_view &= _ok and _fill > 0.7
+    print(f"{'vista 3D ' + str((_w, _h)):34} cabe = {_ok}   ocupa {100 * _fill:.0f} % del lado limitante")
+if not _ok_view:
+    FAIL.append("vista 3D: el modelo debe caber completo y ocupar ~90 % del lado limitante")
+
 # tamano de malla 3D automatico: sube con el area de la placa (costo acotado) y respeta el manual
 from placabase import mesh3d
 _a = Project(); _b = Project(); _b.plate.N = _b.plate.B = 80.0
