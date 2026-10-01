@@ -911,6 +911,13 @@ def full_3d(prj: Project, folder: str, stem: str = "modelo3d", progress=None):
     except Exception as e:
         res.vm_avg = None
         res.msg += f"   (promedio de von Mises no disponible: {e})"
+    try:                                            # columna y rigidizadores: promedio en la misma cara
+        from .view3d import smoothed_part_vm
+        res.part_avg = {k: v for k, v in
+                        ((k, smoothed_part_vm(res, prj, k, r_avg)) for k in ("column", "stiff")) if v}
+    except Exception as e:
+        res.part_avg = {}
+        res.msg += f"   (promedio en columna/rigidizadores no disponible: {e})"
     return res, res.msg
 
 

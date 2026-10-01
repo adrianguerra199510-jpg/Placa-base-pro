@@ -35,6 +35,7 @@ class Result3D:
     vm_avg: dict = None                             # ver smoothed_plate_vm
     elems: list = field(default_factory=list)       # nodos de cada elemento solido (para separar piezas)
     parts: dict = field(default_factory=dict)       # pieza -> caras exteriores de esa pieza (ver classify_parts)
+    part_avg: dict = field(default_factory=dict)    # pieza -> von Mises promediado (ver smoothed_part_vm)
 
 
 # ============================================================ malla (.inp)
@@ -292,7 +293,9 @@ def plot3d(ax, res: Result3D, prj, field="vm", scale=0.0, shrink_tris=12000, tag
         k = int(np.argmax(val))
         mx, my_, mz = Pm[k]
         # el promediado se calculo sobre la placa: vale para el conjunto y para la placa
-        avg = res.vm_avg if (field == "vm" and part in ("all", "plate") and getattr(res, "vm_avg", None)) else None
+        avg = None
+        if field == "vm":
+            avg = (res.vm_avg if part in ("all", "plate") else res.part_avg.get(part))
         if avg:                               # maximo PROMEDIADO (converge con la malla)
             mx, my_, mz = avg["x"] / kl, avg["y"] / kl, avg["z"] / kl
         ax.scatter([mx], [my_], [mz], s=170, color="#d62728", marker="*", edgecolors="black",
@@ -302,7 +305,10 @@ def plot3d(ax, res: Result3D, prj, field="vm", scale=0.0, shrink_tris=12000, tag
         if avg:
             txt = (f"Esfuerzo maximo (promediado, r = {avg['radius'] / kl:.2g} {u.L}) = "
                    f"{avg['vm'] / ks:.4g} {unit}\npico puntual {avg['vm_point'] / ks:.4g} {unit} "
-                   f"(depende de la malla)")
+                   f"(depende de la malla)"
+                   + ("" if part in ("all", "plate") else
+                      "\nReferencia: la singularidad en el extremo del rigidizador persiste;\n"
+                      "la malla rapida subestima ~15 %. No usar para verificar"))
         else:
             txt = (f"{lbl}" + (f" — {PART_LABELS[part]}" if part != "all" else "") + f" = {val[k]:.4g} {unit}"
                    + ("   (pico puntual: depende de la malla)" if field == "vm" else f"   (nodo {ids[k]})"))
@@ -668,6 +674,76 @@ def classify_parts(res: "Result3D", prj) -> dict:
         else:
             groups["stiff"].append(e)
     return {k: skin(v) for k, v in groups.items() if v}
+
+
+def smoothed_part_vm(res: "Result3D", prj, part: str, radius: float):
+    """von Mises PROMEDIADO en una pieza de acero que no es la placa (columna, rigidizadores).
+
+    Igual que en la placa se promedia el TENSOR y no el von Mises, con peso = area tributaria de cada nodo de
+    la piel, pero aqui las paredes son delgadas y una esfera de radio r tocaria las dos caras de la pared (la
+    flexion se anularia): solo se promedian los nodos de la MISMA CARA, es decir con la normal exterior casi
+    paralela (cos > 0.7) dentro de la esfera.  Se excluyen la cara que apoya en la placa (interfaz, donde
+    esta la singularidad del cordon) y el tope donde se aplican las cargas.
+    -> dict(vm, x, y, z, radius, vm_point, n) o None."""
+    import numpy as np
+    from scipy.spatial import cKDTree
+    tris = res.parts.get(part)
+    if not tris:
+        return None
+    tp = prj.plate.tp
+    ztop = max(p[2] for p in res.nodes.values())
+    tol = 1e-3
+    pts = {}
+    for t in tris:
+        P3 = [res.nodes[n] for n in t]
+        if all(abs(p[2] - tp) < 0.05 for p in P3):          # base apoyada en la placa (z = tp o tp + δ)
+            continue
+        if all(p[2] > ztop - tol for p in P3):              # tope de carga
+            continue
+        a, b, c = (np.array(p) for p in P3)
+        nv = np.cross(b - a, c - a)
+        ar = 0.5 * float(np.linalg.norm(nv))
+        if ar <= 1e-12:
+            continue
+        nv = nv / (2 * ar)
+        cen = (a + b + c) / 3.0
+        for n in t:                                           # normal exterior: hacia fuera del centroide de la pieza
+            d = pts.setdefault(n, [0.0, np.zeros(3), cen * 0.0, 0])
+            d[0] += ar / 3.0
+            d[1] += nv * (ar / 3.0)
+    ids = [n for n in pts if n in res.stress]
+    if len(ids) < 4:
+        return None
+    X = np.array([res.nodes[n] for n in ids], float)
+    S = np.array([res.stress[n] for n in ids], float)
+    W = np.array([pts[n][0] for n in ids], float)
+    N = np.array([pts[n][1] for n in ids], float)
+    N /= np.maximum(np.linalg.norm(N, axis=1, keepdims=True), 1e-12)
+    # las normales de los triangulos pueden salir invertidas segun el orden de los nodos: se orientan hacia
+    # fuera de la pieza (lejos de su centroide); en paredes delgadas sirve el signo respecto al centroide local
+    cen = X.mean(axis=0)
+    # orientacion local: normal * signo((x - c_local) . n) con c_local = media de los nodos vecinos
+    tree = cKDTree(X)
+    for i in range(len(ids)):
+        nb = tree.query_ball_point(X[i], 3.0 * radius)
+        cl = X[nb].mean(axis=0)
+        if np.dot(X[i] - cl, N[i]) < 0 and np.linalg.norm(X[i] - cl) > 1e-6:
+            N[i] = -N[i]
+    vm_pt = np.array([von_mises(*s_) for s_ in S])
+    best = None
+    for i in range(len(ids)):
+        nb = np.array(tree.query_ball_point(X[i], radius))
+        ok = nb[(N[nb] @ N[i]) > 0.7]
+        if len(ok) == 0:
+            ok = np.array([i])
+        ww = W[ok]
+        sm = (S[ok] * ww[:, None]).sum(axis=0) / ww.sum()
+        v = von_mises(*sm)
+        if best is None or v > best["vm"]:
+            best = dict(vm=float(v), x=float(X[i][0]), y=float(X[i][1]), z=float(X[i][2]), radius=float(radius))
+    best["vm_point"] = float(vm_pt.max())
+    best["n"] = len(ids)
+    return best
 
 
 def smoothed_face_fields(res: "Result3D", prj, radius: float = 0.0):
