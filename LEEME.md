@@ -11,6 +11,20 @@ kN / N / tonf / kgf, momento y esfuerzo por separado. Se aplican a las entradas,
 tabla de resultados y a los reportes. El cálculo interno siempre corre en in-kip-ksi,
 que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
 
+## Novedades: malla 3D automatica, reintentos y boton para cancelar
+
+- **Tamano de malla automatico** (`Calidad de la malla 3D → Automatica`, con tamano manual = 0): el mayor entre
+  1.2 veces el radio de promedio del von Mises (r = factor × espesor) y raiz(area de la placa / 400), sin
+  pasar de 1/4 del lado menor. Sale del estudio de convergencia (placa 500×500×20 mm, 1000 kN de traccion,
+  mallas de 30 a 12 mm): con r de 15-20 mm el promedio varia ±2 % para elementos de hasta 1.2·r; la traccion
+  en pernos varia < 0.5 %. En placas grandes manda el costo (modelo de ~70-90 mil nodos) y el radio de
+  promedio sube a lc/1.2. "Fina" usa 0.65 veces ese tamano. Un tamano manual > 0 tiene prioridad.
+- **Reintentos:** si Gmsh o CalculiX fallan (tetraedros invalidos, sin convergencia) el analisis se repite solo
+  con malla 1.35 y 1.8 veces mas gruesa. El paso de carga de CalculiX ya no baja de 1e-3 (antes 1e-5 y se
+  quedaba iterando con incrementos minimos).
+- **Cancelar:** la ventana "Analisis 3D" tiene el boton *Cancelar analisis*, que mata Gmsh/CalculiX en curso
+  (tambien al cerrar el programa).
+
 ## Novedades: un solo analisis de elementos finitos (el solido 3D) y soldadura con conectores
 
 **Se elimino el FEM 2D interno** (placa de Mindlin, `fea.py`), su pestaña, sus mapas y la exportacion de

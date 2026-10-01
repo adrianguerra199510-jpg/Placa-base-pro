@@ -155,11 +155,16 @@ class Worker3D(QThread):
     def __init__(self, prj, folder):
         super().__init__()
         self.prj, self.folder = prj, folder
+        self.token = mesh3d.CancelToken()
+
+    def cancel(self):
+        """Mata el proceso en curso (Gmsh o CalculiX) y termina el analisis."""
+        self.token.cancel()
 
     def run(self):
         try:
             res, msg = mesh3d.full_3d(self.prj, self.folder, "modelo3d",
-                                      progress=self.progress.emit)
+                                      progress=self.progress.emit, cancel=self.token)
         except Exception as e:
             res, msg = None, f"{type(e).__name__}: {e}"
         self.done.emit(res, msg)
@@ -558,10 +563,10 @@ class MainWindow(QMainWindow):
         f.num("Brazo del cortante (-1 = automatico)", "fea.shear_arm", -1, 60, uk="L", help="Distancia entre donde el cortante entra en la placa (cara superior) y donde lo devuelven los pernos o la llave. El par V·e es un momento sobre la placa: hace que los pernos de un lado tengan mas traccion que los del otro. -1 = automatico: tp/2 + mortero sin llave; tp + H/2 con llave. 0 = sin efecto del cortante. Lo usa el modelo 3D (altura del punto de aplicacion de las cargas).")
         f.group("Modelo SOLIDO 3D (Gmsh + CalculiX)")
         f.text("CalculiX propio (opcional)", "fea.ccx_path", help="Dejelo vacio: el programa usa el CalculiX incluido en la carpeta solvers. Solo escriba una ruta si quiere usar otra version de ccx.exe.")
-        f.combo("Calidad de la malla 3D", "fea.mesh3d_mode", MESH3D_MODES, help="Rapida (predeterminada): tetraedros del doble de tamano que la automatica (~30 s en lugar de ~3 min). En el estudio de convergencia (3 conexiones) difiere menos de 3 % de la automatica en traccion en pernos, presion, deflexion y von Mises PROMEDIADO. El pico puntual de von Mises no converge con ninguna malla. Automatica: mas fina y lenta. Un tamano manual mayor que 0 (abajo) tiene prioridad.")
+        f.combo("Calidad de la malla 3D", "fea.mesh3d_mode", MESH3D_MODES, help="Automatica (recomendada): el programa calcula el tamano de elemento del proyecto: el mayor entre 1.2 veces el radio de promedio del von Mises (con eso el esfuerzo promediado converge, ±2 % en el estudio de convergencia) y la raiz del area de la placa / 400 (limita el costo en placas grandes, ~70-90 mil nodos). Fina: 0.65 veces ese tamano (mas lenta). Si el calculo falla, el programa reintenta solo con una malla mas gruesa. Un tamano manual mayor que 0 (abajo) tiene prioridad.")
         f.combo("Modelo de la soldadura", "fea.weld_model", WELD_MODELS, help="Conectores (recomendado): el perfil y la placa son cuerpos separados; la compresion pasa por contacto y cada linea de cordon es un conector de traccion y cortante cuya fuerza se lee directo del resorte (una zona sin soldar o un lado sin cordon no transmite). Fusionado: union monolitica que equivale a una CJP; la fuerza del cordon se deduce de los esfuerzos del perfil y una zona sin soldar transmite igual.")
-        f.num("Radio de promedio del von Mises 3D (× espesor)", "fea.vm_avg_factor", 0.1, 3.0, 0.1, 2, help="El von Mises puntual del modelo solido crece sin limite al refinar la malla (singularidades en el borde de los agujeros y en el pie del perfil). El programa verifica el maximo PROMEDIADO: promedio del tensor de esfuerzos, ponderado por area, en un circulo de este radio (en espesores de placa) sobre la misma cara. Predeterminado 1.0. Un radio menor da valores mas altos y mas sensibles a la malla; el radio nunca baja del tamano del elemento. Este valor si converge con la malla.")
-        f.num("Tamano de malla 3D (0 = automatico)", "fea.mesh3d", 0, 20, uk="L", help="Tamano caracteristico de los tetraedros. Valores pequenos dan mas detalle y mucho mas tiempo de calculo. Deje 0 para que lo estime el programa.")
+        f.num("Radio de promedio del von Mises 3D (× espesor)", "fea.vm_avg_factor", 0.1, 3.0, 0.1, 2, help="El von Mises puntual del modelo solido crece sin limite al refinar la malla (singularidades en el borde de los agujeros y en el pie del perfil). El programa verifica el maximo PROMEDIADO: promedio del tensor de esfuerzos, ponderado por area, en un circulo de este radio (en espesores de placa) sobre la misma cara. Predeterminado 1.0. Un radio menor da valores mas altos y mas sensibles a la malla; el radio nunca baja de 1/1.2 del tamano del elemento. Este valor si converge con la malla.")
+        f.num("Tamano de malla 3D (0 = automatico)", "fea.mesh3d", 0, 20, uk="L", help="Tamano caracteristico de los tetraedros. Deje 0 para que el programa lo calcule segun la placa y el radio de promedio (recomendado). Un valor manual muy pequeno en una placa grande hace el modelo enorme y el calculo muy lento o no converge; el radio de promedio nunca baja del tamano de elemento.")
         f.note("El analisis solido 3D es el unico analisis de elementos finitos del programa: sus "
                "resultados (traccion en pernos, presion de contacto, von Mises promediado en la "
                "placa y fuerzas en la soldadura) entran al veredicto y a la memoria de calculo. "
@@ -1190,18 +1195,35 @@ class MainWindow(QMainWindow):
         self.dlg3d.setWindowTitle("Analisis 3D")
         self.dlg3d.setWindowModality(Qt.WindowModal)
         self.dlg3d.setMinimumWidth(460)
-        self.dlg3d.setCancelButton(None)
+        self.dlg3d.setCancelButtonText("Cancelar analisis")
+        self.dlg3d.setAutoClose(False)
+        self.dlg3d.setAutoReset(False)
         self.dlg3d.show()
         self.btn3d.setEnabled(False)
         import copy
         self.worker = Worker3D(copy.deepcopy(self.prj), folder)   # copia: editar mientras corre no lo afecta
         self.worker.progress.connect(self.dlg3d.setLabelText)
+        self.dlg3d.canceled.connect(self._cancel_3d)
         self.worker.done.connect(self._on_3d)
         self.worker.start()
 
+    def _cancel_3d(self):
+        """Boton 'Cancelar analisis': mata Gmsh/CalculiX en curso."""
+        if self.worker is not None and self.worker.isRunning():
+            self.dlg3d.setLabelText("Cancelando ...")
+            self.worker.cancel()
+
     def _on_3d(self, res, msg):
+        try:
+            self.dlg3d.canceled.disconnect(self._cancel_3d)
+        except Exception:
+            pass
         self.dlg3d.close()
         self.btn3d.setEnabled(True)
+        if res is None and msg.startswith(mesh3d.CANCELADO):
+            self.lbl_3d.setText("Analisis cancelado.")
+            self.statusBar().showMessage("Analisis 3D cancelado", 5000)
+            return
         if res is None:
             self.lbl_3d.setText(f"<span style='color:#9c0006'>{msg[:600]}</span>")
             QMessageBox.warning(self, "Analisis 3D", msg[-2500:])
@@ -1220,9 +1242,9 @@ class MainWindow(QMainWindow):
             + f"<b>von Mises pico puntual</b> = {u.q('S', res.vmmax)} (depende de la malla)  ·  "
             + (f"equilibrio: {fem.msg}<br>" if fem.msg else "<br>") +
             f"Archivos en: {getattr(res, 'folder', '')}<br>"
-            + ("<br><span style='color:#595959'>Malla rapida (2× el tamano automatico): en las "
-               "comparaciones hechas difiere &lt; 3 % de la automatica en las magnitudes "
-               "reportadas, salvo el pico puntual.</span><br>" if fem.fast else "")
+            + (f"<br><span style='color:#595959'>Tamano de elemento: {u.q('L', fem.lc)}"
+               + (" (automatico: el mayor entre 1.2 veces el radio de promedio y raiz(area/400))"
+                  if fem.fast else "") + ".</span><br>" if fem.lc else "")
             + "Los picos de von Mises en aristas vivas (borde de agujero, encuentro "
             "perfil-placa) son singularidades de malla: dependen del tamano de "
             "elemento y no deben leerse como esfuerzo real.")
@@ -1472,6 +1494,9 @@ class MainWindow(QMainWindow):
             "Los resultados deben ser revisados por un ingeniero responsable.")
 
     def closeEvent(self, ev):
+        if self.worker is not None and self.worker.isRunning():
+            self.worker.cancel()                  # no deja Gmsh/CalculiX corriendo al cerrar
+            self.worker.wait(5000)
         ev.accept()
 
 

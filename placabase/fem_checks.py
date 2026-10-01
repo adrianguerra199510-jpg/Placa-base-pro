@@ -28,6 +28,7 @@ class Fem3D:
     vm_avg: dict = None              # view3d.smoothed_plate_vm
     rep: dict = None                 # imagenes y resumen para el reporte
     fast: bool = False
+    lc: float = 0.0                  # tamano de elemento usado, in
     n_nodes: int = 0
     n_elems: int = 0
     umax: float = 0.0
@@ -49,7 +50,7 @@ def fem_checks(prj: Project, br: Bearing, fem: Fem3D, rec=None) -> list:
     post = fem.post
     phi = bolt_phiRnt(prj)
     Fy = prj.plate.mat().Fy
-    mesh_txt = ("malla rapida" if fem.fast else "malla automatica") + f", {fem.n_nodes:,} nodos"
+    mesh_txt = (f"malla de {u.q('L', fem.lc)}" if fem.lc else "malla") + f", {fem.n_nodes:,} nodos"
 
     # ---- pernos
     bolts = list(getattr(post, "bolts", []))

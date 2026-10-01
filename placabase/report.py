@@ -163,10 +163,12 @@ def render_3d_png(prj: Project, path: str, size=(6.4, 4.6), dpi=170) -> str | No
 def _rep3d_lines(prj: Project, us, rep: dict) -> list[str]:
     """Texto del resumen de resultados del modelo solido 3D."""
     out = []
-    if rep.get("fast"):
-        out.append("Malla rapida (tamano = 2× el automatico): en las comparaciones realizadas "
-                   "difiere menos de 3 % de la automatica en traccion en pernos, presion, "
-                   "deflexion y von Mises promediado.")
+    if rep.get("lc"):
+        out.append(f"Tamano de elemento: {us.q('L', rep['lc'])} ("
+                   + ("calculado automaticamente: el mayor entre 1.2 veces el radio de promedio y raiz(area de "
+                      "placa/400); en el estudio de convergencia el von Mises promediado varia ±2 % y la "
+                      "traccion en pernos < 0.5 %)." if rep.get("fast") else "definido por el usuario).")
+                   )
     out.append(f"Modelo de {rep['n_nodes']:,} nodos y {rep['n_elems']:,} tetraedros.")
     va = rep.get("vm_avg")
     if va:

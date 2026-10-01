@@ -217,6 +217,18 @@ if not (_q1.sig3d() == _q2.sig3d() and _q1.sig3d() != _q3.sig3d()):
     FAIL.append("firma del 3D: debe ignorar nombre/autor y detectar cambios de geometria")
 print(f"{'firma del modelo 3D':34} ok")
 
+# tamano de malla 3D automatico: sube con el area de la placa (costo acotado) y respeta el manual
+from placabase import mesh3d
+_a = Project(); _b = Project(); _b.plate.N = _b.plate.B = 80.0
+_c = Project(); _c.fea.mesh3d = 1.5
+_la, _lb, _lc = mesh3d.mesh_size_for(_a), mesh3d.mesh_size_for(_b), mesh3d.mesh_size_for(_c)
+print(f"{'malla 3D automatica':34} placa 22 in: {_la:.2f} in   placa 80 in: {_lb:.2f} in   manual 1.5: {_lc:.2f} in")
+if not (_lb > _la and abs(_lc - 1.5) < 1e-9):
+    FAIL.append("malla 3D: el tamano automatico debe crecer con la placa y el manual tener prioridad")
+_tok = mesh3d.CancelToken(); _tok.cancel()
+if mesh3d.full_3d(Project(), __import__("tempfile").mkdtemp(), cancel=_tok)[1] != mesh3d.CANCELADO:
+    FAIL.append("cancelar antes de empezar debe devolver 'cancelado'")
+
 print()
 print("CASOS LIMITE")
 case("placa insuficiente", **{"loads.Mux": 26000.0})

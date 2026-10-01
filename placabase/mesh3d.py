@@ -478,22 +478,36 @@ def write_driver(prj: Project, folder: str, stem: str) -> str:
     return str(out)
 
 
+def auto_mesh_size(prj: Project) -> float:
+    """Tamano de elemento AUTOMATICO (in), calculado del propio proyecto.
+
+    Estudio de convergencia (placa 500×500×20 mm, 1000 kN de traccion, 5 mallas): el von Mises promediado
+    converge (±2 %) cuando el radio de promedio r es al menos ~0.85 veces el tamano del elemento y la traccion
+    en pernos converge con cualquier malla.  Por eso:
+        malla por convergencia   lc = 1.2 · r          r = (factor de radio) · tp
+        malla por costo          lc = √(area de la placa / 400)   (≈ 70-90 mil nodos en total)
+    y se toma la MAYOR de las dos (con placas grandes manda el costo: el calculo no se queda iterando y el
+    radio de promedio sube a lc, como hace full_3d), sin pasar de 1/4 del lado menor de la placa."""
+    p = prj.plate
+    area = (math.pi * p.Dp ** 2 / 4.0) if p.shape == "Circular" else p.Nc * p.Bc
+    side = p.Dp if p.shape == "Circular" else min(p.Nc, p.Bc)
+    lc_conv = 1.2 * max(prj.fea.vm_avg_factor, 0.1) * p.tp
+    lc_cost = math.sqrt(max(area, 1.0) / 400.0)
+    return max(0.25, min(max(lc_conv, lc_cost), side / 4.0))
+
+
 def mesh_size_for(prj: Project) -> float:
-    """Tamano de malla 3D segun las opciones: el valor manual si se fijo; si no, el modo.
-    Automatica -> 0 (lo estima write_geo); Rapida -> el doble del automatico.  En el estudio de
-    convergencia (3 conexiones) la rapida difiere menos de 3 % de la automatica en traccion,
-    presion, deflexion y von Mises PROMEDIADO (con radio de promedio >= tamano de elemento)."""
+    """Tamano de malla 3D: el valor manual si se fijo; si no, el automatico (x 0.65 en el modo "Fina")."""
     if prj.fea.mesh3d and prj.fea.mesh3d > 0:
         return float(prj.fea.mesh3d)
-    if str(getattr(prj.fea, "mesh3d_mode", "")).startswith("Rapida"):
-        p = prj.plate
-        return 2.0 * max(p.tp / 2.0, min(p.Nc, p.Bc) / 26.0)
-    return 0.0
+    k = 0.65 if str(getattr(prj.fea, "mesh3d_mode", "")).startswith("Fina") else 1.0
+    return k * auto_mesh_size(prj)
 
 
 def is_fast_mesh(prj: Project) -> bool:
+    """True si el tamano es el automatico (ni manual ni 'Fina')."""
     return (not (prj.fea.mesh3d and prj.fea.mesh3d > 0)) and \
-        str(getattr(prj.fea, "mesh3d_mode", "")).startswith("Rapida")
+        not str(getattr(prj.fea, "mesh3d_mode", "")).startswith("Fina")
 
 
 def export_3d(prj: Project, geo_path: str, mesh_size: float = 0.0):
@@ -534,20 +548,65 @@ def _self_cmd():
     return [sys.executable, str(app_dir() / "run.py")]
 
 
-def run_gmsh(geo_path: str, gmsh_exe: str = "", timeout: int = 1800):
+class CancelToken:
+    """Permite cancelar el analisis desde la interfaz: mata el proceso (Gmsh o CalculiX) en curso."""
+    def __init__(self):
+        self.cancelled = False
+        self.proc = None
+
+    def cancel(self):
+        self.cancelled = True
+        pr = self.proc
+        if pr is not None and pr.poll() is None:
+            try:
+                pr.kill()
+            except Exception:
+                pass
+
+
+def _run_proc(cmd, cancel=None, timeout=7200, cwd=None, env=None):
+    """Ejecuta un proceso y espera su fin revisando la cancelacion.  -> (returncode, salida, estado)
+    con estado 'ok' | 'cancelado' | 'tiempo'."""
+    import tempfile
+    import time
+    flags = 0x08000000 if os.name == "nt" else 0          # sin ventana de consola
+    tmp = tempfile.TemporaryFile(mode="w+", encoding="utf-8", errors="ignore")
+    pr = subprocess.Popen(cmd, stdout=tmp, stderr=subprocess.STDOUT, cwd=cwd, env=env, creationflags=flags)
+    if cancel is not None:
+        cancel.proc = pr
+    t0, state = time.time(), "ok"
+    while pr.poll() is None:
+        if cancel is not None and cancel.cancelled:
+            pr.kill(); state = "cancelado"; break
+        if time.time() - t0 > timeout:
+            pr.kill(); state = "tiempo"; break
+        time.sleep(0.2)
+    try:
+        pr.wait(timeout=10)
+    except Exception:
+        pass
+    if cancel is not None:
+        cancel.proc = None
+    tmp.seek(0)
+    out = tmp.read()
+    tmp.close()
+    return pr.returncode, out, state
+
+
+def run_gmsh(geo_path: str, gmsh_exe: str = "", timeout: int = 1800, cancel=None):
     """Malla el .geo con la libreria de Gmsh incluida (proceso hijo).
     Devuelve (ok, salida, ruta_inp)."""
     p = Path(geo_path)
     out = str(p.with_name(p.stem + "_malla.inp"))
-    flags = 0x08000000 if os.name == "nt" else 0          # sin ventana de consola
     try:
-        r = subprocess.run(_self_cmd() + ["--mesh", str(p), out],
-                           capture_output=True, text=True, timeout=timeout,
-                           creationflags=flags)
-        txt = (r.stdout or "") + (r.stderr or "")
+        if Path(out).exists():
+            Path(out).unlink()                              # una malla vieja no debe pasar por nueva
+        rc, txt, state = _run_proc(_self_cmd() + ["--mesh", str(p), out], cancel, timeout)
+        if state == "cancelado":
+            return False, "Analisis cancelado por el usuario.", out
+        if state == "tiempo":
+            return False, "Gmsh excedio el tiempo limite.", out
         return Path(out).exists(), txt, out
-    except subprocess.TimeoutExpired:
-        return False, "Gmsh excedio el tiempo limite.", out
     except Exception as e:
         return False, f"No se pudo lanzar el mallador: {e}", out
 
@@ -818,7 +877,7 @@ def build_inp(prj: Project, mesh_inp: str, out_inp: str, height: float = 0.0) ->
     rot = ref + 1
     L += [f"*RIGID BODY, NSET=NTOPE, REF NODE={ref}, ROT NODE={rot}",
           "*BOUNDARY", "NTIERRA, 1, 3",
-          "*STEP, NLGEOM, INC=300", "*STATIC", "0.5, 1.0, 1e-5, 1.0", "*CLOAD",
+          "*STEP, NLGEOM, INC=300", "*STATIC", "0.5, 1.0, 1e-3, 1.0", "*CLOAD",
           f"{ref}, 3, {-ld.Pu:.5f}"]
     if abs(ld.Vux) > 0:
         L.append(f"{ref}, 1, {ld.Vux:.5f}")
@@ -844,7 +903,7 @@ def build_inp(prj: Project, mesh_inp: str, out_inp: str, height: float = 0.0) ->
     return out_inp
 
 
-def run_ccx(inp_path: str, ccx_path: str = "", timeout: int = 7200):
+def run_ccx(inp_path: str, ccx_path: str = "", timeout: int = 7200, cancel=None):
     """Resuelve con CalculiX.  Devuelve (ok, salida, ruta_frd)."""
     p = Path(inp_path)
     stem = str(p.with_suffix(""))
@@ -855,34 +914,57 @@ def run_ccx(inp_path: str, ccx_path: str = "", timeout: int = 7200):
     env.setdefault("OMP_NUM_THREADS", ncpu)
     env.setdefault("CCX_NPROC_EQUATION_SOLVER", ncpu)
     env.setdefault("CCX_NPROC_STIFFNESS", ncpu)
-    flags = 0x08000000 if os.name == "nt" else 0
     try:
-        r = subprocess.run([exe, "-i", p.stem], capture_output=True, text=True,
-                           timeout=timeout, cwd=str(p.parent), env=env,
-                           creationflags=flags)
-        out = (r.stdout or "") + (r.stderr or "")
+        if Path(frd).exists():
+            Path(frd).unlink()
+        rc, out, state = _run_proc([exe, "-i", p.stem], cancel, timeout, cwd=str(p.parent), env=env)
+        if state == "cancelado":
+            return False, "Analisis cancelado por el usuario.", frd
+        if state == "tiempo":
+            return False, "CalculiX excedio el tiempo limite.", frd
         return Path(frd).exists(), out, frd
     except FileNotFoundError:
         return False, (f"No se encontro CalculiX ('{exe}').  Deberia estar en "
                        f"solvers\\calculix junto al programa."), frd
-    except subprocess.TimeoutExpired:
-        return False, "CalculiX excedio el tiempo limite.", frd
 
 
-def full_3d(prj: Project, folder: str, stem: str = "modelo3d", progress=None):
-    """Geometria -> malla -> .inp -> CalculiX -> resultados.
-    `progress` es una funcion opcional que recibe mensajes de avance."""
-    def say(m):
+CANCELADO = "Analisis cancelado por el usuario."
+
+
+def full_3d(prj: Project, folder: str, stem: str = "modelo3d", progress=None, cancel=None):
+    """Geometria -> malla -> .inp -> CalculiX -> resultados, con cancelacion y reintentos.
+
+    Si Gmsh o CalculiX fallan (tetraedros invalidos, sin convergencia, sin memoria) se reintenta hasta dos
+    veces con una malla mas gruesa (x1.35 y x1.8), porque en placas grandes o con detalles pequenos la malla
+    manda en la robustez.  `progress` recibe mensajes de avance; `cancel` es un CancelToken."""
+    def say(m_):
         if progress:
-            progress(m)
+            progress(m_)
 
+    lc0 = mesh_size_for(prj)
+    last = "No se pudo completar el analisis."
+    for k, f in enumerate((1.0, 1.35, 1.8)):
+        if cancel is not None and cancel.cancelled:
+            return None, CANCELADO
+        lc = lc0 * f
+        tag = "" if k == 0 else f"  (reintento {k} con malla mas gruesa)"
+        res, msg = _full_3d_once(prj, folder, stem, lc, say, cancel, tag)
+        if res is not None or (cancel is not None and cancel.cancelled) or msg == CANCELADO:
+            return res, (CANCELADO if (cancel is not None and cancel.cancelled) else msg)
+        last = msg
+    return None, last + "\n\n(Se probaron tres tamanos de malla; revise la geometria o aumente el tamano manual.)"
+
+
+def _full_3d_once(prj, folder, stem, lc, say, cancel, tag=""):
     Path(folder).mkdir(parents=True, exist_ok=True)
     geo = str(Path(folder) / f"{stem}.geo")
-    say("1/4  Escribiendo la geometria solida ...")
-    export_3d(prj, geo, mesh_size_for(prj))
+    say(f"1/4  Escribiendo la geometria solida ...{tag}")
+    export_3d(prj, geo, lc)
 
-    say("2/4  Mallando con Gmsh (puede tardar varios minutos) ...")
-    ok, out, mesh_inp = run_gmsh(geo)
+    say(f"2/4  Mallando con Gmsh (elemento de {lc * 25.4:.0f} mm = {lc:.2f} in) ...{tag}")
+    ok, out, mesh_inp = run_gmsh(geo, cancel=cancel)
+    if cancel is not None and cancel.cancelled:
+        return None, CANCELADO
     if not ok:
         return None, f"Gmsh no genero la malla.\n\n{out[-3000:]}"
 
@@ -894,8 +976,10 @@ def full_3d(prj: Project, folder: str, stem: str = "modelo3d", progress=None):
     except Exception as e:
         return None, f"No se pudo armar el .inp: {e}"
 
-    say("4/4  Resolviendo con CalculiX ...")
-    ok, out, frd = run_ccx(inp, prj.fea.ccx_path)
+    say(f"4/4  Resolviendo con CalculiX ...{tag}")
+    ok, out, frd = run_ccx(inp, prj.fea.ccx_path, cancel=cancel)
+    if cancel is not None and cancel.cancelled:
+        return None, CANCELADO
     if not ok:
         return None, f"CalculiX no genero resultados.\n\n{out[-3000:]}"
 
@@ -911,7 +995,9 @@ def full_3d(prj: Project, folder: str, stem: str = "modelo3d", progress=None):
         pass
     res = load_results(mesh_inp, frd)
     if not res.ok:
-        return None, res.msg
+        err = [ln for ln in out.splitlines() if "*ERROR" in ln][:3]
+        return None, res.msg + ("\n" + "\n".join(err) if err else "")
+    res.lc = lc
     try:
         from .view3d import classify_parts
         res.parts = classify_parts(res, prj)
@@ -933,9 +1019,9 @@ def full_3d(prj: Project, folder: str, stem: str = "modelo3d", progress=None):
     try:
         from .view3d import smoothed_plate_vm
         p_ = prj.plate
-        lc = mesh_size_for(prj) or max(p_.tp / 2.0, min(p_.Nc, p_.Bc) / 26.0)
-        # el radio no baja del tamano de elemento: promediar en menos que un elemento no promedia
-        r_avg = max(prj.fea.vm_avg_factor * p_.tp, lc)
+        # el radio no baja de lc/1.2: en el estudio de convergencia el promedio es estable (±2 %) con
+        # elementos de hasta 1.2 veces el radio; con menos radio por elemento no promedia
+        r_avg = max(prj.fea.vm_avg_factor * p_.tp, lc / 1.2)
         res.vm_avg = smoothed_plate_vm(res, prj, r_avg)
         if res.vm_avg:
             res.msg += (f"   Von Mises PROMEDIADO en la placa (r = {res.vm_avg['radius']:.2f} in) = "

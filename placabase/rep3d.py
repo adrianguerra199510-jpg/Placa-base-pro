@@ -22,7 +22,7 @@ def make_rep3d(prj, res) -> dict | None:
         de = view3d.render_result_png(res, prj, "u", str(folder / "reporte_deformada.png"), sc)
         nvm = max(res.vm, key=res.vm.get) if res.vm else None
         plan = plan3d.render_all(prj, res, str(folder))
-        return dict(fast=mesh3d.is_fast_mesh(prj), vm_avg=getattr(res, "vm_avg", None),
+        return dict(fast=mesh3d.is_fast_mesh(prj), lc=getattr(res, "lc", 0.0), vm_avg=getattr(res, "vm_avg", None),
                     vm=vm, u=de, plan=plan, scale=sc, n_nodes=res.n_nodes, n_elems=res.n_elems,
                     umax=res.umax, vmmax=res.vmmax, vm_node=nvm)
     except Exception:
@@ -35,6 +35,6 @@ def make_fem(prj, res, rep=None) -> Fem3D:
     if rep is None:
         rep = make_rep3d(prj, res)
     return Fem3D(post=getattr(res, "post", None), vm_avg=getattr(res, "vm_avg", None), rep=rep,
-                 fast=mesh3d.is_fast_mesh(prj), n_nodes=res.n_nodes, n_elems=res.n_elems,
+                 fast=mesh3d.is_fast_mesh(prj), lc=getattr(res, "lc", 0.0), n_nodes=res.n_nodes, n_elems=res.n_elems,
                  umax=res.umax, vmmax=res.vmmax, folder=getattr(res, "folder", ""),
                  msg=getattr(getattr(res, "post", None), "msg", ""), sig=prj.sig3d())
