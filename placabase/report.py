@@ -83,78 +83,19 @@ def _fem_of(res):
 
 
 def bolt_rows(prj: Project, res: Results, us: UnitSet):
-    """(encabezados, filas) de la tabla de traccion por perno: modelo 3D contra distribucion lineal."""
+    """(encabezados, filas) de la tabla de traccion por perno del modelo 3D."""
     fem = _fem_of(res)
     post = getattr(fem, "post", None)
     if post is None or not getattr(post, "bolts", None):
         return None, []
-    lin = getattr(res, "lin", None)
-    tl = list(lin.bolt_T) if (lin is not None and getattr(lin, "ok", False)) else []
-    hdr = ["Perno", f"x ({us.L})", f"y ({us.L})", f"T 3D ({us.F})", f"T lineal ({us.F})", "D/C 3D"]
     from .fem_checks import bolt_phiRnt
     phi = bolt_phiRnt(prj)
+    hdr = ["Perno", f"x ({us.L})", f"y ({us.L})", f"T ({us.F})", "D/C"]
     filas = []
     for (k, x, y, T) in sorted(post.bolts, key=lambda b_: -b_[3]):
-        t_l = tl[k - 1] if 0 <= k - 1 < len(tl) else None
         filas.append([f"P{k}", us.fmt("L", x), us.fmt("L", y), us.fmt("F", T),
-                      "—" if t_l is None else us.fmt("F", t_l),
                       f"{T / phi:.3f}" if phi else "—"])
     return hdr, filas
-
-
-def lin_section(prj: Project, res: Results, us: UnitSet):
-    """Datos de la seccion 'Fuerza por perno — distribucion lineal (placa rigida)'.
-    -> None si no hay resultado, o dict(hdr, rows, checks, verdict, lines)."""
-    lin = getattr(res, "lin", None)
-    if lin is None or not getattr(lin, "ok", False):
-        return None
-    from .fem_checks import bolt_phiRnt
-    phi = bolt_phiRnt(prj)
-    fem = _fem_of(res)
-    post = getattr(fem, "post", None)
-    t3 = {}
-    if post is not None:
-        t3 = {k - 1: T for (k, x, y, T) in post.bolts}
-    hdr = ["Perno", f"x ({us.L})", f"y ({us.L})", f"T lineal ({us.F})", "D/C lineal"]
-    if t3:
-        hdr.append(f"T 3D ({us.F})")
-    order = sorted(range(len(lin.bolt_T)), key=lambda i: -lin.bolt_T[i])
-    rows = []
-    for i in order:
-        x, y = lin.bolt_xy[i]
-        row = [f"P{i + 1}", us.fmt("L", x), us.fmt("L", y), us.fmt("F", lin.bolt_T[i]),
-               f"{lin.bolt_T[i] / phi:.3f}" if phi > 0 else "-"]
-        if t3:
-            row.append(us.fmt("F", t3.get(i, 0.0)))
-        rows.append(row)
-    cks = {c.key: c for c in list(getattr(res, "checks", [])) + list(getattr(res, "lin_checks", []))
-           if c.key.startswith("lin_")}
-    chk_rows = []
-    for k in ("lin_t", "lin_tv", "lin_brg", "lin_tp", "lin_rigid"):
-        c = cks.get(k)
-        if c is None:
-            continue
-        dv, cv, ul = ck_vals(us, c)
-        chk_rows.append([c.title, f"{dv:,.3f}", f"{cv:,.3f}", ul,
-                         "—" if c.skip else f"{c.ratio:.3f}",
-                         "n/a" if c.skip else ("CUMPLE" if c.ok else "NO CUMPLE")])
-    rig = cks.get("lin_rigid")
-    if rig is None:
-        verdict = ("Validez de la hipotesis de placa rigida: NO VERIFICADA (requiere el analisis 3D "
-                   "de la placa flexible).")
-    elif rig.skip:
-        verdict = ("La traccion en los pernos es pequena: la distribucion lineal no es determinante.")
-    elif rig.ok:
-        verdict = ("La distribucion lineal ES APLICABLE: la placa flexible (modelo 3D) no excede a la "
-                   "lineal en mas de 10 %.")
-    else:
-        verdict = ("La distribucion lineal NO ES APLICABLE con el espesor actual: la placa es flexible "
-                   "y el reparto lineal SUBESTIMA la traccion. " + rig.note)
-    lines = [lin.msg,
-             (f"Hipotesis: w = a + b·x + c·y con a = {lin.a:.4g}, b = {lin.b:.4g}, c = {lin.c:.4g}; "
-              f"ks = {us.q('K', lin.ks)}, kb = {us.q('LF', lin.kb)}, brazo del cortante e = "
-              f"{us.q('L', lin.arm)}.")]
-    return dict(hdr=hdr, rows=rows, checks=chk_rows, verdict=verdict, lines=lines)
 
 
 def fem_section(prj: Project, res: Results, us: UnitSet):
@@ -404,9 +345,9 @@ def export_xlsx(prj: Project, res: Results, path: str,
     ws[f"B{r}"] = "VEREDICTO"
     ws[f"B{r}"].font = Font(name=F, size=12, bold=True)
     gov = res.governing
-    ws[f"C{r}"] = "CUMPLE" if res.ok else "NO CUMPLE"
+    ws[f"C{r}"] = "PENDIENTE — realizar analisis 3D" if res.pending else ("CUMPLE" if res.ok else "NO CUMPLE")
     ws[f"C{r}"].font = Font(name=F, size=12, bold=True)
-    ws[f"C{r}"].fill = OKF if res.ok else NOF
+    ws[f"C{r}"].fill = PatternFill("solid", fgColor="FFEB9C") if res.pending else (OKF if res.ok else NOF)
     ws.merge_cells(f"D{r}:G{r}")
     ws[f"D{r}"] = (f"D/C maximo = {res.max_ratio:.3f}" +
                    (f"  —  gobierna: {gov.title}" if gov else ""))
@@ -479,7 +420,7 @@ def export_xlsx(prj: Project, res: Results, path: str,
                         val = vtxt
                     cc = ws3.cell(row=rr, column=2 + j, value=val)
                     cc.font = N
-                    if j == 5 and isinstance(val, float):
+                    if j == 4 and isinstance(val, float):
                         cc.font = B
                         cc.fill = grn if val <= 1.0 else red
                 rr += 1
@@ -587,9 +528,10 @@ def export_docx(prj: Project, res: Results, path: str,
 
     pv = doc.add_paragraph()
     pv.add_run("VEREDICTO: ").bold = True
-    rr = pv.add_run("CUMPLE" if res.ok else "NO CUMPLE")
+    rr = pv.add_run("PENDIENTE — realizar el analisis 3D" if res.pending else ("CUMPLE" if res.ok else "NO CUMPLE"))
     rr.bold = True
-    rr.font.color.rgb = RGBColor(0x00, 0x61, 0x00) if res.ok else RGBColor(0x9C, 0x00, 0x06)
+    rr.font.color.rgb = (RGBColor(0x9C, 0x57, 0x00) if res.pending else
+                         (RGBColor(0x00, 0x61, 0x00) if res.ok else RGBColor(0x9C, 0x00, 0x06)))
     gov = res.governing
     pv.add_run(f"   D/C maximo = {res.max_ratio:.3f}" +
                (f"   (gobierna: {gov.title})" if gov else ""))
@@ -598,34 +540,6 @@ def export_docx(prj: Project, res: Results, path: str,
         doc.add_heading("4. Avisos", level=1)
         for wmsg in res.warnings:
             doc.add_paragraph(wmsg, style="List Bullet")
-
-    _ls = lin_section(prj, res, us)
-    if _ls:
-        doc.add_heading("5. Fuerza por perno — distribucion lineal (placa rigida)", level=1)
-        for ln in _ls["lines"]:
-            doc.add_paragraph(ln)
-        tb = doc.add_table(rows=1, cols=len(_ls["hdr"]))
-        tb.style = "Light Grid Accent 1"
-        for j, h_ in enumerate(_ls["hdr"]):
-            tb.rows[0].cells[j].text = ""
-            tb.rows[0].cells[j].paragraphs[0].add_run(h_).bold = True
-        for row in _ls["rows"]:
-            cel = tb.add_row().cells
-            for j, v in enumerate(row):
-                cel[j].text = v
-        doc.add_paragraph().add_run("Verificaciones AISC con la distribucion lineal").bold = True
-        tc = doc.add_table(rows=1, cols=6)
-        tc.style = "Light Grid Accent 1"
-        for j, h_ in enumerate(("Verificacion", "Demanda", "Capacidad", "Un.", "D/C", "Estado")):
-            tc.rows[0].cells[j].text = ""
-            tc.rows[0].cells[j].paragraphs[0].add_run(h_).bold = True
-        for row in _ls["checks"]:
-            cel = tc.add_row().cells
-            for j, v in enumerate(row):
-                cel[j].text = v
-        pv = doc.add_paragraph()
-        pv.add_run("Validez: ").bold = True
-        pv.add_run(_ls["verdict"])
 
     _fs = fem_section(prj, res, us)
     if _fs:
@@ -847,11 +761,12 @@ def export_pdf(prj: Project, res: Results, path: str,
                             0.6 * inch], style))
 
     gov = res.governing
-    vcol = "#006100" if res.ok else "#9C0006"
+    vcol = "#9C5700" if res.pending else ("#006100" if res.ok else "#9C0006")
+    vtxt = "PENDIENTE — realizar analisis 3D" if res.pending else ("CUMPLE" if res.ok else "NO CUMPLE")
     story.append(Spacer(1, 5))
     story.append(Paragraph(
         f'<b>VEREDICTO: <font color="{vcol}">'
-        f'{"CUMPLE" if res.ok else "NO CUMPLE"}</font></b> &nbsp;&nbsp; '
+        f'{vtxt}</font></b> &nbsp;&nbsp; '
         f"D/C maximo = {res.max_ratio:.3f}"
         + (f" &nbsp;(gobierna: {gov.title})" if gov else ""), BODY))
 
@@ -860,34 +775,6 @@ def export_pdf(prj: Project, res: Results, path: str,
         for wmsg in res.warnings:
             col = "9C0006" if wmsg.startswith("**") else "7F6000"
             story.append(Paragraph(f'<font color="#{col}">• {wmsg}</font>', BODY))
-
-    # --------------------------------------------- 5. distribucion lineal por perno
-    _ls = lin_section(prj, res, us)
-    if _ls:
-        story.append(Paragraph("5. Fuerza por perno — distribucion lineal (placa rigida)", H1))
-        for ln in _ls["lines"]:
-            story.append(Paragraph(ln, BODY))
-        story.append(Spacer(1, 4))
-        n_c = len(_ls["hdr"])
-        wcol = [0.55 * inch] + [(6.4 * inch - 0.55 * inch) / (n_c - 1)] * (n_c - 1)
-        story.append(tbl([[Paragraph(str(c_), BODY) for c_ in _ls["hdr"]]] +
-                         [[Paragraph(str(c_), BODY) for c_ in row] for row in _ls["rows"]], wcol,
-                         [("ALIGN", (1, 1), (-1, -1), "RIGHT")]))
-        story.append(Spacer(1, 5))
-        story.append(Paragraph("<b>Verificaciones AISC con la distribucion lineal</b>", BODY))
-        if _ls["checks"]:
-            cst = []
-            for k_, row in enumerate(_ls["checks"], start=1):
-                cst.append(("BACKGROUND", (5, k_), (5, k_),
-                            colors.HexColor("#C6EFCE" if row[5] == "CUMPLE" else
-                                            ("#EEEEEE" if row[5] == "n/a" else "#FFC7CE"))))
-            story.append(tbl([[Paragraph(h_, BODY) for h_ in ("Verificacion", "Demanda", "Capacidad",
-                                                              "Un.", "D/C", "Estado")]] +
-                             [[Paragraph(str(c_), BODY) for c_ in row] for row in _ls["checks"]],
-                             [2.9 * inch, 0.8 * inch, 0.8 * inch, 0.4 * inch, 0.6 * inch, 0.9 * inch],
-                             cst))
-        story.append(Spacer(1, 4))
-        story.append(Paragraph(f"<b>Validez:</b> {_ls['verdict']}", BODY))
 
     # --------------------------------------------- 6-7. modelo solido 3D
     _fs = fem_section(prj, res, us)
@@ -915,12 +802,12 @@ def export_pdf(prj: Project, res: Results, path: str,
             bst = []
             for k_, r in enumerate(_fs["b_rows"], start=1):
                 try:
-                    okb = float(r[5]) <= 1.0
+                    okb = float(r[4]) <= 1.0
                 except ValueError:
                     continue
-                bst.append(("BACKGROUND", (5, k_), (5, k_),
+                bst.append(("BACKGROUND", (4, k_), (4, k_),
                             colors.HexColor("#C6EFCE" if okb else "#FFC7CE")))
-            story.append(tbl([_fs["b_hdr"]] + _fs["b_rows"], [0.6 * inch] + [0.95 * inch] * 5,
+            story.append(tbl([_fs["b_hdr"]] + _fs["b_rows"], [0.6 * inch] + [1.0 * inch] * 4,
                              [("ALIGN", (1, 1), (-1, -1), "RIGHT")] + bst))
         story.append(PageBreak())
         story.append(Paragraph("7. Placa base aislada — resultados del modelo 3D en planta", H1))

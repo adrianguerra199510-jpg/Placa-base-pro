@@ -27,11 +27,6 @@ def case(name, **mut):
         return None, None
     pos = G.bolt_positions(prj)
     feamsg = ""
-    if r.lin is not None and r.lin.ok:
-        err = r.lin.R_conc - r.lin.T_sum - prj.eloads.Pu
-        if abs(err) > 1e-3 * max(1.0, abs(prj.eloads.Pu)):
-            FAIL.append(f"{name}: equilibrio del reparto lineal fuera de tolerancia ({err:+.3f} kip)")
-        feamsg = f" | lineal Tmax={r.lin.T_max:6.1f}  p={r.lin.p_max:5.2f}  it={r.lin.iters}"
     gov = r.governing.title[:38] if r.governing else "-"
     print(f"{name:34} n={len(pos):3d}  caso={r.br.case:13} Tu={r.br.Tu:7.1f}  "
           f"treq={r.treq:5.2f}  D/C={r.max_ratio:6.3f}  gob={gov:40}{feamsg}")
@@ -178,102 +173,43 @@ print(f"{'W soldado solo en el alma':34} weld_part D/C = {_cp[0].ratio if _cp el
 if not _cp or not any("NO esta soldada" in w for w in _rw.warnings):
     FAIL.append("soldadura parcial: falta la verificacion o el aviso")
 
-# ---- fuerza por perno con distribucion lineal (placa rigida)
-from placabase.linear import linear_bolt_forces
-from placabase.model import BOLT_FORCE_METHODS
-import numpy as np
-# signo de Muy (mano derecha, como el 3D) y asimetria por cortante
-_f = Project(); _f.lug.enabled = False
-_f.loads.Mux = 0.0; _f.loads.Vux = 0.0; _f.loads.Muy = 3000.0
-_r = linear_bolt_forces(_f)
-_tm = sum(T for (x, y), T in zip(_r.bolt_xy, _r.bolt_T) if x < 0)
-_tp_ = sum(T for (x, y), T in zip(_r.bolt_xy, _r.bolt_T) if x > 0)
-print(f"{'lineal Muy>0 tracciona -X':34} T(-X) = {_tm:.1f}  T(+X) = {_tp_:.1f}")
-if not (_tm > 5.0 and _tp_ < 0.5):
-    FAIL.append("lineal: Muy > 0 debe traccionar el lado -X (convencion del 3D)")
-_g = Project(); _g.lug.enabled = False; _g.loads.Vux = 30.0
-_rg = linear_bolt_forces(_g)
-_a = sum(T for (x, y), T in zip(_rg.bolt_xy, _rg.bolt_T) if x < 0)
-_b = sum(T for (x, y), T in zip(_rg.bolt_xy, _rg.bolt_T) if x > 0)
-_g.loads.Vux = 0.0
-_r0 = linear_bolt_forces(_g)
-_s0 = [T for (x, y), T in zip(_r0.bolt_xy, _r0.bolt_T) if x < 0]
-_s1 = [T for (x, y), T in zip(_r0.bolt_xy, _r0.bolt_T) if x > 0]
-print(f"{'lineal cortante Vux>0':34} T(-X) = {_a:.2f}  T(+X) = {_b:.2f}   (Vux=0: {sum(_s0):.2f} / {sum(_s1):.2f})")
-if not (_a > _b + 0.1 and abs(sum(_s0) - sum(_s1)) < 1e-6):
-    FAIL.append("lineal: el cortante debe cargar mas el lado -X y sin cortante debe ser simetrico")
-
-_l = Project(); _l.lug.enabled = False
-_l.loads.Mux = 0.0; _l.loads.Muy = 0.0; _l.loads.Vux = 0.0; _l.loads.Vuy = 0.0; _l.loads.Pu = 400.0
-_r = linear_bolt_forces(_l)
-print(f"{'lineal: axial puro':34} T = {_r.T_sum:.4f}  p = {_r.p_max:.4f}  (Pu/A = {400 / _r.A_plate:.4f})")
-if not (_r.ok and _r.T_sum < 1e-9 and abs(_r.p_max - 400 / _r.A_plate) < 1e-6):
-    FAIL.append("lineal: axial puro debe dar T = 0 y p = Pu/A")
-_l.loads.Mux = 4200.0
-_r = linear_bolt_forces(_l)
-_mchk = sum(T * y for (x, y), T in zip(_r.bolt_xy, _r.bolt_T)) - _r.R_conc * _r.yc
-print(f"{'lineal: equilibrio (Mux 4200)':34} ΣT = {_r.T_sum:.2f}  R−ΣT−Pu = {_r.R_conc - _r.T_sum - 400:+.2e}  M = {_mchk:.2f}")
-if not (_r.ok and abs(_r.R_conc - _r.T_sum - 400) < 1e-6 and abs(_mchk - 4200) < 1e-3 and _r.T_sum > 10):
-    FAIL.append("lineal: equilibrio de fuerzas y momentos")
-# comprobacion INDEPENDIENTE con una malla de integracion: con el plano w = a + b·x + c·y que devolvio el
-# solver, la reaccion del concreto (sin los agujeros) y sus momentos deben cerrar el equilibrio
-_pp = _l.plate
-_n = 600
-_xs = (np.arange(_n) + 0.5) / _n * _pp.Bc - _pp.Bc / 2
-_ys = (np.arange(_n) + 0.5) / _n * _pp.Nc - _pp.Nc / 2
-_X, _Y = np.meshgrid(_xs, _ys)
-_dA = (_pp.Bc / _n) * (_pp.Nc / _n)
-_P = _r.ks * np.maximum(_r.a + _r.b * _X + _r.c * _Y, 0.0)
-_dh = _l.bolts.geom().dh
-for (bx, by) in G.bolt_positions(_l):
-    _P[np.hypot(_X - bx, _Y - by) < _dh / 2] = 0.0
-_Rg = float((_P * _dA).sum())
-_Myg = float((_P * _Y * _dA).sum()) - sum(T * y for (x, y), T in zip(_r.bolt_xy, _r.bolt_T))
-_Rt = _r.ks * 0 + _r.R_conc
-print(f"{'lineal contra malla de integracion':34} R = {_Rg:.2f} ({_Rt:.2f})   ∫p·y − ΣT·y = {_Myg:.1f} (-4200)")
-if not (abs(_Rg - _Rt) < 0.01 * _Rt and abs(_Myg + 4200.0) < 0.01 * 4200.0):
-    FAIL.append("lineal: no coincide con la integracion independiente en malla")
-
-# metodo lineal en el solver: sin 3D vigente la validez de la placa rigida queda pendiente
+# ---- el veredicto final lo da el analisis 3D
 import types
 from placabase.fem_checks import Fem3D
-_m = Project(); _m.bolts.force_method = BOLT_FORCE_METHODS[1]
-_m.loads.Mux = 4200.0            # traccion significativa en los pernos
+_m = Project(); _m.loads.Mux = 4200.0
 _rm = solve(_m)
-if any(c.key == "lin_rigid" for c in _rm.checks) or not any("aun no se ha verificado" in w for w in _rm.warnings):
-    FAIL.append("metodo lineal sin 3D: debe avisar que la placa rigida no esta verificada")
-if not any("FEM 3D pendientes" in w for w in _rm.warnings):
-    FAIL.append("sin 3D: falta el aviso de verificaciones FEM pendientes")
+if not (_rm.pending and _rm.verdict == "PENDIENTE"):
+    FAIL.append("sin 3D: el veredicto debe ser PENDIENTE (realizar analisis 3D)")
+if not any("REALIZAR ANALISIS 3D" in w for w in _rm.warnings):
+    FAIL.append("sin 3D: falta el aviso de realizar el analisis 3D")
 
 
-def _mock_fem(prj, lin, factor=1.0, umax=0.1):
-    """Paquete 3D simulado: las fuerzas de pernos del lineal por un factor."""
+def _mock_fem(prj, Ts, umax=0.1):
+    """Paquete 3D simulado con la traccion `Ts` de cada perno."""
+    pos = G.bolt_positions(prj)
     post = types.SimpleNamespace(
-        bolts=[(k + 1, x, y, T * factor) for k, ((x, y), T) in enumerate(zip(lin.bolt_xy, lin.bolt_T))],
-        p_max=lin.p_max, R_conc=lin.R_conc, T_bolts=lin.T_sum * factor, zones=[], msg="simulado")
+        bolts=[(k + 1, x, y, T) for k, ((x, y), T) in enumerate(zip(pos, Ts))],
+        p_max=1.0, R_conc=sum(Ts) + prj.eloads.Pu, T_bolts=sum(Ts), zones=[], msg="simulado")
     return Fem3D(post=post, vm_avg=dict(vm=20.0, radius=1.0, x=0, y=0, z=0), rep={}, fast=True,
                  n_nodes=1000, n_elems=500, umax=umax, vmmax=90.0, sig=prj.sig3d())
 
 
-# con un 3D coherente (mismas fuerzas) la placa rigida se declara valida; con un 3D 30 % mayor, no
-for fac, esperado in ((1.0, True), (1.3, False)):
-    _rr = solve(_m, fem=_mock_fem(_m, _rm.lin, fac))
-    _row = [c for c in _rr.checks if c.key == "lin_rigid"]
-    print(f"{'placa rigida contra 3D x' + str(fac):34} lin_rigid ok = {_row[0].ok if _row else None} (esperado {esperado})  "
-          f"filas fem_ = {[c.key for c in _rr.checks if c.key.startswith('fem_')]}")
-    if not _row or _row[0].ok != esperado:
-        FAIL.append(f"placa rigida contra el 3D (x{fac}): veredicto incorrecto")
-    if any("pendientes" in w for w in _rr.warnings):
-        FAIL.append("con 3D vigente no debe avisar FEM pendiente")
-# metodo "Modelo 3D": el perno de diseno sale del 3D
-_m3 = Project(); _m3.bolts.force_method = BOLT_FORCE_METHODS[2]
-_m3.loads.Mux = 4200.0
-_lin3 = linear_bolt_forces(_m3)
-_r3 = solve(_m3, fem=_mock_fem(_m3, _lin3, 1.5))
+_n = len(G.bolt_positions(_m))
+_Ts = [0.0] * _n; _Ts[1] = 30.0; _Ts[3] = 20.0
+_r3 = solve(_m, fem=_mock_fem(_m, _Ts))
 _bt = [c for c in _r3.checks if c.key == "blt_t"][0]
-print(f"{'metodo Modelo 3D':34} blt_t demanda = {_bt.demand:.2f}  (1.5·Tmax lineal = {1.5 * _lin3.T_max:.2f})")
-if abs(_bt.demand - 1.5 * _lin3.T_max) > 1e-6:
-    FAIL.append("metodo Modelo 3D: la fuerza del perno no sale del 3D")
+print(f"{'con 3D simulado':34} veredicto = {_r3.verdict}  blt_t demanda = {_bt.demand:.1f} (esperado 30.0)  "
+      f"filas fem_ = {[c.key for c in _r3.checks if c.key.startswith('fem_')]}")
+if _r3.pending or abs(_bt.demand - 30.0) > 1e-6:
+    FAIL.append("con 3D: la fuerza del perno de diseno debe salir del 3D y el veredicto dejar de ser PENDIENTE")
+if not {"fem_bolt", "fem_press", "fem_vm"} <= {c.key for c in _r3.checks}:
+    FAIL.append("con 3D: faltan las filas de verificacion FEM")
+if any(c.key.startswith("lin_") for c in _r3.checks) or any("lineal" in w.lower() for w in _r3.warnings):
+    FAIL.append("no debe quedar nada del reparto lineal en el veredicto")
+# un 3D con un perno sobrecargado debe dar NO CUMPLE
+_Ts2 = [0.0] * _n; _Ts2[0] = 500.0
+if solve(_m, fem=_mock_fem(_m, _Ts2)).verdict != "NO CUMPLE":
+    FAIL.append("con 3D sobrecargado el veredicto debe ser NO CUMPLE")
 # la firma del 3D ignora datos cosmeticos y cambia con la geometria
 _q1, _q2 = Project(), Project(); _q2.name = "otro"; _q2.author = "x"
 _q3 = Project(); _q3.plate.tp = 2.5

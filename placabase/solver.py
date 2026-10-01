@@ -11,7 +11,6 @@ from . import geometry as G
 from . import materials as M
 from .design import Check, Bearing
 from .explain import Recorder
-from .linear_checks import linear_checks
 from .fem_checks import fem_checks
 
 
@@ -22,8 +21,6 @@ class Results:
     tdet: dict = field(default_factory=dict)
     checks: list = field(default_factory=list)
     fem: object = None              # fem_checks.Fem3D vigente (o None)
-    lin: object = None              # LinearResult: fuerza por perno con distribucion lineal
-    lin_checks: list = field(default_factory=list)      # verificaciones informativas (metodo DG1)
     warnings: list = field(default_factory=list)
     rec: Recorder = None
 
@@ -40,6 +37,18 @@ class Results:
     @property
     def ok(self) -> bool:
         return all(c.ok for c in self.checks if not c.skip) and not self.warnings_fatal
+
+    @property
+    def pending(self) -> bool:
+        """True si falta el analisis 3D: el veredicto final lo da el 3D, no el calculo cerrado."""
+        return self.fem is None
+
+    @property
+    def verdict(self) -> str:
+        """'PENDIENTE' (realizar el analisis 3D), 'CUMPLE' o 'NO CUMPLE'."""
+        if self.pending:
+            return "PENDIENTE"
+        return "CUMPLE" if self.ok else "NO CUMPLE"
 
     @property
     def warnings_fatal(self) -> bool:
@@ -181,24 +190,6 @@ def solve(prj: Project, detail: bool = True, fem=None) -> Results:
         except Exception as e:                              # pragma: no cover
             R.warnings.append(f"No se pudieron evaluar los resultados del FEM 3D: {e}")
     else:
-        R.warnings.append("Verificaciones FEM 3D pendientes: corra el analisis solido 3D (F8). "
-                          "Hasta entonces el veredicto solo incluye el calculo cerrado.")
-
-    # ------------------------------------------------ fuerza por perno, distribucion lineal
-    # Siempre se calcula; solo entra en el veredicto si el metodo elegido es el lineal (con el
-    # metodo DG1 queda como informacion y en la memoria).
-    try:
-        R.lin, lck = linear_checks(prj, br, fem, rec)
-        if b.force_method.startswith("Lineal"):
-            R.checks += lck
-            if fem is None:
-                R.warnings.append("Metodo lineal: la validez de la hipotesis de placa rigida "
-                                  "requiere el analisis 3D (F8); aun no se ha verificado.")
-        else:
-            R.lin_checks = lck
-    except Exception as e:                                  # pragma: no cover
-        R.warnings.append(f"No se pudo calcular la distribucion lineal: {e}")
-    if b.force_method.startswith("Modelo 3D") and fem is None:
-        R.warnings.append("Metodo 'Modelo 3D': sin analisis 3D vigente la fuerza de los pernos se toma "
-                          "de la distribucion lineal (aproximada); corra el 3D (F8).")
+        R.warnings.append("REALIZAR ANALISIS 3D (F8): el veredicto final y la fuerza de los pernos salen del "
+                          "analisis solido; hasta entonces solo se muestran las verificaciones de calculo cerrado.")
     return R

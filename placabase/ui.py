@@ -27,7 +27,7 @@ from .model import (Project, PATTERNS, ANCHOR_TYPES, WELD_TYPES, PLATE_SHAPES,
                     LUG_DIRS, STIFF_POSITIONS, STIFF_SHAPES, STIFF_SPACING)
 from . import materials as M
 from .shapes import CATALOG, W_SHAPE, HSS_RECT, HSS_ROUND, PIPE, KIND_LABELS
-from .model import LUG_TYPES, save_book, load_book, MESH3D_MODES, BOLT_FORCE_METHODS, WELD_MODELS
+from .model import LUG_TYPES, save_book, load_book, MESH3D_MODES, WELD_MODELS
 from .dialogs import SectionDialog, MaterialsDialog
 from PySide6.QtWidgets import QListWidget, QInputDialog
 from .solver import solve
@@ -358,7 +358,6 @@ class MainWindow(QMainWindow):
         self.lbl_bolt.setStyleSheet("color:#1f3864; font-size:8pt;")
         f._lay.addRow("", self.lbl_bolt)
         f.combo("Material", "bolts.steel", [s.name for s in M.ANCHOR_STEELS], help="Grado de la varilla de anclaje. Ademas de Fy y Fu define si el elemento es ductil, lo que decide el factor de reduccion de ACI Tabla 17.5.3.")
-        f.combo("Metodo de fuerza en los pernos", "bolts.force_method", BOLT_FORCE_METHODS, help="DG1: la traccion Tu del equilibrio se reparte por igual entre los pernos del lado traccionado. Lineal elastico: cada perno toma una fuerza proporcional a su distancia al eje neutro (placa rigida, secciones planas; resortes del concreto solo a compresion y de los pernos solo a traccion): el perno mas cargado y el grupo traccionado salen de ahi. La hipotesis solo es valida si la placa es rigida: el programa lo verifica contra el analisis de la placa flexible (2D) y la verificacion falla si no se cumple; con el metodo DG1 esa informacion queda solo en la memoria.")
         f.combo("Tipo de anclaje", "bolts.atype", ANCHOR_TYPES, help="Con cabeza: la extraccion se calcula con 8·Abrg·f'c. Gancho L o J: con 0.9·f'c·eh·da. Recto: ACI no le reconoce resistencia a la extraccion y el programa lo marca como no valido si hay traccion.")
         f.combo("Instalacion (varilla recta)", "bolts.install", INSTALL_TYPES,
                 help="Solo se usa con varilla recta. Preinstalada (vaciada en sitio): ACI no "
@@ -551,10 +550,10 @@ class MainWindow(QMainWindow):
 
         # ---- FEM 3D y modelo de apoyo
         f = new_form("Elementos finitos")
-        f.group("Apoyo y reparto de fuerzas en los pernos")
-        f.combo("Modulo de balasto", "fea.ks_mode", ["Ec/hped", "manual"], help="Ec/hped estima el modulo de balasto como el modulo elastico del concreto dividido entre la altura del pedestal (minimo 6 in). Con manual usted lo impone. Lo usan la distribucion lineal y el modelo solido 3D.")
+        f.group("Apoyo y cargas")
+        f.combo("Modulo de balasto", "fea.ks_mode", ["Ec/hped", "manual"], help="Ec/hped estima el modulo de balasto como el modulo elastico del concreto dividido entre la altura del pedestal (minimo 6 in). Con manual usted lo impone. Lo usa el modelo solido 3D.")
         f.num("ks manual", "fea.ks_manual", 1, 1e5, uk="K", help="Modulo de balasto del apoyo de concreto. Solo se usa en modo manual.")
-        f.num("Brazo del cortante (-1 = automatico)", "fea.shear_arm", -1, 60, uk="L", help="Distancia entre donde el cortante entra en la placa (cara superior) y donde lo devuelven los pernos o la llave. El par V·e es un momento sobre la placa: hace que los pernos de un lado tengan mas traccion que los del otro. -1 = automatico: tp/2 + mortero sin llave; tp + H/2 con llave. 0 = sin efecto del cortante. Lo usan la distribucion lineal y el modelo 3D (altura del punto de aplicacion de las cargas).")
+        f.num("Brazo del cortante (-1 = automatico)", "fea.shear_arm", -1, 60, uk="L", help="Distancia entre donde el cortante entra en la placa (cara superior) y donde lo devuelven los pernos o la llave. El par V·e es un momento sobre la placa: hace que los pernos de un lado tengan mas traccion que los del otro. -1 = automatico: tp/2 + mortero sin llave; tp + H/2 con llave. 0 = sin efecto del cortante. Lo usa el modelo 3D (altura del punto de aplicacion de las cargas).")
         f.group("Modelo SOLIDO 3D (Gmsh + CalculiX)")
         f.text("CalculiX propio (opcional)", "fea.ccx_path", help="Dejelo vacio: el programa usa el CalculiX incluido en la carpeta solvers. Solo escriba una ruta si quiere usar otra version de ccx.exe.")
         f.combo("Calidad de la malla 3D", "fea.mesh3d_mode", MESH3D_MODES, help="Rapida (predeterminada): tetraedros del doble de tamano que la automatica (~30 s en lugar de ~3 min). En el estudio de convergencia (3 conexiones) difiere menos de 3 % de la automatica en traccion en pernos, presion, deflexion y von Mises PROMEDIADO. El pico puntual de von Mises no converge con ninguna malla. Automatica: mas fina y lenta. Un tamano manual mayor que 0 (abajo) tiene prioridad.")
@@ -1223,7 +1222,7 @@ class MainWindow(QMainWindow):
         self.tabs_out.setCurrentIndex(3)
 
     def fill_3d_tables(self):
-        """Tablas del modelo 3D: soldadura por zona y traccion por perno (3D contra lineal)."""
+        """Tablas del modelo 3D: soldadura por zona y traccion por perno."""
         from .weld3d import summary_rows
         fem = self._fem_now()
         post = fem.post if fem is not None else None
@@ -1233,24 +1232,18 @@ class MainWindow(QMainWindow):
             return
         u = self.us
         welds, _ = summary_rows(self.prj, post)
-        lin = getattr(self.res, "lin", None) if self.res is not None else None
-        tl = list(lin.bolt_T) if (lin is not None and getattr(lin, "ok", False)) else []
         phi = None
         try:
             from .fem_checks import bolt_phiRnt
             phi = bolt_phiRnt(self.prj)
         except Exception:
             pass
-        bolts = [["Perno", f"x ({u.L})", f"y ({u.L})", f"T 3D ({u.F})", f"T lineal ({u.F})",
-                  "3D / lineal", "D/C 3D"]]
+        bolts = [["Perno", f"x ({u.L})", f"y ({u.L})", f"T ({u.F})", "D/C"]]
         for (k, x, y, T) in sorted(post.bolts, key=lambda b: -b[3]):
-            tlin = tl[k - 1] if 0 <= k - 1 < len(tl) else None
             bolts.append([f"P{k}", u.fmt("L", x), u.fmt("L", y), u.fmt("F", T),
-                          "—" if tlin is None else u.fmt("F", tlin),
-                          "—" if (tlin is None or tlin < 1e-6 or T < 1e-6) else f"{T / tlin:.2f}",
                           f"{T / phi:.3f}" if phi else "—"])
         red, green = QColor("#ffc7ce"), QColor("#c6efce")
-        for tb, rows, dc_cols in ((self.tbl_w3, welds, (5, 6)), (self.tbl_b3, bolts, (6,))):
+        for tb, rows, dc_cols in ((self.tbl_w3, welds, (5, 6)), (self.tbl_b3, bolts, (4,))):
             tb.setColumnCount(len(rows[0]))
             tb.setHorizontalHeaderLabels(rows[0])
             if tb is self.tbl_w3:
@@ -1309,11 +1302,19 @@ class MainWindow(QMainWindow):
             html.append(f"<span style='color:{col}'>• {w}</span>")
         self.txt_info.setHtml("<br>".join(html))
 
-        ok = r.ok
-        self.lbl_verdict.setText(f"  {'CUMPLE' if ok else 'NO CUMPLE'}   D/C max = {r.max_ratio:.3f}  ")
-        self.lbl_verdict.setStyleSheet(
-            f"background:{'#c6efce' if ok else '#ffc7ce'}; color:{'#006100' if ok else '#9c0006'};"
-            "border-radius:4px; padding:2px 8px;")
+        if r.pending:
+            # el veredicto lo da el analisis 3D: hasta correrlo no se declara cumple / no cumple
+            self.lbl_verdict.setText("  REALIZAR ANALISIS 3D  (F8)  ")
+            bg, fg = "#ffeb9c", "#9c5700"
+            self.lbl_verdict.setToolTip("Las verificaciones de calculo cerrado estan hechas "
+                                        f"(D/C max = {r.max_ratio:.3f}), pero el veredicto final sale del "
+                                        "analisis solido 3D. Presione F8.")
+        else:
+            ok = r.ok
+            self.lbl_verdict.setText(f"  {'CUMPLE' if ok else 'NO CUMPLE'}   D/C max = {r.max_ratio:.3f}  ")
+            bg, fg = ("#c6efce", "#006100") if ok else ("#ffc7ce", "#9c0006")
+            self.lbl_verdict.setToolTip("")
+        self.lbl_verdict.setStyleSheet(f"background:{bg}; color:{fg}; border-radius:4px; padding:2px 8px;")
 
     # ================================================================= archivo
     def new(self):
@@ -1454,7 +1455,7 @@ class MainWindow(QMainWindow):
             f"<b>PlacaBasePro {__version__}</b><br>"
             "Diseno y verificacion de placas base para perfiles W, HSS y Pipe.<br><br>"
             "AISC 360-22 · AISC Design Guide 1 (2ª Ed.) · ACI 318-19 Cap. 17<br>"
-            "Reparto lineal de fuerzas en los pernos y modelo solido 3D (Gmsh + CalculiX) "
+            "Modelo solido 3D (Gmsh + CalculiX) "
             "con el concreto como resortes solo a compresion.<br><br>"
             "Los resultados deben ser revisados por un ingeniero responsable.")
 

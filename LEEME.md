@@ -24,13 +24,16 @@ verificaciones FEM salen de el:
 | `fem_vm` | von Mises **promediado** en la placa (r = 1 espesor; el pico puntual no converge) | ≤ 0.90·Fy (criterio del programa) |
 | `fem_weld…` | una fila por zona de soldadura perfil-placa | AISC J2.4 |
 
-Sin un 3D vigente (hecho con el proyecto tal como esta ahora; la firma ignora nombre, autor y unidades)
-el programa avisa "Verificaciones FEM 3D pendientes" y el veredicto solo incluye el calculo cerrado.
-Corra el 3D con **F8** (malla rapida, ~30 s); al terminar se recalcula todo solo. `Pestaña Pernos → Metodo de
-fuerza en los pernos` tiene ahora tres opciones: DG1, lineal elastico y **Modelo 3D** (la fuerza de cada
-perno sale del solido). La validez de la distribucion lineal (placa rigida) se verifica contra el 3D.
+**El veredicto lo da el 3D.** Mientras no exista un 3D vigente (hecho con el proyecto tal como esta ahora; la
+firma ignora nombre, autor y unidades) la barra superior dice **"REALIZAR ANALISIS 3D (F8)"** en ambar (y
+los reportes "PENDIENTE — realizar analisis 3D"): se muestran las verificaciones de calculo cerrado pero no
+se declara CUMPLE / NO CUMPLE. Al terminar el 3D (malla rapida, ~30 s) todo se recalcula solo y aparece el
+veredicto. La fuerza de cada perno para las verificaciones de acero y de concreto (AISC J3, ACI 17) sale
+directamente del 3D (el perno de diseno es el mas cargado y el grupo traccionado son los pernos con T > 0).
+El reparto lineal que se uso para validar el 3D se elimino del programa y de la memoria: coincidian con
+placa gruesa (0.97-1.00) y el 3D es la referencia.
 
-**Memoria de calculo.** La seccion 6 trae la soldadura por zona y la traccion por perno (3D contra lineal); la
+**Memoria de calculo.** La seccion 6 trae la soldadura por zona y la traccion por perno; la
 seccion 7 aisla la PLACA y muestra en planta: von Mises promediado de la cara superior y de la inferior
 (con la etiqueta del maximo y la curva 0.90·Fy), presion de contacto con la traccion de cada perno, y el
 desplazamiento vertical; despues las dos vistas 3D en perspectiva.
@@ -91,93 +94,12 @@ falla, use "Fusionado" en `Modelo de la soldadura`.
 | **Todo** sale en las unidades elegidas: también la columna de observaciones, los ejes de los dibujos y los títulos | Toda la aplicación |
 | **Descripción de cada dato de entrada** en un panel al pie de cada pestaña, más la convención de signos de las cargas | Los 65 campos de entrada |
 
-## Fuerza por perno: distribucion lineal (placa rigida)
+## Cortante en el modelo 3D
 
-Ademas del reparto de DG1 (la traccion Tu del equilibrio dividida por igual entre los pernos del
-lado traccionado) el programa calcula la fuerza de CADA perno con la distribucion lineal del metodo
-elastico (`placabase/linear.py`). Hipotesis: la placa es rigida y sus secciones permanecen planas,
-
-    w(x, y) = a + b·x + c·y                       (w > 0 hacia el concreto)
-    concreto: p = ks·max(w, 0)        perno i: Ti = kb·max(−wi, 0)
-    ∫p dA − ΣTi = Pu ;   ∫p·y dA − ΣTi·yi = −Mx' ;   ∫p·x dA − ΣTi·xi = My'
-    Mx' = |Mux| − e·Vuy ,  My' = Muy + e·Vux       (e = brazo del cortante)
-
-de modo que la fuerza del perno es proporcional a su distancia al eje neutro (w = 0). a, b y c salen
-de un Newton con Jacobiano exacto (es el minimo de una energia convexa: converge siempre); las
-integrales sobre la zona comprimida (placa recortada por w > 0, menos agujeros y menos la huella de
-la llave de corte) son exactas (momentos de poligonos). ks y kb son los mismos del modelo 3D
-(Ec/hped y E·Ase/(hef + tp + mortero)). Funciona con placa rectangular o circular y cualquier
-disposicion de pernos, con momento en una o dos direcciones.
-
-Pestaña Pernos → **Metodo de fuerza en los pernos**: "DG1" (predeterminado) o "Lineal elastico". Con el
-lineal, el perno de diseño es el mas cargado y el grupo traccionado son los pernos con T > 0 (acero
-AISC J3, arrancamiento, extraccion, etc.). La memoria (seccion J y seccion 5 del PDF/Word) y la tabla
-del modelo 3D muestran siempre la fuerza lineal de cada perno junto a la del 3D (si hay).
-
-**Verificaciones AISC con la distribucion lineal**: resistencia a traccion del perno mas cargado
-(J3.6, φ·0.75·Fu·Ab) e interaccion traccion-cortante (J3.7); aplastamiento del concreto con la
-presion maxima (J8); espesor de la placa (DG1 §3.1 y §3.3) con esa presion y esa traccion.
-
-**Validez de la hipotesis de placa rigida.** ACI 318 Cap. 17 y EN 1992-4 reparten la traccion de los
-anclajes con una distribucion plana solo si la placa es rigida, pero ni ellos ni AISC dan un limite
-numerico de rigidez; con una placa flexible aparece el efecto palanca y la distribucion lineal
-SUBESTIMA la traccion. El programa lo comprueba (fila `lin_rigid`): el perno mas cargado y la
-traccion total de la placa flexible no deben exceder a las lineales en mas de 10 % (o en mas de 10 %
-de φRnt si la traccion es pequeña). Se compara con el analisis 3D vigente (placa flexible con el perfil
-soldado); sin 3D la validez queda pendiente (aviso). Con el metodo lineal esta verificacion forma
-parte del veredicto; con DG1 queda solo en la memoria. (El boton "Espesor de placa rigida..." y el 2D
-que lo alimentaba se eliminaron.)
-
-Comprobaciones del solver: axial puro → T = 0 y p = Pu/A; equilibrio de fuerzas y momentos exacto; y
-y una integracion INDEPENDIENTE en malla (600×600) con el plano a, b, c devuelto por el solver
-reproduce la reaccion y el momento del equilibrio (≤ 1 %). Con una placa gruesa (tp = 8 in) el 3D converge
-a la solucion lineal (ver la calibracion).
-
-
-## Calibracion del 3D contra el calculo lineal
-
-Prueba en el limite de placa rigida: el 3D con placa gruesa debe reproducir la distribucion lineal.
-Relacion 3D / lineal (traccion total, perno max):
-
-| Prueba | Antes | Despues |
-|---|---|---|
-| Rectangular (PB-01 B) tp = 8 in | 0.61 / 0.61 | 0.97 / 0.97 (perno a perno ≤ 4 %) |
-| Circular, 16 pernos radiales (R1) tp = 8 in | — | 1.00 / 1.01 (perno a perno ≤ 2 %) |
-
-Defectos encontrados y corregidos en el 3D:
-1. Los resortes HORIZONTALES de los pernos estaban en la cara superior de la placa: el giro de la
-   placa (θ·tp) los movia y añadian una rigidez de giro artificial que crece con tp² (con tp = 8 in
-   la traccion salia 40 % baja; con tp = 2 in el efecto era 0.2 %). Ahora estan en la cara inferior
-   (interfaz con el mortero, centro de giro de la placa); la traccion/compresion del perno sigue en
-   el anillo de la tuerca (cara superior).
-2. El cortante actua a la altura e (el mismo brazo del calculo lineal) sobre ese plano de
-   reaccion (con llave, sobre la mitad de su altura).
-3. La seleccion del anillo de apoyo de cada perno es robusta con mallas gruesas.
-4. Bajo la llave de corte no hay resortes del concreto (su cara superior queda pegada a la placa);
-   ahora el calculo lineal excluye igual esa huella, asi ambos modelos comparten area.
-
-Placas reales (tp entre 1.5 y 3.25 in, malla rapida), relacion respecto al 3D (las columnas "2D" son historicas:
-ese modelo ya se elimino):
-
-| Caso | ΣT lineal | ΣT 2D | Tmax lineal | Tmax 2D | p lineal | p 2D |
-|---|---|---|---|---|---|---|
-| PB-01 B (Mux 4200, llave) | 1.05 | 1.23 | 0.97 | 1.24 | 1.09 | 1.10 |
-| PB-02 (HSS, rigidizadores) | 0.79 | 1.27 | 0.66 | 1.29 | 1.05 | 1.06 |
-| PB-03 circular, tp = 3.25 | 0.97 | 1.00 | 0.95 | 1.02 | 1.21 | 0.91 |
-| R1 circular, 16 pernos, tp = 1.5 | 0.73 | 1.09 | 0.80 | 1.12 | 0.53 | 0.98 |
-| R2 (momento biaxial) | 0.77 | 1.08 | 0.83 | 1.13 | 0.55 | 0.98 |
-| R3 circular, 10 pernos, tp = 2 | 0.76 | 1.06 | 0.79 | 1.08 | 1.02 | 1.02 |
-
-La distribucion lineal queda 20-35 % por debajo del 3D en placas de espesor de diseño DG1
-(placa flexible: efecto palanca) y coincide con placas gruesas (PB-03); el antiguo 2D quedaba 6-29 % por
-encima. Por eso el metodo lineal solo se acepta si pasa la verificacion de placa rigida.
-
-## Cortante y asimetria (calculo lineal y 3D)
-
-- El par del cortante entra en el calculo lineal y el 3D: Mx' = |Mux| − e·Vuy, My' = Muy + e·Vux, con e
-  automatico (sin llave: tp/2 + mortero; con llave: tp + H/2) o manual en Elementos finitos. Con
-  Vux ≠ 0 los pernos de un lado quedan mas cargados (con Vux = 0 el reparto es simetrico), como en el 3D.
-- Convencion de signo: Muy > 0 tracciona el lado −X (mano derecha), comprobado contra el 3D.
+- El cortante entra a la altura e (brazo automatico: sin llave tp/2 + mortero; con llave tp + H/2; o manual en
+  Elementos finitos), lo que genera el par V·e sobre la placa: con Vux ≠ 0 los pernos de un lado quedan mas
+  cargados.
+- Convencion de signo: Muy > 0 tracciona el lado −X (mano derecha).
 
 ## Novedades: malla 3D rapida (predeterminada) y von Mises promediado
 
@@ -498,7 +420,7 @@ de la tuerca (mas los horizontales que equilibran el cortante), el contacto y lo
 y las cargas P-M-V en un nodo de referencia; lo resuelve, y lee el `.frd` para dibujar el resultado.
 Puede alternar entre von Mises, |U| y Uz, y amplificar la deformada.
 
-Salidas: la **tabla de traccion por perno** (3D contra lineal, posicion, D/C frente a AISC J3), la tabla
+Salidas: la **tabla de traccion por perno** (posicion, D/C frente a AISC J3), la tabla
 de **soldadura por zona** (pico y media, con la capacidad AISC J2.4), la presion de contacto, el von Mises
 promediado y el residuo de equilibrio (reaccion del concreto − pernos − Pu). Todas entran al veredicto
 como filas `fem_*` y a la memoria (secciones 6 y 7, con la placa aislada en planta).
@@ -609,7 +531,7 @@ Léalas antes de firmar nada con esto.
    envolvente del perfil girado. Conservador, pero conservador.
 4. **Momento biaxial**: `Muy` entra en el esfuerzo del perfil, en la soldadura y en
    el modelo 3D, pero el equilibrio cerrado de aplastamiento de DG1 es uniaxial (usa
-   `Mux`). Con biaxial importante, gobierne por el 3D (o el metodo lineal).
+   `Mux`). Con biaxial importante, gobierne por el 3D.
 5. `ψec,N` y `ψec,V` de ACI se dejan en 1.0; si la resultante de tracción o el
    cortante son excéntricos respecto al grupo, ajústelos a mano.
 6. No se verifica: fatiga, efecto de palanca (*prying*) por flexibilidad de la
@@ -636,8 +558,7 @@ placabase/
                         rigidizadores, detección de interferencias
   design.py             aplastamiento, espesor, soldadura, llave, rigidizadores
   anchors.py            ACI 318-19 Cap. 17 y AISC J3
-  linear.py             reparto lineal de fuerzas por perno (placa rigida)
-  linear_checks.py      verificaciones AISC del reparto lineal y validez de la placa rigida
+  params3d.py           brazo del cortante, modulo de balasto y rigidez del perno del modelo 3D
   fem_checks.py         verificaciones FEM a partir del 3D (Fem3D, fem_bolt/press/vm/weld)
   mesh3d.py             modelo sólido 3D: .geo de Gmsh, .inp de CalculiX y pipeline
   view3d.py             lectura del .frd, dibujo 3D y von Mises promediado
@@ -655,8 +576,8 @@ ejemplos/               tres proyectos resueltos
 ```
 
 Para tocar el motor sin abrir la GUI: `python run.py --selftest` corre los casos y
-verifica, entre otras cosas, el equilibrio del reparto lineal en todos y una integracion independiente en
-malla; con `--3d` (o `python selftest.py --3d`) corre ademas el analisis solido de PB-01, la traccion pura
+verifica, entre otras cosas, que sin 3D el veredicto sea PENDIENTE y que con 3D (simulado) las fuerzas de
+los pernos salgan de el; con `--3d` (o `python selftest.py --3d`) corre ademas el analisis solido de PB-01, la traccion pura
 y el respaldo fusionado. `python run.py proyecto.pbase --3d carpeta --pdf memoria.pdf` hace el calculo
 completo por lotes.
 

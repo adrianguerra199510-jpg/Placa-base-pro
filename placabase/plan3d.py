@@ -22,7 +22,7 @@ from matplotlib.patches import Circle, Polygon
 from matplotlib.tri import Triangulation
 
 from . import geometry as G
-from .linear import foundation_ks
+from .params3d import foundation_ks
 
 
 def _outline_patch(ax, prj, k):

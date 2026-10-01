@@ -9,9 +9,6 @@ from .shapes import CATALOG, Shape, W_SHAPE, GENERIC_KINDS, rect_props
 import dataclasses
 
 # --------------------------------------------------------------- catalogos
-BOLT_FORCE_METHODS = ["DG1 (Tu repartida por igual entre los pernos traccionados)",
-                      "Lineal elastico (placa rigida, secciones planas)",
-                      "Modelo 3D (fuerza del perno del analisis solido)"]
 WELD_MODELS = ["Conectores (cordon como resortes entre cuerpos separados)",
                "Fusionado (union monolitica, equivale a CJP)"]
 MESH3D_MODES = ["Rapida (recomendada, ~30 s)", "Automatica (fina, ~3 min)"]
@@ -125,7 +122,6 @@ class BoltGroup:
     size: str = "1-1/4"
     steel: str = "ASTM F1554 Gr.55"
     atype: str = "Con cabeza (hex pesada)"
-    force_method: str = "DG1 (Tu repartida por igual entre los pernos traccionados)"   # ver BOLT_FORCE_METHODS
     pattern: str = "Perimetral (4 lados)"
     n_major: int = 3             # pernos por fila en el eje MAYOR (a lo largo de X)
     n_minor: int = 3             # pernos por fila en el eje MENOR (a lo largo de Y)
@@ -416,7 +412,6 @@ class Project:
         d = asdict(self)
         for k in ("name", "element", "author", "date", "metric", "u_len", "u_force", "u_stress", "u_moment"):
             d.pop(k, None)
-        d.get("bolts", {}).pop("force_method", None)
         d.get("fea", {}).pop("ccx_path", None)
         d.get("fea", {}).pop("gmsh_path", None)
         return json.dumps(d, sort_keys=True, ensure_ascii=False)
