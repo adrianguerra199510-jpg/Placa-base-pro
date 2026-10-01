@@ -172,26 +172,32 @@ def set_aspect(ax, aspect, zoom=0.72):
 
 
 def fit_to_axes(ax, margin=0.04):
-    """Escala el modelo para que llene el area del grafico (ancho y alto) sin recortarse.
-    Proyecta las 8 esquinas de la caja del modelo a pixeles y ajusta el zoom."""
+    """Encuadra el modelo completo dentro del area del grafico, sea cual sea su tamano.
+
+    El eje 3D dibuja en un cuadrado centrado cuyo lado es el menor de (ancho, alto) de la ventana, asi que
+    el modelo se expande y se contrae solo con la ventana; lo unico que hay que fijar es el zoom con el que
+    la caja del modelo (sus 8 esquinas proyectadas) llena ese cuadrado.  Se calcula desde cero (zoom = 1) en
+    coordenadas del propio eje, no en pixeles: es idempotente y no depende de un dibujado previo."""
     asp = getattr(ax, "_pb_aspect", None)
     if asp is None:
         return
     from mpl_toolkits.mplot3d import proj3d
     try:
-        for _ in range(2):
-            (x0, x1), (y0, y1), (z0, z1) = ax.get_xlim3d(), ax.get_ylim3d(), ax.get_zlim3d()
-            cs = [(x, y, z) for x in (x0, x1) for y in (y0, y1) for z in (z0, z1)]
-            X, Y, _z = proj3d.proj_transform([c[0] for c in cs], [c[1] for c in cs],
-                                             [c[2] for c in cs], ax.get_proj())
-            px = ax.transData.transform(np.column_stack([X, Y]))
-            bb = ax.bbox
-            w, h = px[:, 0].max() - px[:, 0].min(), px[:, 1].max() - px[:, 1].min()
-            if w <= 1 or h <= 1 or bb.width <= 1 or bb.height <= 1:
-                return
-            k = min(bb.width * (1 - 2 * margin) / w, bb.height * (1 - 2 * margin) / h)
-            ax._pb_zoom = float(np.clip(ax._pb_zoom * k, 0.2, 3.0))
-            ax.set_box_aspect(asp, zoom=ax._pb_zoom)
+        ax.set_box_aspect(asp, zoom=1.0)
+        ax.apply_aspect()                    # fija el cuadrado de dibujo para el tamano actual de la ventana
+        (x0, x1), (y0, y1), (z0, z1) = ax.get_xlim3d(), ax.get_ylim3d(), ax.get_zlim3d()
+        cs = [(x, y, z) for x in (x0, x1) for y in (y0, y1) for z in (z0, z1)]
+        X, Y, _z = proj3d.proj_transform([c[0] for c in cs], [c[1] for c in cs],
+                                         [c[2] for c in cs], ax.get_proj())
+        px = ax.transData.transform(np.column_stack([X, Y]))
+        bb = ax.bbox
+        side = min(bb.width, bb.height)
+        if side <= 1:
+            return
+        cx, cy = 0.5 * (bb.x0 + bb.x1), 0.5 * (bb.y0 + bb.y1)
+        ext = max(np.abs(px[:, 0] - cx).max(), np.abs(px[:, 1] - cy).max(), 1e-9)
+        ax._pb_zoom = float(np.clip((1 - 2 * margin) * 0.5 * side / ext, 0.1, 5.0))
+        ax.set_box_aspect(asp, zoom=ax._pb_zoom)
     except Exception:
         pass
 
