@@ -565,8 +565,7 @@ def plot_geometry(ax, prj, show_concrete=True):
         if not faces or (grp == "conc" and not show_concrete):
             continue
         v = [[(x / kl, y / kl, z / kl) for x, y, z in f] for f in faces]
-        if grp != "conc":
-            allp += [pt for f in v for pt in f]
+        allp += [pt for f in v for pt in f]      # incluye el concreto: si no, queda fuera del encuadre
         rgb = to_rgb(color)
         # los triangulos de la malla de la placa no llevan aristas
         edge = (*rgb, 1.0) if flat else ((0, 0, 0, 0.35) if alpha > 0.5 else (0.3, 0.35, 0.4, 0.35))
