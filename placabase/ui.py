@@ -278,26 +278,27 @@ class MainWindow(QMainWindow):
         act(m_exp, "Reportes PDF de TODAS las conexiones...", lambda: self.export_all("pdf"))
         act(m_exp, "Reportes Word de TODAS las conexiones...", lambda: self.export_all("docx"))
 
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        tb.addWidget(spacer)                     # empuja lo siguiente a la esquina superior derecha
         self.lbl_verdict = QLabel("  ")
         f = QFont(); f.setBold(True); f.setPointSize(11)
         self.lbl_verdict.setFont(f)
-        tb.addSeparator()
         tb.addWidget(self.lbl_verdict)
-        self.btn3d = QPushButton("CALCULAR  (F8)")
-        self.btn3d.setStyleSheet("QPushButton{background:#1f6fd1;color:white;font-weight:bold;"
-                                 "padding:4px 14px;border-radius:4px;margin-left:6px;}"
-                                 "QPushButton:disabled{background:#9db8d9;}")
-        self.btn3d.setToolTip("Corre el analisis 3D (Gmsh + CalculiX) de todas las combinaciones de carga y "
-                              "entrega el veredicto. Mientras no se calcule no se muestra ningun resultado.")
-        self.btn3d.clicked.connect(self.run_3d)
-        tb.addWidget(self.btn3d)
-        tb.addSeparator()
-        tb.addWidget(QLabel(" Combinacion: "))
+        tb.addWidget(QLabel("  Combinacion: "))
         self.cb_combo = QComboBox()
         self.cb_combo.setMinimumWidth(150)
         self.cb_combo.setToolTip("Combinacion de carga que se dibuja y se detalla en los resultados.")
         self.cb_combo.currentIndexChanged.connect(self._on_combo_pick)
         tb.addWidget(self.cb_combo)
+        self.btn3d = QPushButton("CALCULAR  (F8)")
+        self.btn3d.setStyleSheet("QPushButton{background:#1f6fd1;color:white;font-weight:bold;"
+                                 "padding:4px 14px;border-radius:4px;margin-left:6px;margin-right:6px;}"
+                                 "QPushButton:disabled{background:#9db8d9;}")
+        self.btn3d.setToolTip("Corre el analisis 3D (Gmsh + CalculiX) de todas las combinaciones de carga y "
+                              "entrega el veredicto. Mientras no se calcule no se muestra ningun resultado.")
+        self.btn3d.clicked.connect(self.run_3d)
+        tb.addWidget(self.btn3d)
 
     # ============================================================= formularios
     def _build_forms(self):
@@ -620,14 +621,33 @@ class MainWindow(QMainWindow):
         self.cv_elev = Canvas(size=(6, 4))
         self.cv_stif = Canvas(size=(7, 5))
 
-        # ---------------- vista general: 3D + planta + elevacion
+        # ---------------- vista general: SOLO la geometria (3D + planta + elevacion)
         w3 = QWidget()
         l3 = QVBoxLayout(w3)
+        l3.setContentsMargins(0, 0, 0, 0)
+        sph = QSplitter(Qt.Horizontal)
+        self.cv_3d = Canvas3D()
+        sph.addWidget(self.cv_3d)
+        spv = QSplitter(Qt.Vertical)
+        pw = QWidget(); pl = QVBoxLayout(pw); pl.setContentsMargins(0, 0, 0, 0)
+        pl.addWidget(QLabel("<b>Planta</b>")); pl.addWidget(self.cv_plan)
+        ew = QWidget(); el = QVBoxLayout(ew); el.setContentsMargins(0, 0, 0, 0)
+        el.addWidget(QLabel("<b>Elevacion</b>")); el.addWidget(self.cv_elev)
+        spv.addWidget(pw); spv.addWidget(ew)
+        spv.setSizes([400, 300])
+        sph.addWidget(spv)
+        sph.setSizes([620, 380])
+        l3.addWidget(sph, 1)
+        self.tabs_out.addTab(w3, "Modelo y vistas")
+        self.tabs_out.addTab(self.cv_stif, "Rigidizador")
+
+        # ---------------- resultados del 3D (campos, soldadura y pernos): solo tras calcular
+        wr3 = QWidget()
+        lr3 = QVBoxLayout(wr3)
         t3 = QHBoxLayout()
         t3.addWidget(QLabel("Campo:"))
         self.cb_f3 = QComboBox()
-        self.cb_f3.addItems(["Solo geometria", "Von Mises", "Desplazamiento |U|",
-                             "Desplazamiento Uz"])
+        self.cb_f3.addItems(["Von Mises", "Desplazamiento |U|", "Desplazamiento Uz"])
         self.cb_f3.currentIndexChanged.connect(self.draw_3d)
         t3.addWidget(self.cb_f3)
         t3.addWidget(QLabel("Elemento:"))
@@ -649,21 +669,10 @@ class MainWindow(QMainWindow):
         self.sp_sc.valueChanged.connect(self.draw_3d)
         t3.addWidget(self.sp_sc)
         t3.addStretch(1)
-        l3.addLayout(t3)
+        lr3.addLayout(t3)
         sp3 = QSplitter(Qt.Vertical)
-        sph = QSplitter(Qt.Horizontal)
-        self.cv_3d = Canvas3D()
-        sph.addWidget(self.cv_3d)
-        spv = QSplitter(Qt.Vertical)
-        pw = QWidget(); pl = QVBoxLayout(pw); pl.setContentsMargins(0, 0, 0, 0)
-        pl.addWidget(QLabel("<b>Planta</b>")); pl.addWidget(self.cv_plan)
-        ew = QWidget(); el = QVBoxLayout(ew); el.setContentsMargins(0, 0, 0, 0)
-        el.addWidget(QLabel("<b>Elevacion</b>")); el.addWidget(self.cv_elev)
-        spv.addWidget(pw); spv.addWidget(ew)
-        spv.setSizes([400, 300])
-        sph.addWidget(spv)
-        sph.setSizes([620, 380])
-        sp3.addWidget(sph)
+        self.cv_res3d = Canvas3D()
+        sp3.addWidget(self.cv_res3d)
         low = QWidget(); ll = QHBoxLayout(low); ll.setContentsMargins(0, 0, 0, 0)
         self.tbl_w3 = QTableWidget(0, 7)
         self.tbl_b3 = QTableWidget(0, 4)
@@ -680,35 +689,29 @@ class MainWindow(QMainWindow):
         b2.addWidget(self.tbl_b3)
         ll.addWidget(bw, 3); ll.addWidget(bb, 2)
         sp3.addWidget(low)
-        sp3.setSizes([620, 200])
-        l3.addWidget(sp3, 1)
+        sp3.setSizes([560, 230])
+        lr3.addWidget(sp3, 1)
         self.lbl_3d = QLabel("")
         self.lbl_3d.setWordWrap(True)
-        l3.addWidget(self.lbl_3d)
+        lr3.addWidget(self.lbl_3d)
         self._lbl_3d_idle()
-        self.tabs_out.addTab(w3, "Modelo y vistas")
-        self.tabs_out.addTab(self.cv_stif, "Rigidizador")
+        self.tabs_out.addTab(wr3, "Resultados 3D")
 
-        # ---------------- memoria detallada
-        self.txt_mem = QTextEdit()
-        self.txt_mem.setReadOnly(True)
-        wm = QWidget()
-        lm = QVBoxLayout(wm)
-        tm = QHBoxLayout()
-        self.chk_mem = QCheckBox("Incluir la memoria detallada en los reportes")
-        self.chk_mem.setChecked(True)
-        tm.addWidget(self.chk_mem)
-        bexp = QPushButton("Copiar al portapapeles")
-        bexp.clicked.connect(lambda: QApplication.clipboard().setText(
-            self.txt_mem.toPlainText()))
-        tm.addWidget(bexp)
-        tm.addStretch(1)
-        lm.addLayout(tm)
-        lm.addWidget(self.txt_mem, 1)
-        self.tabs_out.addTab(wm, "Memoria detallada")
-
+        # ---------------- resultados + memoria detallada (una sola pestaña)
         w2 = QWidget()
         l2 = QVBoxLayout(w2)
+        top = QHBoxLayout()
+        top.addWidget(QLabel("<b>Combinacion mostrada:</b>"))
+        self.cb_combo2 = QComboBox()
+        self.cb_combo2.setMinimumWidth(170)
+        self.cb_combo2.setToolTip("Combinacion de carga que se dibuja y se detalla.")
+        self.cb_combo2.currentIndexChanged.connect(self._on_combo_pick)
+        top.addWidget(self.cb_combo2)
+        top.addStretch(1)
+        self.chk_mem = QCheckBox("Incluir la memoria detallada en los reportes")
+        self.chk_mem.setChecked(True)
+        top.addWidget(self.chk_mem)
+        l2.addLayout(top)
         l2.addWidget(QLabel("<b>Combinaciones de carga</b>"))
         self.tbl_cmb = QTableWidget(0, 5)
         self.tbl_cmb.setHorizontalHeaderLabels(["Combinacion", "D/C max", "Gobierna", "Estado", "Mostrada"])
@@ -716,7 +719,7 @@ class MainWindow(QMainWindow):
         self.tbl_cmb.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         self.tbl_cmb.verticalHeader().setVisible(False)
         self.tbl_cmb.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.tbl_cmb.setMaximumHeight(130)
+        self.tbl_cmb.setMaximumHeight(95)
         self.tbl_cmb.cellClicked.connect(lambda r, c: self.cb_combo.setCurrentIndex(r))
         l2.addWidget(self.tbl_cmb)
         self.lbl_res_ck = QLabel("<b>Verificaciones de la combinacion mostrada</b>")
@@ -733,11 +736,30 @@ class MainWindow(QMainWindow):
         self.tbl.setEditTriggers(QTableWidget.NoEditTriggers)
         self.tbl.setAlternatingRowColors(True)
         l2.addWidget(self.tbl, 1)
+        l2.addWidget(self.tbl, 3)
         self.txt_info = QTextEdit()
         self.txt_info.setReadOnly(True)
-        self.txt_info.setMaximumHeight(190)
+        self.txt_info.setMaximumHeight(80)
         l2.addWidget(self.txt_info)
+        bm = QHBoxLayout()
+        self.btn_mem = QPushButton("Mostrar calculos detallados")
+        self.btn_mem.setCheckable(True)
+        self.btn_mem.toggled.connect(self._toggle_mem)
+        bm.addWidget(self.btn_mem)
+        bcp = QPushButton("Copiar al portapapeles")
+        bcp.clicked.connect(lambda: QApplication.clipboard().setText(self.txt_mem.toPlainText()))
+        bm.addWidget(bcp)
+        bm.addStretch(1)
+        l2.addLayout(bm)
+        self.txt_mem = QTextEdit()
+        self.txt_mem.setReadOnly(True)
+        self.txt_mem.setVisible(False)
+        l2.addWidget(self.txt_mem, 4)
         self.tabs_out.addTab(w2, "Resultados")
+
+    def _toggle_mem(self, on):
+        self.txt_mem.setVisible(on)
+        self.btn_mem.setText("Ocultar calculos detallados" if on else "Mostrar calculos detallados")
 
     # ============================================================ sincronizacion
     def apply_units(self):
@@ -1218,6 +1240,8 @@ class MainWindow(QMainWindow):
             if QApplication.overrideCursor() is not None:
                 QApplication.restoreOverrideCursor()
         self._fill_combo_box()
+        if not self.calculated:
+            self._lbl_3d_idle()
         self.draw_all()
         self.fill_table()
         self.fill_3d_tables()
@@ -1246,61 +1270,74 @@ class MainWindow(QMainWindow):
             self.cv_stif.cv.draw_idle()
         except Exception as e:
             self.statusBar().showMessage(f"Error de dibujo: {e}", 8000)
-        if self.cb_f3.currentIndex() == 0 or self._raw_now() is None:
-            self.draw_3d()                      # la geometria 3D siempre esta al dia
+        self.draw_geom()                        # la geometria 3D siempre esta al dia
+        self.draw_3d()
 
-    def draw_3d(self):
+    def draw_geom(self):
+        """Pestaña 'Modelo y vistas': solo la geometria, nunca resultados."""
         try:                                    # conserva la orientacion de la camara
             elev, azim = self.cv_3d.ax.elev, self.cv_3d.ax.azim
         except Exception:
             elev = azim = None
-        k = self.cb_f3.currentIndex()
-        raw = self._raw_now()
-        self.cv_3d.reset(cbar=not (k == 0 or raw is None or not raw.ok))
-        if k == 0 or raw is None or not raw.ok:
-            try:
-                view3d.plot_geometry(self.cv_3d.ax, self.prj)
-            except Exception as e:
-                # no deja la vista en blanco: muestra el error en el propio lienzo
-                self.cv_3d.reset()
-                self.cv_3d.ax.set_axis_off()
-                self.cv_3d.ax.text2D(0.5, 0.5, "No se pudo dibujar la geometria 3D:\n"
-                                     f"{type(e).__name__}: {str(e)[:160]}",
-                                     ha="center", va="center", color="#9c0006",
-                                     transform=self.cv_3d.ax.transAxes, fontsize=9)
-                self.statusBar().showMessage(f"Error de dibujo 3D: {e}", 8000)
-                traceback.print_exc()
-            if elev is not None:
-                self.cv_3d.ax.view_init(elev=elev, azim=azim)
-            view3d.fit_to_axes(self.cv_3d.ax)
-            self.cv_3d.cv.draw_idle()
-            return
-        fld = ["vm", "u", "uz"][k - 1]
-        m = view3d.plot3d(self.cv_3d.ax, raw, self.prj, fld,
-                          float(self.sp_sc.value()), part=self.PARTS[self.cb_part.currentIndex()][0])
-        if m is not None:
-            cax = self.cv_3d.fig.add_axes([0.90, 0.18, 0.018, 0.64])
-            self.cv_3d.fig.colorbar(m, cax=cax)
+        self.cv_3d.reset(cbar=False)
+        try:
+            view3d.plot_geometry(self.cv_3d.ax, self.prj)
+        except Exception as e:
+            # no deja la vista en blanco: muestra el error en el propio lienzo
+            self.cv_3d.reset()
+            self.cv_3d.ax.set_axis_off()
+            self.cv_3d.ax.text2D(0.5, 0.5, "No se pudo dibujar la geometria 3D:\n"
+                                 f"{type(e).__name__}: {str(e)[:160]}",
+                                 ha="center", va="center", color="#9c0006",
+                                 transform=self.cv_3d.ax.transAxes, fontsize=9)
+            self.statusBar().showMessage(f"Error de dibujo 3D: {e}", 8000)
+            traceback.print_exc()
         if elev is not None:
             self.cv_3d.ax.view_init(elev=elev, azim=azim)
         view3d.fit_to_axes(self.cv_3d.ax)
         self.cv_3d.cv.draw_idle()
 
+    def draw_3d(self):
+        """Pestaña 'Resultados 3D': campo de resultados; vacia hasta que el calculo termina."""
+        try:
+            elev, azim = self.cv_res3d.ax.elev, self.cv_res3d.ax.azim
+        except Exception:
+            elev = azim = None
+        raw = self._raw_now() if self.calculated else None
+        ok = raw is not None and raw.ok
+        self.cv_res3d.reset(cbar=ok)
+        if not ok:
+            self.cv_res3d.ax.set_axis_off()
+            self.cv_res3d.ax.text2D(0.5, 0.5, "Sin calcular.\nPresione CALCULAR (F8) para ver los resultados.",
+                                    ha="center", va="center", color="#7f6000",
+                                    transform=self.cv_res3d.ax.transAxes, fontsize=11)
+            self.cv_res3d.cv.draw_idle()
+            return
+        fld = ["vm", "u", "uz"][self.cb_f3.currentIndex()]
+        m = view3d.plot3d(self.cv_res3d.ax, raw, self.prj, fld,
+                          float(self.sp_sc.value()), part=self.PARTS[self.cb_part.currentIndex()][0])
+        if m is not None:
+            cax = self.cv_res3d.fig.add_axes([0.90, 0.18, 0.018, 0.64])
+            self.cv_res3d.fig.colorbar(m, cax=cax)
+        if elev is not None:
+            self.cv_res3d.ax.view_init(elev=elev, azim=azim)
+        view3d.fit_to_axes(self.cv_res3d.ax)
+        self.cv_res3d.cv.draw_idle()
+
     def _lbl_3d_idle(self):
-        self.lbl_3d.setText("La vista 3D muestra siempre la geometria de la conexion (se actualiza al editar; "
-                            "no necesita analisis). Ningun resultado se muestra hasta presionar CALCULAR (F8), "
-                            "que corre el analisis solido 3D (Gmsh + CalculiX, incluidos) de todas las "
-                            "combinaciones de carga.")
+        self.lbl_3d.setText("Ningun resultado se muestra hasta presionar CALCULAR (F8), que corre el analisis "
+                            "solido 3D (Gmsh + CalculiX, incluidos) de todas las combinaciones de carga.")
 
     # ------------------------------------------------------ combinaciones de carga
     def _fill_combo_box(self):
         cs = self.prj.combo_list()
-        self.cb_combo.blockSignals(True)
-        self.cb_combo.clear()
-        for i, c in enumerate(cs):
-            self.cb_combo.addItem(c.name)
-        self.cb_combo.setCurrentIndex(self.prj.combo_idx)
-        self.cb_combo.blockSignals(False)
+        for cb in (self.cb_combo, self.cb_combo2):
+            cb.blockSignals(True)
+            cb.clear()
+            for c in cs:
+                cb.addItem(c.name)
+            cb.setCurrentIndex(self.prj.combo_idx)
+            cb.blockSignals(False)
 
     def _on_combo_pick(self, i):
         if self._loading or i < 0 or i == self.prj.combo_idx:
@@ -1309,7 +1346,6 @@ class MainWindow(QMainWindow):
         self.prj.apply_combo(i)
         self.load_ui()
         self.recalc()
-        self.draw_3d()
 
     def _combo_load(self):
         u = self.us
@@ -1454,13 +1490,13 @@ class MainWindow(QMainWindow):
         if p is not self.prj:                       # el usuario cambio de conexion mientras corria
             self.recalc()
             return
+        self.recalc()                               # el 3D entra al veredicto y a la memoria
         if cancelled:
             self.lbl_3d.setText("Analisis cancelado.")
             self.statusBar().showMessage("Analisis 3D cancelado", 5000)
         if failed:
             self.lbl_3d.setText(f"<span style='color:#9c0006'>{failed[0]}: {failed[1][:600]}</span>")
             QMessageBox.warning(self, "Analisis 3D", f"Combinacion {failed[0]}:\n\n{failed[1][-2500:]}")
-        self.recalc()                               # el 3D entra al veredicto y a la memoria
         raw, fem = self._raw_now(), self._fem_now()
         if raw is not None and fem is not None:
             u = self.us
@@ -1477,10 +1513,7 @@ class MainWindow(QMainWindow):
                 + (f"<span style='color:#595959'>Tamano de elemento: {u.q('L', fem.lc)}.</span><br>" if fem.lc else "")
                 + "Los picos de von Mises en aristas vivas (borde de agujero, encuentro perfil-placa) son "
                 "singularidades de malla: dependen del tamano de elemento y no deben leerse como esfuerzo real.")
-            self.cb_f3.blockSignals(True)
-            self.cb_f3.setCurrentIndex(1)           # muestra von Mises al terminar el analisis
-            self.cb_f3.blockSignals(False)
-            self.draw_3d()
+            self.tabs_out.setCurrentIndex(2)        # muestra los resultados 3D al terminar
         if self.calculated and len(self.pairs) > 1:
             self.statusBar().showMessage(f"Calculo completo; gobierna la combinacion "
                                          f"{self.pairs[self._governing(self.pairs)][0].combos[self._governing(self.pairs)].name}",

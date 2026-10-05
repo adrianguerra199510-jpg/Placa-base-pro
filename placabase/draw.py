@@ -78,9 +78,8 @@ def plan_view(ax, prj: Project, show_dims=True, labels=True):
     ax.set_xlim(-Lm / 2, Lm / 2)
     ax.set_ylim(-Lm / 2, Lm / 2)
     ax.set_aspect("equal", adjustable="datalim")
-    ax.axhline(0, color=C_DIM, lw=0.5, ls=(0, (6, 3, 1, 3)), zorder=1)
-    ax.axvline(0, color=C_DIM, lw=0.5, ls=(0, (6, 3, 1, 3)), zorder=1)
-    ax.grid(True, ls=":", lw=0.4, color="#cccccc")
+    ax.grid(False)
+    ax.set_axis_off()
     ax.set_xlabel(f"X — direccion B  ({u.L})")
     ax.set_ylabel(f"Y — direccion N  ({u.L})   ↑ lado traccionado por Mux")
 
@@ -173,7 +172,8 @@ def elevation_view(ax, prj: Project):
     ax.set_xlabel(f"X  ({u.L})")
     ax.set_ylabel(f"Z  ({u.L})")
     ax.set_title("ELEVACION (esquematica)", fontsize=9, loc="left")
-    ax.grid(True, ls=":", lw=0.4, color="#cccccc")
+    ax.grid(False)
+    ax.set_axis_off()
 
 
 def stiffener_detail(ax, prj):
@@ -223,4 +223,5 @@ def stiffener_detail(ax, prj):
                  f"destaje {u.q('L', st.clip_root)}", fontsize=9, loc="left")
     ax.set_xlabel(f"Proyeccion desde la cara del perfil  ({u.L})")
     ax.set_ylabel(f"Altura sobre la placa  ({u.L})")
-    ax.grid(True, ls=":", lw=0.4, color="#cccccc")
+    ax.grid(False)
+    ax.set_axis_off()
