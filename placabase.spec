@@ -41,7 +41,7 @@ exe = EXE(
     exclude_binaries=True,
     name="PlacaBasePro",
     console=False,            # sin ventana de consola
-    icon=None,
+    icon="placabase/data/placabasepro.ico",
     upx=False,
 )
 coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name="PlacaBasePro")

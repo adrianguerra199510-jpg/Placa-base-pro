@@ -464,6 +464,12 @@ def export_docx(prj: Project, res: Results, path: str,
     st.font.name = "Arial"
     st.font.size = Pt(9)
 
+    try:
+        from . import brand
+        doc.add_picture(brand.LOGO(), width=Inches(2.6))
+        doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.LEFT
+    except Exception:
+        pass
     doc.add_heading("MEMORIA DE CALCULO — PLACA BASE", level=0)
     p0 = doc.add_paragraph()
     p0.add_run(f"{prj.name}\n").bold = True
@@ -662,6 +668,14 @@ def export_pdf(prj: Project, res: Results, path: str,
     CEN = ParagraphStyle("CEN", parent=BODY, alignment=TA_CENTER)
 
     story = []
+    try:
+        from . import brand
+        from reportlab.platypus import Image as RLImage
+        _lw = 2.4 * inch
+        story.append(RLImage(brand.LOGO(), width=_lw, height=_lw * 246.0 / 1100.0, hAlign="LEFT"))
+        story.append(Spacer(1, 4))
+    except Exception:
+        pass
     story.append(Paragraph("MEMORIA DE CALCULO — PLACA BASE", H0))
     story.append(Paragraph(
         f"<b>{prj.name}</b> &nbsp;|&nbsp; Elemento: {prj.element} &nbsp;|&nbsp; "
@@ -902,7 +916,7 @@ def export_pdf(prj: Project, res: Results, path: str,
         canvas.setFont("Helvetica", 6.5)
         canvas.setFillColor(colors.HexColor("#777777"))
         canvas.drawString(0.6 * inch, 0.32 * inch,
-                          f"{prj.name} — {prj.element} — PlacaBasePro 1.1")
+                          f"{prj.name} — {prj.element} — PlacaBasePro {__import__('placabase').__version__}")
         canvas.drawRightString(letter[0] - 0.6 * inch, 0.32 * inch,
                                f"Pagina {docu.page}")
         canvas.restoreState()

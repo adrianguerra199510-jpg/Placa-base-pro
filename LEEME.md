@@ -1,3 +1,5 @@
+<p align="center"><img src="placabase/data/logo.png" width="420" alt="PlacaBasePro"></p>
+
 # PlacaBasePro 2.1
 
 Diseño y verificación de placas base para perfiles **W, HSS cuadrado/rectangular,
@@ -10,6 +12,10 @@ Normas: **AISC 360-22**, **AISC Design Guide 1 (2ª Ed.)**, **ACI 318-19 Cap. 17
 kN / N / tonf / kgf, momento y esfuerzo por separado. Se aplican a las entradas, a la
 tabla de resultados y a los reportes. El cálculo interno siempre corre en in-kip-ksi,
 que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
+
+## Identidad visual (2.1)
+
+Icono propio del programa y del .exe (`placabase/data/placabasepro.ico`), logo en la ventana, pantalla de inicio, "Acerca de" y el encabezado de las memorias PDF y Word; barra con acento naranja y boton CALCULAR de marca. Los recursos estan en `placabase/data/` y los colores en `placabase/brand.py`.
 
 ## Novedades de la 2.1: combinaciones de carga, flexion del perno y nueva organizacion
 

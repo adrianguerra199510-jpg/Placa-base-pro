@@ -14,7 +14,7 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolb
 from matplotlib.figure import Figure
 
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QObject
-from PySide6.QtGui import QAction, QKeySequence, QColor, QFont
+from PySide6.QtGui import QAction, QKeySequence, QColor, QFont, QIcon, QPixmap
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QTabWidget, QSplitter,
                                QVBoxLayout, QHBoxLayout, QLabel, QTableWidget,
                                QTableWidgetItem, QHeaderView, QFileDialog, QMessageBox,
@@ -32,7 +32,7 @@ from .dialogs import SectionDialog, MaterialsDialog
 from PySide6.QtWidgets import QListWidget, QInputDialog
 from .solver import solve
 from .units import parse_xy_clipboard
-from . import draw, report, mesh3d, view3d
+from . import draw, report, mesh3d, view3d, brand
 from .rep3d import make_fem
 from .ui_widgets import Form, scroll, PasteTable
 from .units import (UnitSet, LEN_UNITS, FORCE_UNITS, STRESS_UNITS, MOMENT_UNITS,
@@ -196,6 +196,7 @@ class MainWindow(QMainWindow):
                           self.prj.u_stress, self.prj.u_moment)
 
         self.setWindowTitle(f"PlacaBasePro {__version__} — Diseno de placas base")
+        self.setWindowIcon(QIcon(brand.ICO()))
         self.resize(1500, 920)
 
         self._build_actions()
@@ -204,6 +205,13 @@ class MainWindow(QMainWindow):
 
         left = QSplitter(Qt.Vertical)
         cw = QWidget(); cl = QVBoxLayout(cw); cl.setContentsMargins(4, 4, 4, 0)
+        lg = QLabel()
+        pm = QPixmap(brand.LOGO())
+        if not pm.isNull():
+            lg.setPixmap(pm.scaledToWidth(250, Qt.SmoothTransformation))
+        lg.setAlignment(Qt.AlignCenter)
+        lg.setToolTip(f"PlacaBasePro {__version__}")
+        cl.addWidget(lg)
         cl.addWidget(QLabel("<b>Conexiones del proyecto</b>"))
         self.lst_con = QListWidget()
         self.lst_con.setMaximumHeight(140)
@@ -280,9 +288,10 @@ class MainWindow(QMainWindow):
 
         tb.addSeparator()
         self.btn3d = QPushButton("CALCULAR  (F8)")
-        self.btn3d.setStyleSheet("QPushButton{background:#1f6fd1;color:white;font-weight:bold;"
-                                 "padding:4px 14px;border-radius:4px;margin-left:6px;margin-right:6px;}"
-                                 "QPushButton:disabled{background:#9db8d9;}")
+        self.btn3d.setStyleSheet(f"QPushButton{{background:{brand.ORANGE};color:white;font-weight:bold;"
+                                 f"padding:4px 14px;border-radius:4px;margin-left:6px;margin-right:6px;}}"
+                                 f"QPushButton:hover{{background:{brand.ORANGE_DK};}}"
+                                 f"QPushButton:disabled{{background:#e9b999;}}")
         self.btn3d.setToolTip("Corre el analisis 3D (Gmsh + CalculiX) de todas las combinaciones de carga y "
                               "entrega el veredicto. Mientras no se calcule no se muestra ningun resultado.")
         self.btn3d.clicked.connect(self.run_3d)
@@ -1860,14 +1869,19 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "Exportar", f"Archivo generado:\n{what}")
 
     def about(self):
-        QMessageBox.about(
-            self, "Acerca de PlacaBasePro",
+        mb = QMessageBox(self)
+        mb.setWindowTitle("Acerca de PlacaBasePro")
+        pm = QPixmap(brand.LOGO())
+        if not pm.isNull():
+            mb.setIconPixmap(pm.scaledToWidth(360, Qt.SmoothTransformation))
+        mb.setText(
             f"<b>PlacaBasePro {__version__}</b><br>"
             "Diseno y verificacion de placas base para perfiles W, HSS y Pipe.<br><br>"
             "AISC 360-22 · AISC Design Guide 1 (2ª Ed.) · ACI 318-19 Cap. 17<br>"
             "Modelo solido 3D (Gmsh + CalculiX) "
             "con el concreto como resortes solo a compresion.<br><br>"
             "Los resultados deben ser revisados por un ingeniero responsable.")
+        mb.exec()
 
     def closeEvent(self, ev):
         if self.worker is not None and self.worker.isRunning():
@@ -1877,9 +1891,36 @@ class MainWindow(QMainWindow):
 
 
 def main():
+    if sys.platform.startswith("win"):
+        try:                      # la barra de tareas de Windows agrupa y muestra el icono propio
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("PlacaBasePro.App")
+        except Exception:
+            pass
     app = QApplication(sys.argv)
     app.setApplicationName("PlacaBasePro")
     app.setStyle("Fusion")
+    app.setWindowIcon(QIcon(brand.ICO()))
+    app.setStyleSheet(brand.STYLE)
+    splash = None
+    pm = QPixmap(brand.LOGO())
+    if not pm.isNull():
+        from PySide6.QtWidgets import QSplashScreen
+        card = QPixmap(560, 220)
+        card.fill(QColor(brand.GREY))
+        from PySide6.QtGui import QPainter
+        pt = QPainter(card)
+        lw = pm.scaledToWidth(480, Qt.SmoothTransformation)
+        pt.drawPixmap((560 - lw.width()) // 2, 40, lw)
+        pt.setPen(QColor(brand.SLATE))
+        pt.drawText(card.rect().adjusted(0, 0, 0, -14), Qt.AlignHCenter | Qt.AlignBottom,
+                    f"Version {__version__}  ·  cargando ...")
+        pt.end()
+        splash = QSplashScreen(card)
+        splash.show()
+        app.processEvents()
     w = MainWindow()
     w.show()
+    if splash is not None:
+        splash.finish(w)
     return app.exec()
