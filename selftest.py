@@ -280,8 +280,11 @@ _cant = Project(); _cant.bolts.standoff = 2.0; _cant.bolts.fixity = "Voladizo (p
 _kc = {c.key: c for c in solve(_cant).checks}
 if abs(_kc["blt_m"].demand / _k["blt_m"].demand - 2.0) > 1e-6:
     FAIL.append("flexion del perno: voladizo debe duplicar el momento del doble empotramiento")
-if "blt_m" in {c.key for c in solve(Project()).checks}:
-    FAIL.append("flexion del perno: sin stand-off no debe verificarse")
+_ng = Project(); _ng.plate.grout = 0.0
+if "blt_m" in {c.key for c in solve(_ng).checks}:
+    FAIL.append("flexion del perno: sin stand-off ni mortero no debe verificarse")
+if "blt_m" not in {c.key for c in solve(Project()).checks}:
+    FAIL.append("flexion del perno: el mortero grueso debe verificarse")
 print(f"{'flexion del perno (stand-off 2 in)':34} M/φMn = {_k['blt_m'].ratio:.3f}   voladizo = {_kc['blt_m'].ratio:.3f}")
 
 

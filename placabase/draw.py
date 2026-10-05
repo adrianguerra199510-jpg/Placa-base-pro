@@ -114,11 +114,15 @@ def elevation_view(ax, prj: Project):
     gr = p.grout / k
     m = 1.0 / k                   # una pulgada, en unidades de dibujo
 
-    ax.add_patch(Rectangle((-B2 / 2, -hef - 6 * m), B2, hef + 6 * m,
+    # de arriba hacia abajo: placa, separacion libre (stand-off), mortero y, debajo, el elemento de concreto
+    so = max(0.0, getattr(b, "standoff", 0.0)) / k
+    zc = -(gr + so)                       # cara superior del concreto (hef se mide desde aqui)
+    ax.add_patch(Rectangle((-B2 / 2, zc - hef - 6 * m), B2, hef + 6 * m,
                            facecolor="#e8e8e8", edgecolor="#999999", lw=1.0, zorder=1))
-    ax.add_patch(Rectangle((-Bx / 2, -gr), Bx, gr,
-                           facecolor="#d9d2c5", edgecolor="#8a8172", lw=0.8,
-                           hatch="//", zorder=2))
+    if gr > 0:
+        ax.add_patch(Rectangle((-Bx / 2, zc), Bx, gr,
+                               facecolor="#d9d2c5", edgecolor="#8a8172", lw=0.8,
+                               hatch="//", zorder=2))
     ax.add_patch(Rectangle((-Bx / 2, 0), Bx, tp,
                            facecolor="#b9c6de", edgecolor=C_PLATE, lw=1.8, zorder=4))
 
@@ -145,30 +149,33 @@ def elevation_view(ax, prj: Project):
     Fh = g.Fhex / k
     xs_b = sorted({round(x / k, 4) for x, _ in G.bolt_positions(prj)})
     for x in xs_b:
-        ax.plot([x, x], [tp + 2 * m, -hef], color="#333333", lw=2.0, zorder=6)
+        ax.plot([x, x], [tp + 2 * m, zc - hef], color="#333333", lw=2.0, zorder=6)
         ax.plot([x - Fh / 2, x + Fh / 2], [tp + 0.9 * m, tp + 0.9 * m],
                 color="#333333", lw=3.5, solid_capstyle="butt", zorder=7)   # tuerca
+        if so > 0:                                                         # tuerca de nivelacion
+            ax.plot([x - Fh / 2, x + Fh / 2], [-0.4 * m, -0.4 * m],
+                    color="#333333", lw=3.5, solid_capstyle="butt", zorder=7)
         t = b.atype
         if t.startswith("Con cabeza"):
-            ax.plot([x - Fh / 2, x + Fh / 2], [-hef, -hef],
+            ax.plot([x - Fh / 2, x + Fh / 2], [zc - hef, zc - hef],
                     color="#333333", lw=4.0, solid_capstyle="butt", zorder=7)
         elif t.startswith("Gancho en L"):
             eh = (b.eh if b.eh > 0 else 3 * g.db) / k
-            ax.plot([x, x + eh], [-hef, -hef], color="#333333", lw=2.0, zorder=7)
+            ax.plot([x, x + eh], [zc - hef, zc - hef], color="#333333", lw=2.0, zorder=7)
         elif t.startswith("Gancho en J"):
             eh = (b.eh if b.eh > 0 else 3 * g.db) / k
             th = np.linspace(-math.pi, 0, 24)
-            ax.plot(x + eh / 2 + eh / 2 * np.cos(th), -hef + eh / 2 + eh / 2 * np.sin(th),
+            ax.plot(x + eh / 2 + eh / 2 * np.cos(th), zc - hef + eh / 2 + eh / 2 * np.sin(th),
                     color="#333333", lw=2.0, zorder=7)
 
-    ax.annotate("", xy=(Bx / 2 + 2 * m, 0), xytext=(Bx / 2 + 2 * m, -hef),
+    ax.annotate("", xy=(Bx / 2 + 2 * m, zc), xytext=(Bx / 2 + 2 * m, zc - hef),
                 arrowprops=dict(arrowstyle="<->", color=C_DIM, lw=0.9))
-    ax.text(Bx / 2 + 2.6 * m, -hef / 2, f"hef = {u.q('L', b.hef)}", fontsize=8,
+    ax.text(Bx / 2 + 2.6 * m, zc - hef / 2, f"hef = {u.q('L', b.hef)}", fontsize=8,
             color=C_DIM, rotation=90, va="center")
 
     ax.set_aspect("equal", adjustable="datalim")
     ax.set_xlim(-B2 / 2 - 2 * m, B2 / 2 + 8 * m)
-    ax.set_ylim(-hef - 8 * m, tp + bh + 2 * m)
+    ax.set_ylim(zc - hef - 8 * m, tp + bh + 2 * m)
     ax.set_xlabel(f"X  ({u.L})")
     ax.set_ylabel(f"Z  ({u.L})")
     ax.set_title("ELEVACION (esquematica)", fontsize=9, loc="left")

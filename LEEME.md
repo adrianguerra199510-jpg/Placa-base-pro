@@ -16,7 +16,7 @@ que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
 - **Motor por defecto: solido 3D** (tetraedros, con arandelas y conectores de soldadura). El de placas (shell)
   de la 2.0 sigue disponible como "experimental" en Elementos finitos > Tipo de elementos.
 - **Flexion en los anclajes (stand-off):** Pernos > "Separacion libre placa-concreto". Con valor > 0 el cortante
-  flexiona el perno en el tramo libre l = stand-off + tp/2: M = V·l/2 (doble empotramiento) o V·l (voladizo);
+  flexiona el perno en el tramo libre l = stand-off + mortero + tp/2 (se verifica si stand-off + mortero > db/2; un mortero mas delgado lo cubre el factor 0.80 de ACI): M = V·l/2 (doble empotramiento) o V·l (voladizo);
   se verifica φMn = 0.90·Fy·Z (AISC F11) y la interaccion traccion-flexion T/φTn + M/φMn ≤ 1 (AISC H1-1a). La
   traccion sale del 3D. El stand-off tambien suma al brazo del cortante del 3D y a la longitud del resorte del perno.
 - **Combinaciones de carga:** la pestaña Cargas (ahora justo despues de Proyecto) es una tabla; cada fila es una

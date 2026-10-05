@@ -161,8 +161,12 @@ def anchor_checks(prj: Project, br: Bearing,
     # superficie del concreto hasta el centro del espesor de la placa (la placa queda sujeta por las dos
     # tuercas).  Con doble empotramiento (placa que no gira) M = V·l/2; en voladizo M = V·l.
     so = max(0.0, float(getattr(b, "standoff", 0.0)))
-    if so > 1e-9 and Vua_b > 1e-9:
-        l_b = so + 0.5 * prj.plate.tp
+    gr_t = max(0.0, float(getattr(prj.plate, "grout", 0.0)))
+    l_gap = so + gr_t                     # tramo del perno sin apoyo lateral del concreto: separacion + mortero
+    if l_gap > 0.5 * g.db and Vua_b > 1e-9:
+        # un mortero delgado (<= medio diametro) queda cubierto por el factor 0.80 de ACI 17.7.1.2.1;
+        # con mortero grueso o placa elevada se verifica la flexion del perno
+        l_b = l_gap + 0.5 * prj.plate.tp
         k_fix = 0.5 if str(getattr(b, "fixity", "")).startswith("Doble") else 1.0
         Mu_b = Vua_b * l_b * k_fix
         d_e = (4.0 * g.Ase / 3.141592653589793) ** 0.5          # diametro de la seccion roscada
@@ -170,7 +174,7 @@ def anchor_checks(prj: Project, br: Bearing,
         phiMn = 0.90 * mat.Fy * Zb                               # AISC F11 (seccion redonda, plastico)
         out.append(Check("blt_m", "Perno — flexion por separacion libre (stand-off)", Mu_b, phiMn, "kip·in",
                          "AISC F11 / DG1 §3.5",
-                         f"l = stand-off {u.q('L', so)} + tp/2 = {u.q('L', l_b)}; "
+                         f"l = stand-off {u.q('L', so)} + mortero {u.q('L', gr_t)} + tp/2 = {u.q('L', l_b)}; "
                          f"M = V·l·{k_fix:g}; Z = {Zb:.4g} in³, Fy = {u.q('S', mat.Fy)}"))
         # interaccion traccion + flexion (+ cortante como tension combinada)
         rt_m = Nua_b / phiRnt if phiRnt > 0 else 0.0
@@ -180,7 +184,8 @@ def anchor_checks(prj: Project, br: Bearing,
                          f"T/φTn = {rt_m:.3f} + M/φMn = {rm:.3f};  cortante Vb = {u.q('F', Vua_b)}"))
         if rec:
             rec.section("D2. FLEXION DEL PERNO (stand-off)")
-            rec.add("l", "stand-off + tp/2", f"{rec.n('L', so)} + {rec.n('L', prj.plate.tp)}/2", l_b, "L",
+            rec.add("l", "stand-off + mortero + tp/2",
+                    f"{rec.n('L', so)} + {rec.n('L', gr_t)} + {rec.n('L', prj.plate.tp)}/2", l_b, "L",
                     "", "brazo libre entre el concreto y el centro de la placa")
             rec.add("Mu,perno", f"Vua,perno · l · {k_fix:g}", f"{rec.n('F', Vua_b)} · {rec.n('L', l_b)} · {k_fix:g}",
                     Mu_b, "M", "", str(b.fixity))
