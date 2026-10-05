@@ -267,8 +267,8 @@ class MainWindow(QMainWindow):
         m_calc.addSeparator()
         act(m_calc, "CALCULAR (analisis 3D de todas las combinaciones)...", self.run_3d, "F8")
         tb.addSeparator()
-        act(m_exp, "Memoria de calculo PDF (.pdf)...", self.export_pdf, None, True)
-        act(m_exp, "Memoria de calculo Word (.docx)...", self.export_docx, None, True)
+        act(m_exp, "Memoria de calculo PDF (.pdf)...", self.export_pdf)
+        act(m_exp, "Memoria de calculo Word (.docx)...", self.export_docx)
         act(m_exp, "Imagenes (.png)...", self.export_png)
         m_exp.addSeparator()
         act(m_exp, "Modelo solido 3D para Gmsh (.geo)...", self.export_3d)
@@ -278,14 +278,8 @@ class MainWindow(QMainWindow):
         act(m_exp, "Reportes PDF de TODAS las conexiones...", lambda: self.export_all("pdf"))
         act(m_exp, "Reportes Word de TODAS las conexiones...", lambda: self.export_all("docx"))
 
-        spacer = QWidget()
-        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        tb.addWidget(spacer)                     # empuja lo siguiente a la esquina superior derecha
-        self.lbl_verdict = QLabel("  ")
-        f = QFont(); f.setBold(True); f.setPointSize(11)
-        self.lbl_verdict.setFont(f)
-        tb.addWidget(self.lbl_verdict)
-        tb.addWidget(QLabel("  Combinacion: "))
+        tb.addSeparator()
+        tb.addWidget(QLabel(" Combinacion: "))
         self.cb_combo = QComboBox()
         self.cb_combo.setMinimumWidth(150)
         self.cb_combo.setToolTip("Combinacion de carga que se dibuja y se detalla en los resultados.")
@@ -299,6 +293,13 @@ class MainWindow(QMainWindow):
                               "entrega el veredicto. Mientras no se calcule no se muestra ningun resultado.")
         self.btn3d.clicked.connect(self.run_3d)
         tb.addWidget(self.btn3d)
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        tb.addWidget(spacer)                     # empuja el D/C a la esquina superior derecha
+        self.lbl_verdict = QLabel("  ")
+        f = QFont(); f.setBold(True); f.setPointSize(11)
+        self.lbl_verdict.setFont(f)
+        tb.addWidget(self.lbl_verdict)
 
     # ============================================================= formularios
     def _build_forms(self):
@@ -619,7 +620,6 @@ class MainWindow(QMainWindow):
         self.tabs_out = QTabWidget()
         self.cv_plan = Canvas(size=(5, 5))
         self.cv_elev = Canvas(size=(6, 4))
-        self.cv_stif = Canvas(size=(7, 5))
 
         # ---------------- vista general: SOLO la geometria (3D + planta + elevacion)
         w3 = QWidget()
@@ -632,14 +632,20 @@ class MainWindow(QMainWindow):
         pw = QWidget(); pl = QVBoxLayout(pw); pl.setContentsMargins(0, 0, 0, 0)
         pl.addWidget(QLabel("<b>Planta</b>")); pl.addWidget(self.cv_plan)
         ew = QWidget(); el = QVBoxLayout(ew); el.setContentsMargins(0, 0, 0, 0)
-        el.addWidget(QLabel("<b>Elevacion</b>")); el.addWidget(self.cv_elev)
+        eh = QHBoxLayout()
+        eh.addWidget(QLabel("<b>Vista:</b>"))
+        self.cb_elev = QComboBox()
+        self.cb_elev.addItems(["Elevacion", "Detalle del rigidizador"])
+        self.cb_elev.currentIndexChanged.connect(self._draw_elev)
+        eh.addWidget(self.cb_elev)
+        eh.addStretch(1)
+        el.addLayout(eh); el.addWidget(self.cv_elev)
         spv.addWidget(pw); spv.addWidget(ew)
         spv.setSizes([400, 300])
         sph.addWidget(spv)
         sph.setSizes([620, 380])
         l3.addWidget(sph, 1)
         self.tabs_out.addTab(w3, "Modelo y vistas")
-        self.tabs_out.addTab(self.cv_stif, "Rigidizador")
 
         # ---------------- resultados del 3D (campos, soldadura y pernos): solo tras calcular
         wr3 = QWidget()
@@ -708,6 +714,8 @@ class MainWindow(QMainWindow):
         self.cb_combo2.currentIndexChanged.connect(self._on_combo_pick)
         top.addWidget(self.cb_combo2)
         top.addStretch(1)
+        for txt, fn in (("Memoria de calculo PDF", self.export_pdf), ("Memoria de calculo Word", self.export_docx)):
+            bt = QPushButton(txt); bt.clicked.connect(fn); top.addWidget(bt)
         self.chk_mem = QCheckBox("Incluir la memoria detallada en los reportes")
         self.chk_mem.setChecked(True)
         top.addWidget(self.chk_mem)
@@ -736,6 +744,8 @@ class MainWindow(QMainWindow):
         self.tbl.setEditTriggers(QTableWidget.NoEditTriggers)
         self.tbl.setAlternatingRowColors(True)
         l2.addWidget(self.tbl, 1)
+        self.tbl.cellClicked.connect(self._goto_calc)
+        self.tbl.setToolTip("Haga clic en una fila para ir a su calculo detallado.")
         l2.addWidget(self.tbl, 3)
         self.txt_info = QTextEdit()
         self.txt_info.setReadOnly(True)
@@ -756,6 +766,51 @@ class MainWindow(QMainWindow):
         self.txt_mem.setVisible(False)
         l2.addWidget(self.txt_mem, 4)
         self.tabs_out.addTab(w2, "Resultados")
+
+    # palabras de la memoria que corresponden a cada verificacion (clave -> textos a buscar, en orden)
+    MEMO_KEYS = {
+        "brg": ["Aplastamiento del concreto"], "tp": ["Espesor de la placa"],
+        "blt_t": ["Perno en traccion"], "blt_v": ["Perno en cortante"],
+        "blt_tv": ["Perno en cortante"], "blt_m": ["Flexion del perno"],
+        "blt_tm": ["Interaccion traccion-flexion"], "blt_edge": ["PERNOS DE ANCLAJE"],
+        "aci_nsa": ["Acero del anclaje en traccion"], "aci_ncb": ["Arrancamiento del concreto en traccion"],
+        "aci_np": ["Extraccion (pullout)"], "aci_vsa": ["Acero del anclaje en cortante"],
+        "aci_vcb": ["Arrancamiento del concreto en cortante"], "aci_vcp": ["Pryout"],
+        "aci_int": ["ANCLAJES AL CONCRETO"],
+        "weld_fl": ["Soldadura de ala"], "weld_fl_min": ["Soldadura de ala"],
+        "weld_web": ["Soldadura de alma"], "weld_web_min": ["Soldadura de alma"],
+        "lug_brg": ["Aplastamiento del concreto contra la llave"], "lug_flex": ["Flexion de la pletina de la llave"],
+        "lug_brkout": ["Desprendimiento del concreto delante de la llave"],
+        "lug_shear": ["LLAVE DE CORTE"], "lug_weld": ["LLAVE DE CORTE"],
+        "stf_flex": ["Flexion del rigidizador"], "stf_weld_col": ["Soldadura rigidizador-columna"],
+        "stf_weld_pl": ["RIGIDIZADORES"], "stf_shear": ["RIGIDIZADORES"], "stf_fit": ["RIGIDIZADORES"],
+        "stf_slend": ["RIGIDIZADORES"], "col_norm": ["DATOS DE PARTIDA"], "col_shear": ["DATOS DE PARTIDA"],
+        "fem_bolt": ["Tmax perno"], "fem_press": ["pmax"], "fem_vm": ["σvM promediado"],
+    }
+
+    def _goto_calc(self, row, _col=0):
+        """Despliega los calculos detallados y salta al paso de la verificacion elegida."""
+        if self.res is None or not (0 <= row < len(self.res.checks)):
+            return
+        ch = self.res.checks[row]
+        self.btn_mem.setChecked(True)
+        doc = self.txt_mem.document()
+        from PySide6.QtGui import QTextDocument, QTextCursor
+        cands = list(self.MEMO_KEYS.get(ch.key, []))
+        if ch.key.startswith("fem_weld"):
+            cands += ["Traccion en cordones", "ELEMENTOS FINITOS"]
+        t = ch.title
+        cands += [t, t.split(" — ")[-1], t.split(" (")[0]]
+        for c in cands:
+            if not c.strip():
+                continue
+            cur = doc.find(c, 0, QTextDocument.FindCaseSensitively)
+            if not cur.isNull():
+                self.txt_mem.setTextCursor(cur)
+                sb = self.txt_mem.verticalScrollBar()
+                sb.setValue(sb.value() + self.txt_mem.cursorRect(cur).top() - 8)
+                return
+        self.txt_mem.moveCursor(QTextCursor.Start)
 
     def _toggle_mem(self, on):
         self.txt_mem.setVisible(on)
@@ -1264,14 +1319,20 @@ class MainWindow(QMainWindow):
         try:
             draw.plan_view(self.cv_plan.ax, self.prj)
             self.cv_plan.cv.draw_idle()
-            draw.elevation_view(self.cv_elev.ax, self.prj)
-            self.cv_elev.cv.draw_idle()
-            draw.stiffener_detail(self.cv_stif.ax, self.prj)
-            self.cv_stif.cv.draw_idle()
         except Exception as e:
             self.statusBar().showMessage(f"Error de dibujo: {e}", 8000)
+        self._draw_elev()
         self.draw_geom()                        # la geometria 3D siempre esta al dia
         self.draw_3d()
+
+    def _draw_elev(self):
+        try:
+            self.cv_elev.reset()
+            (draw.stiffener_detail if self.cb_elev.currentIndex() == 1 else draw.elevation_view)(
+                self.cv_elev.ax, self.prj)
+            self.cv_elev.cv.draw_idle()
+        except Exception as e:
+            self.statusBar().showMessage(f"Error de dibujo: {e}", 8000)
 
     def draw_geom(self):
         """Pestaña 'Modelo y vistas': solo la geometria, nunca resultados."""

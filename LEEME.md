@@ -25,7 +25,7 @@ que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
   se detalla. La memoria detalla la que gobierna e incluye la tabla de todas.
 - **Boton CALCULAR (F8)** junto al D/C de la barra superior. Hasta calcular no se muestra ninguna verificacion,
   D/C, memoria ni tabla de resultados ("SIN CALCULAR"); si se edita algo, el resultado vuelve a quedar sin calcular.
-- **Pestañas:** "Modelo y vistas" (solo geometria: 3D + planta + elevacion, sin cuadricula), "Rigidizador", "Resultados 3D" (campos, soldadura y pernos) y "Resultados" (combinaciones, verificaciones y, con el boton "Mostrar calculos detallados", la memoria). D/C, combinacion y CALCULAR estan en la esquina superior derecha.
+- **Pestañas:** "Modelo y vistas" (solo geometria: 3D + planta + elevacion, que tambien alterna con el detalle del rigidizador; sin cuadricula), "Resultados 3D" (campos, soldadura y pernos) y "Resultados" (combinaciones, verificaciones, botones de memoria PDF/Word y, con "Mostrar calculos detallados", la memoria; al hacer clic en una fila se salta a su calculo). Combinacion y CALCULAR estan junto a Guardar; el D/C, en la esquina superior derecha.
 
 ## Novedades de la 2.0: modelo de placas (shell) en lugar de solido 3D
 
