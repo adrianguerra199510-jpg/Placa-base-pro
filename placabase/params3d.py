@@ -9,7 +9,7 @@ from .units import ES_KSI, Ec_ksi
 def shear_arm(prj: Project) -> float:
     """Brazo e (in) entre donde el cortante entra en la placa (cara superior) y donde lo
     devuelven los pernos o la llave.  Manual si fea.shear_arm >= 0; si no:
-      sin llave : tp/2 + mortero  (el perno apoya en el centro del espesor y, con mortero,
+      sin llave : tp/2 + mortero + stand-off  (el perno apoya en el centro del espesor y, con mortero,
                   trabaja a esa altura sobre el concreto)
       con llave : tp + H/2        (la llave reacciona en el centro de su altura de apoyo)."""
     a = float(getattr(prj.fea, "shear_arm", -1.0))
@@ -18,7 +18,7 @@ def shear_arm(prj: Project) -> float:
     p = prj.plate
     if prj.lug.enabled:
         return p.tp + 0.5 * prj.lug.H
-    return 0.5 * p.tp + max(0.0, p.grout)
+    return 0.5 * p.tp + max(0.0, p.grout) + max(0.0, getattr(prj.bolts, 'standoff', 0.0))
 
 
 def foundation_ks(prj: Project) -> float:
@@ -29,7 +29,7 @@ def foundation_ks(prj: Project) -> float:
 
 def bolt_kb(prj: Project) -> float:
     g = prj.bolts.geom()
-    Lb = prj.bolts.hef + prj.plate.tp + prj.plate.grout
+    Lb = prj.bolts.hef + prj.plate.tp + prj.plate.grout + max(0.0, getattr(prj.bolts, "standoff", 0.0))
     return ES_KSI * g.Ase / max(Lb, 1.0)
 
 

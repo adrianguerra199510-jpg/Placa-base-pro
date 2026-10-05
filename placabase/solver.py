@@ -23,6 +23,8 @@ class Results:
     fem: object = None              # fem_checks.Fem3D vigente (o None)
     warnings: list = field(default_factory=list)
     rec: Recorder = None
+    combo_rows: list = field(default_factory=list)   # resumen de todas las combinaciones (lo llena la UI)
+    combo_gov: int = 0
 
     @property
     def max_ratio(self) -> float:
@@ -62,9 +64,9 @@ def solve(prj: Project, detail: bool = True, fem=None) -> Results:
     notes = prj.normalize()
     R.rec = Recorder(prj.units()) if detail else None
     rec = R.rec
+    u = prj.units()
     if rec:
         rec.section("DATOS DE PARTIDA")
-        u = prj.units()
         s_ = prj.section.shape()
         rec.add("Perfil", prj.section.label,
                 f"{prj.section.steel}, rotacion {prj.section.rotation:g}°", None)

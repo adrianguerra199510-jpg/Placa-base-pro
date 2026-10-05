@@ -538,6 +538,20 @@ def export_docx(prj: Project, res: Results, path: str,
     pv.add_run(f"   D/C maximo = {res.max_ratio:.3f}" +
                (f"   (gobierna: {gov.title})" if gov else ""))
 
+    if len(getattr(res, "combo_rows", []) or []) > 1:
+        pc = doc.add_paragraph()
+        pc.add_run("Combinaciones de carga (el detalle de esta memoria corresponde a la que gobierna).").bold = True
+        tc = doc.add_table(rows=1, cols=4)
+        tc.style = "Light Grid Accent 1"
+        for i, h in enumerate(["Combinacion", "D/C max", "Gobierna", "Estado"]):
+            tc.rows[0].cells[i].text = h
+        for cr in res.combo_rows:
+            cells = tc.add_row().cells
+            cells[0].text = cr["name"]
+            cells[1].text = f"{cr['ratio']:.3f}"
+            cells[2].text = cr["gov"]
+            cells[3].text = "PENDIENTE" if cr["pending"] else ("CUMPLE" if cr["ok"] else "NO CUMPLE")
+
     if res.warnings:
         doc.add_heading("4. Avisos", level=1)
         for wmsg in res.warnings:
@@ -771,6 +785,19 @@ def export_pdf(prj: Project, res: Results, path: str,
         f'{vtxt}</font></b> &nbsp;&nbsp; '
         f"D/C maximo = {res.max_ratio:.3f}"
         + (f" &nbsp;(gobierna: {gov.title})" if gov else ""), BODY))
+
+    if len(getattr(res, "combo_rows", []) or []) > 1:
+        story.append(Spacer(1, 4))
+        story.append(Paragraph("<b>Combinaciones de carga</b> (el detalle de esta memoria corresponde a la "
+                               "que gobierna)", BODY))
+        cd = [["Combinacion", "D/C max", "Gobierna", "Estado"]]
+        cst = []
+        for i, cr in enumerate(res.combo_rows, start=1):
+            cd.append([cr["name"], f"{cr['ratio']:.3f}", Paragraph(cr["gov"], BODY),
+                       "PENDIENTE" if cr["pending"] else ("CUMPLE" if cr["ok"] else "NO CUMPLE")])
+            cst.append(("BACKGROUND", (3, i), (3, i), colors.HexColor(
+                "#FFEB9C" if cr["pending"] else ("#C6EFCE" if cr["ok"] else "#FFC7CE"))))
+        story.append(tbl(cd, [1.4 * inch, 0.8 * inch, 3.3 * inch, 0.9 * inch], cst))
 
     if res.warnings:
         story.append(Paragraph("4. Avisos", H1))

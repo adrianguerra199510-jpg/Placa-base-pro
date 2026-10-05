@@ -1,4 +1,4 @@
-# PlacaBasePro 2.0
+# PlacaBasePro 2.1
 
 Diseño y verificación de placas base para perfiles **W, HSS cuadrado/rectangular,
 HSS circular y Pipe**, con dibujo paramétrico, anclajes ACI 318-19, llave de corte,
@@ -10,6 +10,22 @@ Normas: **AISC 360-22**, **AISC Design Guide 1 (2ª Ed.)**, **ACI 318-19 Cap. 17
 kN / N / tonf / kgf, momento y esfuerzo por separado. Se aplican a las entradas, a la
 tabla de resultados y a los reportes. El cálculo interno siempre corre en in-kip-ksi,
 que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
+
+## Novedades de la 2.1: combinaciones de carga, flexion del perno y nueva organizacion
+
+- **Motor por defecto: solido 3D** (tetraedros, con arandelas y conectores de soldadura). El de placas (shell)
+  de la 2.0 sigue disponible como "experimental" en Elementos finitos > Tipo de elementos.
+- **Flexion en los anclajes (stand-off):** Pernos > "Separacion libre placa-concreto". Con valor > 0 el cortante
+  flexiona el perno en el tramo libre l = stand-off + tp/2: M = V·l/2 (doble empotramiento) o V·l (voladizo);
+  se verifica φMn = 0.90·Fy·Z (AISC F11) y la interaccion traccion-flexion T/φTn + M/φMn ≤ 1 (AISC H1-1a). La
+  traccion sale del 3D. El stand-off tambien suma al brazo del cortante del 3D y a la longitud del resorte del perno.
+- **Combinaciones de carga:** la pestaña Cargas (ahora justo despues de Proyecto) es una tabla; cada fila es una
+  combinacion (Pu, Mux, Muy, Vux, Vuy). CALCULAR corre el 3D de todas (solo las que no tienen 3D vigente) y el
+  veredicto es el de la mas desfavorable. El combo "Combinacion" de la barra superior elige la que se dibuja y
+  se detalla. La memoria detalla la que gobierna e incluye la tabla de todas.
+- **Boton CALCULAR (F8)** junto al D/C de la barra superior. Hasta calcular no se muestra ninguna verificacion,
+  D/C, memoria ni tabla de resultados ("SIN CALCULAR"); si se edita algo, el resultado vuelve a quedar sin calcular.
+- **Vista unica:** el 3D, la planta y la elevacion aparecen juntos en la pestaña "Modelo y vistas".
 
 ## Novedades de la 2.0: modelo de placas (shell) en lugar de solido 3D
 

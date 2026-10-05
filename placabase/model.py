@@ -11,7 +11,8 @@ import dataclasses
 # --------------------------------------------------------------- catalogos
 WELD_MODELS = ["Conectores (cordon como resortes entre cuerpos separados)",
                "Fusionado (union monolitica, equivale a CJP)"]
-ENGINES = ["Placas (shell S6, recomendado)", "Solido 3D (tetraedros, referencia)"]
+ENGINES = ["Solido 3D (tetraedros, recomendado)", "Placas (shell S6, experimental)"]
+FIXITY = ["Doble empotramiento (placa restringida)", "Voladizo (placa libre de girar)"]
 MESH3D_MODES = ["Automatica (recomendada)", "Fina (mas lenta)"]
 PATTERNS = ["Perimetral (4 lados)", "2 lados (eje mayor)",
             "2 lados (eje menor)", "Circular", "Coordenadas manuales"]
@@ -135,6 +136,8 @@ class BoltGroup:
     washer_d: float = 0.0        # diametro de la arandela / zona de apoyo de la tuerca, in (0 = automatico)
     washer_t: float = -1.0       # espesor de la arandela, in (-1 = automatico 0.25·db; 0 = sin arandela)
     hole_rule: str = "AISC Tabla 14-2 (maximo recomendado)"
+    standoff: float = 0.0        # separacion libre placa-concreto (tuercas de nivelacion), in; 0 = sin flexion
+    fixity: str = "Doble empotramiento (placa restringida)"   # ver FIXITY
     # --- instalacion (solo varilla recta)
     install: str = "Preinstalado (vaciado en sitio)"
     adh_env: str = "Interior, concreto seco (Tabla 17.6.5.2.5)"
@@ -348,6 +351,17 @@ class Loads:
 
 
 @dataclass
+class LoadCombo:
+    """Una combinacion de cargas factorizadas (en ejes de la columna si esta inclinada)."""
+    name: str = "Comb 1"
+    Pu: float = 400.0            # kip, compresion positiva
+    Mux: float = 1800.0          # kip*in
+    Muy: float = 0.0             # kip*in
+    Vux: float = 30.0            # kip
+    Vuy: float = 0.0             # kip
+
+
+@dataclass
 class FEAOpts:
     """Opciones del analisis de elementos finitos SOLIDO 3D (Gmsh + CalculiX) y de sus datos comunes
     con el calculo lineal (modulo de balasto, brazo del cortante)."""
@@ -356,7 +370,7 @@ class FEAOpts:
     ccx_path: str = "ccx"
     gmsh_path: str = "gmsh"
     mesh3d: float = 0.0          # tamano de malla 3D (0 = automatico)
-    engine: str = "Placas (shell S6, recomendado)"   # ver ENGINES
+    engine: str = "Solido 3D (tetraedros, recomendado)"   # ver ENGINES
     mesh3d_mode: str = "Automatica (recomendada)"   # ver MESH3D_MODES
     shear_arm: float = -1.0      # brazo del cortante sobre la placa, in (-1 = automatico)
     vm_avg_factor: float = 1.0   # radio de promedio del von Mises 3D, en espesores de placa
@@ -384,6 +398,37 @@ class Project:
     conc: Concrete = field(default_factory=Concrete)
     loads: Loads = field(default_factory=Loads)
     fea: FEAOpts = field(default_factory=FEAOpts)
+    # combinaciones de carga: `loads` guarda la combinacion ACTIVA (la que se dibuja) mas los datos comunes
+    # (inclinacion, friccion); el calculo corre todas las combinaciones
+    combos: list = field(default_factory=lambda: [LoadCombo()])
+    combo_idx: int = 0
+
+    def combo_list(self) -> list:
+        """Lista de combinaciones (nunca vacia)."""
+        if not self.combos:
+            L = self.loads
+            self.combos = [LoadCombo("Comb 1", L.Pu, L.Mux, L.Muy, L.Vux, L.Vuy)]
+        self.combo_idx = max(0, min(self.combo_idx, len(self.combos) - 1))
+        return self.combos
+
+    def with_combo(self, i: int) -> "Project":
+        """Copia del proyecto con las cargas de la combinacion i como combinacion activa."""
+        import copy
+        q = copy.deepcopy(self)
+        cs = q.combo_list()
+        i = max(0, min(i, len(cs) - 1))
+        c = cs[i]
+        q.combo_idx = i
+        q.loads.Pu, q.loads.Mux, q.loads.Muy, q.loads.Vux, q.loads.Vuy = c.Pu, c.Mux, c.Muy, c.Vux, c.Vuy
+        return q
+
+    def apply_combo(self, i: int):
+        """Hace activa la combinacion i (copia sus cargas a `loads`)."""
+        cs = self.combo_list()
+        self.combo_idx = max(0, min(i, len(cs) - 1))
+        c = cs[self.combo_idx]
+        self.loads.Pu, self.loads.Mux, self.loads.Muy = c.Pu, c.Mux, c.Muy
+        self.loads.Vux, self.loads.Vuy = c.Vux, c.Vuy
 
     @property
     def eloads(self) -> Loads:
@@ -414,7 +459,8 @@ class Project:
         materiales, las soldaduras o las opciones de malla; NO si solo cambian el nombre, el autor,
         las unidades de presentacion o el metodo de reparto de fuerzas."""
         d = asdict(self)
-        for k in ("name", "element", "author", "date", "metric", "u_len", "u_force", "u_stress", "u_moment"):
+        for k in ("name", "element", "author", "date", "metric", "u_len", "u_force", "u_stress", "u_moment",
+                  "combos", "combo_idx"):
             d.pop(k, None)
         d.get("fea", {}).pop("ccx_path", None)
         d.get("fea", {}).pop("gmsh_path", None)
@@ -442,8 +488,15 @@ class Project:
                     setattr(p, k, w)
                 else:
                     setattr(p, k, mk(type(cur), v))
+            elif k == "combos" and isinstance(v, list):
+                p.combos = [mk(LoadCombo, c) for c in v if isinstance(c, dict)]
             else:
                 setattr(p, k, v)
+        if "combos" not in d:                    # archivo de una version anterior: una sola combinacion
+            p.combos = []
+        p.combo_list()
+        if "combos" in d:
+            p.apply_combo(p.combo_idx)
         return p
 
     def save(self, path: str):

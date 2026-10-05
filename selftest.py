@@ -261,6 +261,30 @@ print("CASOS LIMITE")
 case("placa insuficiente", **{"loads.Mux": 26000.0})
 case("perfil mas grande que placa", **{"section.label": "W14X730", "plate.N": 14.0, "plate.B": 14.0})
 
+# ---------------------------------------------------- combinaciones de carga y flexion del perno
+from placabase.model import LoadCombo
+_cb = Project()
+_cb.combos = [LoadCombo("A", 400, 1800, 0, 30, 0), LoadCombo("B", -100, 0, 0, 10, 0)]
+_q0, _q1 = _cb.with_combo(0), _cb.with_combo(1)
+if not (_q0.loads.Pu == 400 and _q1.loads.Pu == -100 and _cb.loads.Pu == 400 and _q0.sig3d() != _q1.sig3d()):
+    FAIL.append("combinaciones: with_combo no aplica las cargas de la combinacion")
+_rt = Project.from_json(_cb.to_json())
+if [c.name for c in _rt.combos] != ["A", "B"]:
+    FAIL.append("combinaciones: no sobreviven al guardar/abrir")
+_so = Project(); _so.bolts.standoff = 2.0
+_Rso = solve(_so)
+_k = {c.key: c for c in _Rso.checks}
+if "blt_m" not in _k or "blt_tm" not in _k or _k["blt_m"].ratio <= 0:
+    FAIL.append("flexion del perno: faltan las verificaciones con stand-off")
+_cant = Project(); _cant.bolts.standoff = 2.0; _cant.bolts.fixity = "Voladizo (placa libre de girar)"
+_kc = {c.key: c for c in solve(_cant).checks}
+if abs(_kc["blt_m"].demand / _k["blt_m"].demand - 2.0) > 1e-6:
+    FAIL.append("flexion del perno: voladizo debe duplicar el momento del doble empotramiento")
+if "blt_m" in {c.key for c in solve(Project()).checks}:
+    FAIL.append("flexion del perno: sin stand-off no debe verificarse")
+print(f"{'flexion del perno (stand-off 2 in)':34} M/φMn = {_k['blt_m'].ratio:.3f}   voladizo = {_kc['blt_m'].ratio:.3f}")
+
+
 if "--3d" in sys.argv:
     # prueba de extremo a extremo con Gmsh + CalculiX (~30 s con la malla rapida)
     import tempfile
@@ -269,7 +293,7 @@ if "--3d" in sys.argv:
     print()
     from placabase.model import ENGINES
     print("ANALISIS SOLIDO 3D (--3d)")
-    _p3 = Project(); _p3.fea.engine = ENGINES[1]
+    _p3 = Project(); _p3.fea.engine = ENGINES[0]
     _res, _msg = mesh3d.full_3d(_p3, tempfile.mkdtemp(prefix="pb3d_"))
     if _res is None:
         FAIL.append(f"3D: no corrio: {_msg[-300:]}")
@@ -295,7 +319,7 @@ if "--3d" in sys.argv:
         if _post.weld_model != "conectores" or abs(_eqw) > 0.02 * abs(_p3.eloads.Pu):
             FAIL.append("3D: equilibrio vertical del cordon con conectores")
         # traccion pura: todo el axial pasa por los cordones y por los pernos
-        _pt = Project(); _pt.fea.engine = ENGINES[1]; _pt.loads.Pu = -100.0; _pt.loads.Mux = 0.0; _pt.loads.Vux = 0.0
+        _pt = Project(); _pt.fea.engine = ENGINES[0]; _pt.loads.Pu = -100.0; _pt.loads.Mux = 0.0; _pt.loads.Vux = 0.0
         _rt, _mt = mesh3d.full_3d(_pt, tempfile.mkdtemp(prefix="pb3d_"))
         if _rt is None:
             FAIL.append(f"3D traccion pura: no corrio: {_mt[-200:]}")
@@ -306,7 +330,7 @@ if "--3d" in sys.argv:
             if not (abs(_pp.Fz_weld - 100.0) < 2.0 and _pp.F_bear < 1.0 and abs(_pp.T_bolts - 100.0) < 2.0):
                 FAIL.append("3D traccion pura: el axial debe pasar por cordones y pernos")
         # respaldo fusionado: corre y entrega zonas
-        _pf = Project(); _pf.fea.engine = ENGINES[1]; _pf.fea.weld_model = "Fusionado (union monolitica, equivale a CJP)"
+        _pf = Project(); _pf.fea.engine = ENGINES[0]; _pf.fea.weld_model = "Fusionado (union monolitica, equivale a CJP)"
         _rf, _mf = mesh3d.full_3d(_pf, tempfile.mkdtemp(prefix="pb3d_"))
         if _rf is None or not _rf.post or not _rf.post.zones or _rf.post.weld_model != "fusionado":
             FAIL.append("3D fusionado: no entrego zonas de soldadura")
@@ -316,7 +340,7 @@ if "--3d" in sys.argv:
     # motor de placas (shell): corre, equilibra y entrega vistas y filas
     print()
     print("ANALISIS CON PLACAS (--3d)")
-    _ps = Project(); _ps.fea.engine = ENGINES[0]
+    _ps = Project(); _ps.fea.engine = ENGINES[1]
     _rs, _ms = mesh3d.full_3d(_ps, tempfile.mkdtemp(prefix="pbsh_"))
     if _rs is None:
         FAIL.append(f"placas: no corrio: {_ms[-300:]}")

@@ -156,6 +156,40 @@ def anchor_checks(prj: Project, br: Bearing,
                          Nua_b, 0.75 * Fnt_p * g.Ab, "kip", "AISC Ec. J3-3a",
                          f"F'nt = {u.q('S', Fnt_p)} con frv = {u.q('S', frv)}"))
 
+    # ===================== flexion del perno por separacion libre (stand-off, tuercas de nivelacion)
+    # El cortante que baja por el perno a traves de la separacion libre lo flexiona: voladizo desde la
+    # superficie del concreto hasta el centro del espesor de la placa (la placa queda sujeta por las dos
+    # tuercas).  Con doble empotramiento (placa que no gira) M = V·l/2; en voladizo M = V·l.
+    so = max(0.0, float(getattr(b, "standoff", 0.0)))
+    if so > 1e-9 and Vua_b > 1e-9:
+        l_b = so + 0.5 * prj.plate.tp
+        k_fix = 0.5 if str(getattr(b, "fixity", "")).startswith("Doble") else 1.0
+        Mu_b = Vua_b * l_b * k_fix
+        d_e = (4.0 * g.Ase / 3.141592653589793) ** 0.5          # diametro de la seccion roscada
+        Zb = d_e ** 3 / 6.0
+        phiMn = 0.90 * mat.Fy * Zb                               # AISC F11 (seccion redonda, plastico)
+        out.append(Check("blt_m", "Perno — flexion por separacion libre (stand-off)", Mu_b, phiMn, "kip·in",
+                         "AISC F11 / DG1 §3.5",
+                         f"l = stand-off {u.q('L', so)} + tp/2 = {u.q('L', l_b)}; "
+                         f"M = V·l·{k_fix:g}; Z = {Zb:.4g} in³, Fy = {u.q('S', mat.Fy)}"))
+        # interaccion traccion + flexion (+ cortante como tension combinada)
+        rt_m = Nua_b / phiRnt if phiRnt > 0 else 0.0
+        rm = Mu_b / phiMn if phiMn > 0 else 0.0
+        out.append(Check("blt_tm", "Perno — interaccion traccion-flexion", rt_m + rm, 1.0, "-",
+                         "AISC H1-1a",
+                         f"T/φTn = {rt_m:.3f} + M/φMn = {rm:.3f};  cortante Vb = {u.q('F', Vua_b)}"))
+        if rec:
+            rec.section("D2. FLEXION DEL PERNO (stand-off)")
+            rec.add("l", "stand-off + tp/2", f"{rec.n('L', so)} + {rec.n('L', prj.plate.tp)}/2", l_b, "L",
+                    "", "brazo libre entre el concreto y el centro de la placa")
+            rec.add("Mu,perno", f"Vua,perno · l · {k_fix:g}", f"{rec.n('F', Vua_b)} · {rec.n('L', l_b)} · {k_fix:g}",
+                    Mu_b, "M", "", str(b.fixity))
+            rec.add("Z", "de³/6", f"({d_e:.4g})³/6", Zb, "-", "", "modulo plastico de la seccion roscada")
+            rec.add("φMn", "0.90·Fy·Z", f"0.90·{rec.n('S', mat.Fy)}·{Zb:.4g}", phiMn, "M", "AISC F11")
+            rec.check("Flexion del perno", Mu_b, phiMn, "M", rm, Mu_b <= phiMn, "AISC F11")
+            rec.check("Interaccion traccion-flexion", rt_m + rm, 1.0, "-", rt_m + rm, rt_m + rm <= 1.0,
+                      "AISC H1-1a")
+
     if rec:
         rec.section("E.  ANCLAJES AL CONCRETO  (ACI 318-19 Cap. 17)")
         rec.add("futa", "min( Fu ; 1.9·Fy ; 125 ksi )",
