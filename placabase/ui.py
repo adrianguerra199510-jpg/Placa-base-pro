@@ -279,12 +279,6 @@ class MainWindow(QMainWindow):
         act(m_exp, "Reportes Word de TODAS las conexiones...", lambda: self.export_all("docx"))
 
         tb.addSeparator()
-        tb.addWidget(QLabel(" Combinacion: "))
-        self.cb_combo = QComboBox()
-        self.cb_combo.setMinimumWidth(150)
-        self.cb_combo.setToolTip("Combinacion de carga que se dibuja y se detalla en los resultados.")
-        self.cb_combo.currentIndexChanged.connect(self._on_combo_pick)
-        tb.addWidget(self.cb_combo)
         self.btn3d = QPushButton("CALCULAR  (F8)")
         self.btn3d.setStyleSheet("QPushButton{background:#1f6fd1;color:white;font-weight:bold;"
                                  "padding:4px 14px;border-radius:4px;margin-left:6px;margin-right:6px;}"
@@ -651,6 +645,13 @@ class MainWindow(QMainWindow):
         wr3 = QWidget()
         lr3 = QVBoxLayout(wr3)
         t3 = QHBoxLayout()
+        t3.addWidget(QLabel("<b>Combinacion:</b>"))
+        self.cb_combo = QComboBox()
+        self.cb_combo.setMinimumWidth(150)
+        self.cb_combo.setToolTip("Combinacion de carga que se dibuja y se detalla en los resultados.")
+        self.cb_combo.currentIndexChanged.connect(self._on_combo_pick)
+        t3.addWidget(self.cb_combo)
+        t3.addSpacing(12)
         t3.addWidget(QLabel("Campo:"))
         self.cb_f3 = QComboBox()
         self.cb_f3.addItems(["Von Mises", "Desplazamiento |U|", "Desplazamiento Uz"])
@@ -701,7 +702,7 @@ class MainWindow(QMainWindow):
         self.lbl_3d.setWordWrap(True)
         lr3.addWidget(self.lbl_3d)
         self._lbl_3d_idle()
-        self.tabs_out.addTab(wr3, "Resultados 3D")
+        self.tabs_out.addTab(wr3, "Analisis FEM")
 
         # ---------------- resultados + memoria detallada (una sola pestaña)
         w2 = QWidget()
@@ -1358,8 +1359,13 @@ class MainWindow(QMainWindow):
         view3d.fit_to_axes(self.cv_3d.ax)
         self.cv_3d.cv.draw_idle()
 
+    def _bolt_loads(self):
+        fem = self._fem_now()
+        post = getattr(fem, "post", None) if fem is not None else None
+        return list(getattr(post, "bolts", []) or [])
+
     def draw_3d(self):
-        """Pestaña 'Resultados 3D': campo de resultados; vacia hasta que el calculo termina."""
+        """Pestaña 'Analisis FEM': campo de resultados; vacia hasta que el calculo termina."""
         try:
             elev, azim = self.cv_res3d.ax.elev, self.cv_res3d.ax.azim
         except Exception:
@@ -1376,7 +1382,8 @@ class MainWindow(QMainWindow):
             return
         fld = ["vm", "u", "uz"][self.cb_f3.currentIndex()]
         m = view3d.plot3d(self.cv_res3d.ax, raw, self.prj, fld,
-                          float(self.sp_sc.value()), part=self.PARTS[self.cb_part.currentIndex()][0])
+                          float(self.sp_sc.value()), part=self.PARTS[self.cb_part.currentIndex()][0],
+                          bolts=self._bolt_loads())
         if m is not None:
             cax = self.cv_res3d.fig.add_axes([0.90, 0.18, 0.018, 0.64])
             self.cv_res3d.fig.colorbar(m, cax=cax)
@@ -1574,7 +1581,7 @@ class MainWindow(QMainWindow):
                 + (f"<span style='color:#595959'>Tamano de elemento: {u.q('L', fem.lc)}.</span><br>" if fem.lc else "")
                 + "Los picos de von Mises en aristas vivas (borde de agujero, encuentro perfil-placa) son "
                 "singularidades de malla: dependen del tamano de elemento y no deben leerse como esfuerzo real.")
-            self.tabs_out.setCurrentIndex(2)        # muestra los resultados 3D al terminar
+            self.tabs_out.setCurrentIndex(1)        # muestra el analisis FEM al terminar
         if self.calculated and len(self.pairs) > 1:
             self.statusBar().showMessage(f"Calculo completo; gobierna la combinacion "
                                          f"{self.pairs[self._governing(self.pairs)][0].combos[self._governing(self.pairs)].name}",

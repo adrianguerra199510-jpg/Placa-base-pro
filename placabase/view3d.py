@@ -225,7 +225,7 @@ def _soft_cmap(diverging=False):
     return LinearSegmentedColormap.from_list("pb_suave", cols, N=256)
 
 
-def plot3d(ax, res: Result3D, prj, field="vm", scale=0.0, shrink_tris=12000, tag_max=True, part="all"):
+def plot3d(ax, res: Result3D, prj, field="vm", scale=0.0, shrink_tris=12000, tag_max=True, part="all", bolts=None):
     """Dibuja la piel del solido coloreada por el campo elegido.  `part`: all | plate | column | stiff | lug."""
     from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
@@ -327,6 +327,20 @@ def plot3d(ax, res: Result3D, prj, field="vm", scale=0.0, shrink_tris=12000, tag
         ax.text2D(0.02, 0.93, txt,
                   transform=ax.transAxes, fontsize=9, color="#7a1010", fontweight="bold",
                   va="top", bbox=dict(boxstyle="round,pad=0.35", fc="#fff3e0", ec="#d62728", lw=1.0))
+    if bolts and part == "plate":
+        # una etiqueta por anclaje (P# y traccion): el perno mas exigido va en rojo, igual que en la tabla
+        zt = float(Pm[:, 2].max()) + 0.02 * float(spans.max())
+        Tmax = max(b[3] for b in bolts)
+        for kb, bx, by, T in bolts:
+            hot = T >= Tmax - 1e-9 and Tmax > 1e-9
+            ax.text(bx / kl, by / kl, zt, f"P{kb}\n{u.fmt('F', T)}", ha="center", va="bottom", fontsize=8,
+                    fontweight="bold" if hot else "normal", color="white" if hot else "#08306b", zorder=30,
+                    bbox=dict(boxstyle="round,pad=0.25", fc="#d62728" if hot else "#ffffffd9",
+                              ec="#d62728" if hot else "#08306b", lw=0.9))
+            ax.scatter([bx / kl], [by / kl], [zt], s=14, color="#d62728" if hot else "#08306b",
+                       depthshade=False, zorder=29, clip_on=False)
+        ax.text2D(0.02, 0.04, f"Etiquetas: P# y traccion del perno ({u.F}); en rojo, el mas exigido",
+                  transform=ax.transAxes, fontsize=8, color="#444444", va="bottom")
     ax.set_axis_off()                     # sin ejes ni reglas
     ax.set_title(f"{title}  ({unit})" + (f" — {PART_LABELS[part]}" if part != "all" else "")
                  + (f"   —  deformada ×{scale:g}" if scale > 0 else ""),
