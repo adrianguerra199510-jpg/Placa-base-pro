@@ -594,7 +594,7 @@ def update_order(ax):
         coll.set_zorder(z)
 
 
-def plot_geometry(ax, prj, show_concrete=True):
+def plot_geometry(ax, prj, show_concrete=True, title=True):
     """Dibuja el conjunto de la conexion (solo geometria) en un eje 3D."""
     from mpl_toolkits.mplot3d.art3d import Poly3DCollection
     from matplotlib.colors import to_rgb
@@ -636,9 +636,10 @@ def plot_geometry(ax, prj, show_concrete=True):
     set_aspect(ax, tuple(float(v) + 2 * pad for v in spans), pts=P)
     ax.set_axis_off()                     # sin ejes ni reglas
     tl = prj.loads
-    ax.set_title("Geometria de la conexion"
-                 + (f"   —   columna inclinada  X {tl.tilt_x:g}°, Y {tl.tilt_y:g}°"
-                    if tl.tilted else ""), fontsize=9, loc="left")
+    if title:
+        ax.set_title("Geometria de la conexion"
+                     + (f"   —   columna inclinada  X {tl.tilt_x:g}°, Y {tl.tilt_y:g}°"
+                        if tl.tilted else ""), fontsize=9, loc="left")
 
 
 def render_result_png(res: Result3D, prj, field: str, path: str, scale: float = 0.0,

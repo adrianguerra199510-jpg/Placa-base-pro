@@ -630,7 +630,10 @@ class MainWindow(QMainWindow):
         l3.setContentsMargins(0, 0, 0, 0)
         sph = QSplitter(Qt.Horizontal)
         self.cv_3d = Canvas3D()
-        sph.addWidget(self.cv_3d)
+        gw = QWidget(); gl = QVBoxLayout(gw); gl.setContentsMargins(0, 0, 0, 0)
+        self.lbl_geom = QLabel("<b>Geometria de la conexion</b>")     # misma altura que "Planta"
+        gl.addWidget(self.lbl_geom); gl.addWidget(self.cv_3d)
+        sph.addWidget(gw)
         spv = QSplitter(Qt.Vertical)
         pw = QWidget(); pl = QVBoxLayout(pw); pl.setContentsMargins(0, 0, 0, 0)
         pl.addWidget(QLabel("<b>Planta</b>")); pl.addWidget(self.cv_plan)
@@ -1352,7 +1355,10 @@ class MainWindow(QMainWindow):
             elev = azim = None
         self.cv_3d.reset(cbar=False)
         try:
-            view3d.plot_geometry(self.cv_3d.ax, self.prj)
+            view3d.plot_geometry(self.cv_3d.ax, self.prj, title=False)
+            tl = self.prj.loads
+            self.lbl_geom.setText("<b>Geometria de la conexion</b>" + (
+                f"   —   columna inclinada  X {tl.tilt_x:g}°, Y {tl.tilt_y:g}°" if tl.tilted else ""))
         except Exception as e:
             # no deja la vista en blanco: muestra el error en el propio lienzo
             self.cv_3d.reset()
