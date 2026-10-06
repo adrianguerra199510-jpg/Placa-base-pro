@@ -19,7 +19,7 @@ Por defecto el 3D solido usa acero elasto-plastico perfecto (limite φ·Fy) **so
 los picos puntuales y la verificacion es la deformacion plastica equivalente (PEEQ) maxima de la placa ≤ 5 % (criterio de IDEA StatiCa). El von
 Mises promediado pasa a ser informativo. Con plasticidad solo en la placa el calculo cuesta ~+25 % (en todo el modelo seria ~4 veces).
 Tu caso del tubo (placa 300×300×20, A36): PEEQ = 0.02-0.09 % segun la malla, contra 0.0 % de IDEA. Se desactiva en Elementos finitos.
-Con barras U la condicion A de ACI es automatica (la casilla manual se oculta).
+Con barras U la condicion A de ACI (φ = 0.75) se aplica sola; la casilla manual se elimino. En el visor, el analisis elasto-plastico reporta solo el punto maximo, bajo la escala de colores.
 
 ## Barras U, cargas en el visor y elevacion (2.1)
 

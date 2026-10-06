@@ -594,12 +594,11 @@ class MainWindow(QMainWindow):
         f.num("ha (altura del elemento)", "conc.ha", 4, 400, uk="L", help="Altura del elemento de concreto medida desde la superficie donde apoya la placa. Interviene en el factor de espesor del arrancamiento en cortante.")
         f.num("λa (concreto liviano)", "conc.lam", 0.5, 1.0, 0.05, 2, help="Factor de concreto liviano de ACI. Use 1.00 para concreto de peso normal.")
         f.check("Concreto fisurado en servicio", "conc.cracked", help="Marque si el concreto estara fisurado en la zona del anclaje bajo cargas de servicio, que es la hipotesis por defecto de ACI. Sin fisurar, las resistencias del concreto aumentan.")
-        self.chk_condA = f.check("Refuerzo suplementario (condicion A)", "conc.cond_A", help="Condicion A de ACI Tabla 17.5.3: hay refuerzo suplementario que ata el cono de falla al elemento. Sube el factor de reduccion de 0.70 a 0.75.")
         f.check("Diseno sismico (ACI 17.10, factor 0.75)", "conc.seismic", help="Aplica el factor 0.75 a la resistencia del concreto de los anclajes. No verifica por usted el requisito de que el anclaje sea gobernado por la fluencia ductil del acero.")
         f.group("Refuerzo del arrancamiento (barras U)")
         f.check("Agregar barras U de refuerzo", "conc.u_on", help="Barras en forma de U invertida (herradura) que abrazan el grupo de pernos: un tramo horizontal cerca de la superficie y dos patas verticales a cada lado. Segun ACI 318-19 17.5.2 el refuerzo del anclaje puede sustituir la resistencia del concreto al arrancamiento en traccion y en cortante: la capacidad pasa a ser φ·(n° de patas)·Ab·fy con φ = 0.75, siempre que las patas esten desarrolladas a ambos lados del cono de falla. Se dibujan en la elevacion y en el 3D. El analisis 3D no las modela (solo el calculo cerrado).")
         f.combo("Diametro de la barra", "conc.u_size", list(REBAR.keys()), help="Numero de barra (ASTM A615). #4 = 1/2 in, #5 = 5/8 in, #6 = 3/4 in...")
-        f.int_("Cantidad de barras U", "conc.u_n", 1, 12, help="Cada barra U aporta 2 patas. Se reparten a lo largo de Y, dentro del grupo de pernos, y las patas quedan a 0.3·hef de los pernos extremos (maximo 0.5·hef, como exige ACI).")
+        f.int_("Cantidad de barras U", "conc.u_n", 1, 12, help="Cada barra U aporta 2 patas.  Se reparten a lo largo de Y, dentro del grupo de pernos, y las patas quedan a 0.3·hef de los pernos extremos (maximo 0.5·hef, como exige ACI).")
         f.num("fy de la barra", "conc.u_fy", 40, 100, uk="S", help="Esfuerzo de fluencia del refuerzo (Gr. 60 = 60 ksi).")
         f.num("Profundidad del tramo horizontal", "conc.u_depth", 0.5, 24, uk="L", help="Distancia desde la superficie del concreto hasta el tramo horizontal de la U (recubrimiento + barras).")
         f.num("Longitud de la pata (0 = automatica)", "conc.u_leg", 0, 200, uk="L", help="Largo de cada pata medido desde el tramo horizontal. 0 = automatica: la que desarrolla ld bajo la superficie de falla (el cono se cruza a hef − d/1.5). Si pone un valor, se verifica el desarrollo.")
@@ -1231,8 +1230,6 @@ class MainWindow(QMainWindow):
         self.timer.start(350)
 
     def _update_labels(self):
-        # con barras U de refuerzo la condicion A es automatica: la casilla manual deja de tener sentido
-        self.chk_condA.setVisible(not self.prj.conc.u_on)
         tilted = self.prj.loads.tilted
         self.chk_stiff.setEnabled(not tilted)
         self.chk_stiff.setToolTip("No disponible con la columna inclinada." if tilted else "")
@@ -1608,18 +1605,26 @@ class MainWindow(QMainWindow):
         if raw is not None and fem is not None:
             u = self.us
             vmx = getattr(raw, "vm_avg", None)
+            pk = getattr(fem, "peeq", None)
+            if pk is not None:
+                stress_txt = (f"<b>von Mises maximo</b> = {u.q('S', raw.vmmax)}  ·  "
+                              f"<b>deformacion plastica maxima en la placa</b> = {pk[0] * 100:.3f} % "
+                              f"(limite {self.prj.fea.plastic_limit:g} %)  ·  ")
+                tail = ""
+            else:
+                stress_txt = ((f"<b>von Mises promediado en la placa</b> (r = {u.q('L', vmx['radius'])}) = "
+                               f"{u.q('S', vmx['vm'])}  ·  " if vmx else "")
+                              + f"<b>von Mises pico puntual</b> = {u.q('S', raw.vmmax)} (depende de la malla)  ·  ")
+                tail = ("Los picos de von Mises en aristas vivas (borde de agujero, encuentro perfil-placa) son "
+                        "singularidades de malla: dependen del tamano de elemento y no deben leerse como esfuerzo real.")
             self.lbl_3d.setText(
                 f"<b>Combinacion {self.prj.combos[self.prj.combo_idx].name}:</b> "
                 f"<b>{raw.n_nodes:,} nodos</b> y {raw.n_elems:,} elementos.  "
-                f"<b>|U| max</b> = {u.q('L', raw.umax)}  ·  "
-                + (f"<b>von Mises promediado en la placa</b> (r = {u.q('L', vmx['radius'])}) = "
-                   f"{u.q('S', vmx['vm'])}  ·  " if vmx else "")
-                + f"<b>von Mises pico puntual</b> = {u.q('S', raw.vmmax)} (depende de la malla)  ·  "
+                f"<b>|U| max</b> = {u.q('L', raw.umax)}  ·  " + stress_txt
                 + (f"equilibrio: {fem.msg}<br>" if fem.msg else "<br>")
                 + f"Archivos en: {getattr(raw, 'folder', '')}<br>"
                 + (f"<span style='color:#595959'>Tamano de elemento: {u.q('L', fem.lc)}.</span><br>" if fem.lc else "")
-                + "Los picos de von Mises en aristas vivas (borde de agujero, encuentro perfil-placa) son "
-                "singularidades de malla: dependen del tamano de elemento y no deben leerse como esfuerzo real.")
+                + tail)
             self.tabs_out.setCurrentIndex(1)        # muestra el analisis FEM al terminar
         if self.calculated and len(self.pairs) > 1:
             self.statusBar().showMessage(f"Calculo completo; gobierna la combinacion "

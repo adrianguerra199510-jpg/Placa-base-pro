@@ -348,7 +348,8 @@ def plot3d(ax, res: Result3D, prj, field="vm", scale=0.0, shrink_tris=12000, tag
         mx, my_, mz = Pm[k]
         # el promediado se calculo sobre la placa: vale para el conjunto y para la placa
         avg = None
-        if field == "vm":
+        plastic = bool(getattr(res, "peeq", None))
+        if field == "vm" and not plastic:
             avg = (res.vm_avg if part in ("all", "plate") else res.part_avg.get(part))
         if avg:                               # maximo PROMEDIADO (converge con la malla)
             mx, my_, mz = avg["x"] / kl, avg["y"] / kl, avg["z"] / kl
@@ -366,9 +367,15 @@ def plot3d(ax, res: Result3D, prj, field="vm", scale=0.0, shrink_tris=12000, tag
         else:
             txt = (f"{lbl}" + (f" — {PART_LABELS[part]}" if part != "all" else "") + f" = {val[k]:.4g} {unit}"
                    + ("   (pico puntual: depende de la malla)" if field == "vm" else f"   (nodo {ids[k]})"))
-        ax.text2D(0.02, 0.12, txt,
-                  transform=ax.transAxes, fontsize=9, color="#7a1010", fontweight="bold",
-                  va="bottom", bbox=dict(boxstyle="round,pad=0.35", fc="#fff3e0", ec="#d62728", lw=1.0))
+        if plastic:
+            # acero elasto-plastico: el esfuerzo ya esta acotado, solo se reporta el punto maximo, bajo la escala
+            ax.figure.text(0.885, 0.15, f"{lbl.replace(' maximo', '')}\nmaximo\n{val[k]:.4g} {unit}", fontsize=9,
+                           color="#7a1010", fontweight="bold", ha="left", va="top",
+                           bbox=dict(boxstyle="round,pad=0.3", fc="#fff3e0", ec="#d62728", lw=1.0))
+        else:
+            ax.text2D(0.02, 0.12, txt,
+                      transform=ax.transAxes, fontsize=9, color="#7a1010", fontweight="bold",
+                      va="bottom", bbox=dict(boxstyle="round,pad=0.35", fc="#fff3e0", ec="#d62728", lw=1.0))
     if bolts and part == "plate":
         # una etiqueta por anclaje (P# y traccion): el perno mas exigido va en rojo, igual que en la tabla
         zt = float(Pm[:, 2].max()) + 0.02 * float(spans.max())
@@ -461,16 +468,17 @@ def load_arrows(prj, kl, ztop=None):
             arrow(tail, tip, C_V, f"{name} = {u.q('F', comp)}", tail)
     for comp, name, axis in ((L.Mux, "Mux", 0), (L.Muy, "Muy", 1)):
         if abs(comp) > 1e-9:
-            r_ = 0.62 * size
-            # arco de ~250° sobre la columna, en el plano perpendicular al eje del momento; el sentido
-            # es el de la regla de la mano derecha respecto al eje +X (Mux) o +Y (Muy)
-            th = np.radians(np.linspace(90.0 - 125.0, 90.0 + 125.0, 60))
-            if comp < 0:
+            # arco de ~160° por ENCIMA de la columna (en el plano perpendicular al eje del momento) con la punta
+            # al final; el sentido es el de la regla de la mano derecha respecto a +X (Mux) o +Y (Muy)
+            wcol = bh if axis == 0 else bw
+            r_ = max(0.9 * wcol, 0.45 * size)
+            th = np.radians(np.linspace(10.0, 170.0, 50))
+            if (axis == 0 and comp < 0) or (axis == 1 and comp > 0):
                 th = th[::-1]
-            if axis == 0:       # giro alrededor de +X: (y, z) = r(cos, sin)
+            if axis == 0:       # giro alrededor de +X, plano YZ: de +y a -y por arriba si Mux > 0
                 P_ = [T + np.array([0, r_ * np.cos(t), r_ * np.sin(t)]) for t in th]
-            else:               # giro alrededor de +Y: (z, x) = r(cos, sin)
-                P_ = [T + np.array([r_ * np.sin(t), 0, r_ * np.cos(t)]) for t in th]
+            else:               # giro alrededor de +Y, plano ZX: de -x a +x por arriba si Muy > 0
+                P_ = [T + np.array([r_ * np.cos(t), 0, r_ * np.sin(t)]) for t in th]
             P_ = [p / kl for p in P_]
             items.append(("arc", P_, C_M, f"{name} = {u.q('M', comp)}"))
             pts.extend(P_)
@@ -500,11 +508,11 @@ def _arrow3d(ax, tail, head, color, lw=4.2):
     if L < 1e-9:
         return
     u_ = d / L
-    hl = 0.25 * L                                   # largo de la cabeza
+    hl = 0.18 * L                                   # largo de la cabeza
     base = np.array(head) - u_ * hl
     ax.plot([tail[0], base[0]], [tail[1], base[1]], [tail[2], base[2]], color=color, lw=lw, zorder=40,
             solid_capstyle="butt", clip_on=False)
-    coll = Poly3DCollection(_cone(head, u_, hl, 0.55 * hl), facecolors=(*to_rgb(color), 1.0),
+    coll = Poly3DCollection(_cone(head, u_, hl, 0.42 * hl), facecolors=(*to_rgb(color), 1.0),
                             edgecolors=(*to_rgb(color), 1.0), linewidths=0.3, zorder=41)
     coll.set_clip_on(False)
     ax.add_collection3d(coll)
@@ -528,7 +536,7 @@ def draw_loads(ax, items):
             p_end, p_prev = np.array(P_[-1]), np.array(P_[-4])
             dirv = (p_end - p_prev) / max(np.linalg.norm(p_end - p_prev), 1e-12)
             rad = float(np.linalg.norm(np.array(P_[0]) - np.array(P_[len(P_) // 2]))) / 1.6
-            hl = 0.38 * rad
+            hl = 0.30 * rad
             coll = Poly3DCollection(_cone(p_end + dirv * hl, dirv, hl, 0.42 * hl), facecolors=(*to_rgb(color), 1.0),
                                     edgecolors=(*to_rgb(color), 1.0), linewidths=0.3, zorder=41)
             coll.set_clip_on(False)

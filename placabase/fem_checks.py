@@ -70,7 +70,7 @@ def fem_checks(prj: Project, br: Bearing, fem: Fem3D, rec=None) -> list:
     lim = float(getattr(prj.fea, "plastic_limit", 5.0))
     if pk is not None:
         out.append(Check("fem_peeq", "FEM 3D — deformacion plastica equivalente en la placa", pk[0] * 100.0, lim, "%",
-                         "criterio de IDEA StatiCa: ≤ 5 %",
+                         "deformacion plastica admisible",
                          f"acero elasto-plastico con limite φ·Fy = {u.q('S', 0.9 * Fy)}; maximo en "
                          f"({u.fmt('L', pk[1])}, {u.fmt('L', pk[2])}, z = {u.fmt('L', pk[3])}) {u.L}"))
     if va:

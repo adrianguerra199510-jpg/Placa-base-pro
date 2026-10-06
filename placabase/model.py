@@ -319,8 +319,8 @@ class Concrete:
 
     @property
     def cond_A_eff(self) -> bool:
-        """Condicion A (ACI T.17.5.3): refuerzo suplementario marcado a mano o barras U de refuerzo del anclaje."""
-        return bool(self.cond_A or self.u_on)
+        """Condicion A (ACI T.17.5.3): se activa sola cuando hay barras U de refuerzo del anclaje."""
+        return bool(self.u_on)
 
 
 @dataclass
