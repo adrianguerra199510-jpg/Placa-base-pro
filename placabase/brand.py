@@ -31,6 +31,7 @@ QTabBar::tab {{ padding: 5px 12px; }}
 QTabBar::tab:selected {{ border-bottom: 3px solid {ORANGE}; font-weight: bold; color: {DARK}; }}
 QGroupBox {{ font-weight: bold; color: {DARK}; }}
 QHeaderView::section {{ background: {GREY}; color: {DARK}; border: 0; border-bottom: 1px solid #c9ccc6; padding: 3px; }}
-QStatusBar {{ background: {DARK}; color: #e8eaed; }}
+QStatusBar {{ background: {GREY}; color: {DARK}; border-top: 1px solid #c9ccc6; }}
+QStatusBar::item {{ border: 0; }}
 QPushButton:hover {{ border-color: {ORANGE}; }}
 """
