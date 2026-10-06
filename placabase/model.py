@@ -13,6 +13,9 @@ WELD_MODELS = ["Conectores (cordon como resortes entre cuerpos separados)",
                "Fusionado (union monolitica, equivale a CJP)"]
 ENGINES = ["Solido 3D (tetraedros, recomendado)", "Placas (shell S6, experimental)"]
 FIXITY = ["Doble empotramiento (placa restringida)", "Voladizo (placa libre de girar)"]
+# barras de refuerzo ASTM A615 (diametro in, area in2)
+REBAR = {"#3": (0.375, 0.11), "#4": (0.500, 0.20), "#5": (0.625, 0.31), "#6": (0.750, 0.44),
+         "#7": (0.875, 0.60), "#8": (1.000, 0.79), "#9": (1.128, 1.00), "#10": (1.270, 1.27)}
 MESH3D_MODES = ["Automatica (recomendada)", "Fina (mas lenta)"]
 PATTERNS = ["Perimetral (4 lados)", "2 lados (eje mayor)",
             "2 lados (eje menor)", "Circular", "Coordenadas manuales"]
@@ -306,6 +309,13 @@ class Concrete:
     lam: float = 1.0             # lambda_a
     cond_A: bool = False         # refuerzo suplementario (ACI T.17.5.3)
     seismic: bool = False        # aplica 0.75 de ACI 17.10
+    # barras U que refuerzan el arrancamiento (ACI 17.5.2): se usan en lugar del concreto si resisten mas
+    u_on: bool = False
+    u_size: str = "#4"
+    u_n: int = 2                 # numero de barras U (cada una aporta 2 patas)
+    u_fy: float = 60.0           # ksi
+    u_depth: float = 2.0         # profundidad del tramo horizontal bajo la superficie, in
+    u_leg: float = 0.0           # longitud de la pata, in (0 = automatica: la que desarrolla ld bajo el cono)
 
 
 @dataclass

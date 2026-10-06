@@ -288,6 +288,30 @@ if "blt_m" not in {c.key for c in solve(Project()).checks}:
 print(f"{'flexion del perno (stand-off 2 in)':34} M/φMn = {_k['blt_m'].ratio:.3f}   voladizo = {_kc['blt_m'].ratio:.3f}")
 
 
+# ---------------------------------------------------- barras U y visualizacion de cargas
+from placabase.ubar import ubar
+_u0 = Project(); _u0.combos = [LoadCombo("T", -300, 0, 0, 30, 0)]; _u0.apply_combo(0)
+_u1 = Project.from_json(_u0.to_json()); _u1.conc.u_on = True; _u1.conc.u_n = 2; _u1.conc.u_size = "#5"
+_k0 = {c.key: c for c in solve(_u0).checks}; _k1 = {c.key: c for c in solve(_u1).checks}
+if not (ubar(_u0) is None and ubar(_u1) is not None):
+    FAIL.append("barras U: ubar() debe existir solo si se activan")
+if not (_k1["aci_ncb"].capacity > _k0["aci_ncb"].capacity and _k1["aci_vcb"].capacity > _k0["aci_vcb"].capacity):
+    FAIL.append("barras U: el refuerzo debe aumentar la capacidad del arrancamiento")
+if "aci_ubar_dev" not in _k1 or "aci_ubar_dev" in _k0:
+    FAIL.append("barras U: fila de desarrollo de las patas")
+_ub = ubar(_u1)
+if abs(_ub["Nrs"] - 4 * 0.31 * 60.0) > 1e-6 or _ub["below"] < _ub["ld"] - 1e-6:
+    FAIL.append("barras U: resistencia o desarrollo automatico incorrectos")
+_u2 = Project.from_json(_u1.to_json()); _u2.conc.u_leg = 5.0
+if _k1["aci_ubar_dev"].ratio > 1.0 or solve(_u2).checks[[c.key for c in solve(_u2).checks].index("aci_ubar_dev")].ratio <= 1.0:
+    FAIL.append("barras U: una pata corta debe fallar el desarrollo")
+print(f"{'barras U (2 U #5, Ncb tracc.)':34} capacidad {_k0['aci_ncb'].capacity:.1f} -> {_k1['aci_ncb'].capacity:.1f} kip   ld = {_ub['ld']:.1f} in")
+from placabase import view3d as _v3
+_its, _pts = _v3.load_arrows(_u0, 1.0)
+if len(_its) != 2 or not _pts:
+    FAIL.append("cargas 3D: se esperaban flechas de Pu y Vux")
+
+
 if "--3d" in sys.argv:
     # prueba de extremo a extremo con Gmsh + CalculiX (~30 s con la malla rapida)
     import tempfile

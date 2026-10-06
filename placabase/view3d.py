@@ -225,7 +225,7 @@ def _soft_cmap(diverging=False):
     return LinearSegmentedColormap.from_list("pb_suave", cols, N=256)
 
 
-def plot3d(ax, res: Result3D, prj, field="vm", scale=0.0, shrink_tris=12000, tag_max=True, part="all", bolts=None):
+def plot3d(ax, res: Result3D, prj, field="vm", scale=0.0, shrink_tris=12000, tag_max=True, part="all", bolts=None, loads=False):
     """Dibuja la piel del solido coloreada por el campo elegido.  `part`: all | plate | column | stiff | lug."""
     from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
@@ -288,7 +288,13 @@ def plot3d(ax, res: Result3D, prj, field="vm", scale=0.0, shrink_tris=12000, tag
     ax.add_collection3d(coll)
 
     Pm = P / kl
-    mins, maxs = Pm.min(axis=0), Pm.max(axis=0)
+    load_items = []
+    if loads:
+        load_items, lpts = load_arrows(prj, kl, ztop=max(c_[2] for c_ in res.nodes.values()))
+        Pe = np.vstack([Pm, np.array(lpts)])
+    else:
+        Pe = Pm
+    mins, maxs = Pe.min(axis=0), Pe.max(axis=0)
     # proporciones reales y margen minimo: el modelo llena el lienzo y queda
     # centrado; la rueda del mouse hace zoom sobre el centro
     spans = np.maximum(maxs - mins, 1e-6)
@@ -296,7 +302,9 @@ def plot3d(ax, res: Result3D, prj, field="vm", scale=0.0, shrink_tris=12000, tag
     ax.set_xlim(mins[0] - pad, maxs[0] + pad)
     ax.set_ylim(mins[1] - pad, maxs[1] + pad)
     ax.set_zlim(mins[2] - pad, maxs[2] + pad)
-    set_aspect(ax, tuple(float(v) + 2 * pad for v in spans), pts=Pm)
+    set_aspect(ax, tuple(float(v) + 2 * pad for v in spans), pts=Pe)
+    if load_items:
+        draw_loads(ax, load_items)
     if tag_max and len(val):
         try:
             ax.computed_zorder = False
@@ -324,9 +332,9 @@ def plot3d(ax, res: Result3D, prj, field="vm", scale=0.0, shrink_tris=12000, tag
         else:
             txt = (f"{lbl}" + (f" — {PART_LABELS[part]}" if part != "all" else "") + f" = {val[k]:.4g} {unit}"
                    + ("   (pico puntual: depende de la malla)" if field == "vm" else f"   (nodo {ids[k]})"))
-        ax.text2D(0.02, 0.93, txt,
+        ax.text2D(0.02, 0.12, txt,
                   transform=ax.transAxes, fontsize=9, color="#7a1010", fontweight="bold",
-                  va="top", bbox=dict(boxstyle="round,pad=0.35", fc="#fff3e0", ec="#d62728", lw=1.0))
+                  va="bottom", bbox=dict(boxstyle="round,pad=0.35", fc="#fff3e0", ec="#d62728", lw=1.0))
     if bolts and part == "plate":
         # una etiqueta por anclaje (P# y traccion): el perno mas exigido va en rojo, igual que en la tabla
         zt = float(Pm[:, 2].max()) + 0.02 * float(spans.max())
@@ -350,6 +358,106 @@ def plot3d(ax, res: Result3D, prj, field="vm", scale=0.0, shrink_tris=12000, tag
 
 
 # ============================================================ solo geometria
+def _bar_faces(p0, p1, r):
+    """Prisma de seccion cuadrada (lado 2r) a lo largo del segmento p0-p1: caras como cuadrilateros."""
+    a, b = np.array(p0, float), np.array(p1, float)
+    ax_ = b - a
+    n = np.linalg.norm(ax_)
+    if n < 1e-9:
+        return []
+    ax_ = ax_ / n
+    ref = np.array([0.0, 0.0, 1.0]) if abs(ax_[2]) < 0.9 else np.array([1.0, 0.0, 0.0])
+    u_ = np.cross(ax_, ref); u_ /= np.linalg.norm(u_)
+    w_ = np.cross(ax_, u_)
+    ring = [(u_ * sx + w_ * sy) * r for sx, sy in ((1, 1), (-1, 1), (-1, -1), (1, -1))]
+    pa = [tuple(a + q) for q in ring]
+    pb = [tuple(b + q) for q in ring]
+    f = [[pa[i], pa[(i + 1) % 4], pb[(i + 1) % 4], pb[i]] for i in range(4)]
+    f += [pa, pb]
+    return f
+
+
+# ======================================================================== cargas
+C_PU, C_V, C_M = "#c0392b", "#1d4ed8", "#7c3aed"
+
+
+def load_arrows(prj, kl, ztop=None):
+    """Flechas de las cargas de la combinacion activa, en el sistema de la placa (ejes de la columna si no esta inclinada).
+    -> (lista de elementos a dibujar, puntos para el encuadre).  Coordenadas ya divididas por kl."""
+    from . import geometry as G
+    L = prj.eloads
+    u = prj.units()
+    s = prj.section.shape()
+    N, B = (prj.plate.Dp, prj.plate.Dp) if prj.plate.shape == "Circular" else (prj.plate.N, prj.plate.B)
+    size = 1.0 * max(N, B)
+    H = max(3.0 * s.d, 12.0)
+    R = _rot_matrix(prj.loads.tilt_x, prj.loads.tilt_y)
+    T = np.array(R @ np.array([0.0, 0.0, H])) + np.array([0.0, 0.0, prj.plate.tp])
+    if ztop is not None:                          # en los resultados el perfil tiene la altura del modelo
+        T = np.array([0.0, 0.0, float(ztop)])
+    items, pts = [], []
+
+    def arrow(tail, head, color, label):
+        items.append(("arrow", np.array(tail) / kl, np.array(head) / kl, color, label))
+        pts.extend([np.array(tail) / kl, np.array(head) / kl])
+
+    F = [abs(L.Pu), abs(L.Vux), abs(L.Vuy)]
+    fmax = max(F) if max(F) > 1e-9 else 1.0
+
+    def ln(v):                                   # largo proporcional, con un minimo legible
+        return size * (0.35 + 0.65 * abs(v) / fmax)
+
+    if abs(L.Pu) > 1e-9:
+        l_ = ln(L.Pu)
+        if L.Pu > 0:                              # compresion: la flecha empuja hacia abajo sobre la columna
+            arrow(T + np.array([0, 0, l_]), T, C_PU, f"Pu = {u.q('F', L.Pu)} (compresion)")
+        else:                                     # traccion: tira hacia arriba
+            arrow(T, T + np.array([0, 0, l_]), C_PU, f"Pu = {u.q('F', abs(L.Pu))} (traccion)")
+    for comp, name, vec in ((L.Vux, "Vux", np.array([1.0, 0, 0])), (L.Vuy, "Vuy", np.array([0, 1.0, 0]))):
+        if abs(comp) > 1e-9:
+            l_ = ln(comp) * np.sign(comp)
+            arrow(T - vec * l_, T, C_V, f"{name} = {u.q('F', comp)}")
+    for comp, name, axis in ((L.Mux, "Mux", 0), (L.Muy, "Muy", 1)):
+        if abs(comp) > 1e-9:
+            r_ = 0.42 * size
+            th = np.linspace(-0.85, 0.85, 28)
+            if comp < 0:
+                th = th[::-1]
+            if axis == 0:       # giro alrededor de +X: (y, z) = r(cos, sin)
+                P_ = [T + np.array([0, r_ * np.cos(t), r_ * np.sin(t)]) for t in th]
+            else:               # giro alrededor de +Y: (z, x) = r(cos, sin)
+                P_ = [T + np.array([r_ * np.sin(t), 0, r_ * np.cos(t)]) for t in th]
+            items.append(("arc", [p / kl for p in P_], C_M, f"{name} = {u.q('M', comp)}"))
+            pts.extend([p / kl for p in P_])
+    return items, pts
+
+
+def draw_loads(ax, items):
+    """Dibuja las flechas de load_arrows en un eje 3D."""
+    for it in items:
+        if it[0] == "arrow":
+            _, a, b, color, label = it
+            d = b - a
+            ax.plot([a[0], b[0]], [a[1], b[1]], [a[2], b[2]], color=color, lw=2.6, zorder=40,
+                    solid_capstyle="round", clip_on=False)
+            ax.quiver(a[0], a[1], a[2], d[0], d[1], d[2], color=color, arrow_length_ratio=0.16, linewidth=2.6,
+                      zorder=40)
+            mid = a if np.linalg.norm(b - a) < 1e-12 else a + 0.5 * d
+            # etiqueta en el extremo lejano al punto de aplicacion (tail si empuja, head si tira)
+            far = a if abs(b[2] - a[2]) < 1e-9 or d[2] < 0 else b
+            ax.text(*far, label, fontsize=8, color=color, fontweight="bold", zorder=41,
+                    ha="right" if d[0] > 0 else "left", va="bottom")
+        else:
+            _, P_, color, label = it
+            xs, ys, zs = zip(*[tuple(p) for p in P_])
+            ax.plot(xs, ys, zs, color=color, lw=2.4, zorder=40, clip_on=False)
+            d = np.array(P_[-1]) - np.array(P_[-3])
+            ax.quiver(P_[-3][0], P_[-3][1], P_[-3][2], d[0], d[1], d[2], color=color, arrow_length_ratio=0.9,
+                      linewidth=2.4, zorder=40)
+            ax.text(*P_[-1], label, fontsize=8, color=color, fontweight="bold", zorder=41,
+                    ha="left" if "Mux" in label else "right", va="top" if "Mux" in label else "bottom")
+
+
 def _clean_poly(poly):
     pts = list(poly)
     if len(pts) > 1 and abs(pts[0][0] - pts[-1][0]) < 1e-9 and abs(pts[0][1] - pts[-1][1]) < 1e-9:
@@ -567,10 +675,25 @@ def geometry_faces(prj):
             faces += _prism(poly, -lug.H, 0.0)
         parts.append(("below", faces, "#e15759", 1.0))
 
+    # ---- barras U de refuerzo del arrancamiento
+    from .ubar import ubar
+    ub = ubar(prj)
+    if ub is not None:
+        faces = []
+        r = ub["db"] / 2.0
+        for yy in ub["yu"]:
+            z0 = -ub["depth"]
+            pts = [(ub["xl"], yy, z0 - ub["leg"]), (ub["xl"], yy, z0), (ub["xr"], yy, z0), (ub["xr"], yy, z0 - ub["leg"])]
+            for a_, b_ in zip(pts[:-1], pts[1:]):
+                faces += _bar_faces(a_, b_, r)
+        parts.append(("below", faces, "#1b7f3b", 1.0))
+
     # ---- pedestal de concreto (transparente)
     c = prj.conc
     ped = [(-c.B2 / 2, -c.N2 / 2), (c.B2 / 2, -c.N2 / 2), (c.B2 / 2, c.N2 / 2), (-c.B2 / 2, c.N2 / 2)]
     zc = -min(c.ha, max(b.hef * 1.15, 12.0))
+    if ub is not None:
+        zc = min(zc, -(ub["depth"] + ub["leg"]) - 1.0)
     conc = _prism(ped, zc, 0.0, cap=False)                 # caras laterales
     conc.append([(x, y, zc) for x, y in ped])              # fondo (sin tapa: apoya la placa)
     parts.append(("conc", conc, "#a9b4bd", 0.16))          # UNICO elemento translucido
@@ -594,7 +717,7 @@ def update_order(ax):
         coll.set_zorder(z)
 
 
-def plot_geometry(ax, prj, show_concrete=True, title=True):
+def plot_geometry(ax, prj, show_concrete=True, title=True, loads=False):
     """Dibuja el conjunto de la conexion (solo geometria) en un eje 3D."""
     from mpl_toolkits.mplot3d.art3d import Poly3DCollection
     from matplotlib.colors import to_rgb
@@ -625,6 +748,10 @@ def plot_geometry(ax, prj, show_concrete=True, title=True):
         groups.append((grp, coll))
     ax._pb_groups = groups
     update_order(ax)
+    load_items = []
+    if loads:
+        load_items, lpts = load_arrows(prj, kl)
+        allp += [tuple(p) for p in lpts]
 
     P = np.array(allp, dtype=float)
     mins, maxs = P.min(axis=0), P.max(axis=0)
@@ -635,6 +762,8 @@ def plot_geometry(ax, prj, show_concrete=True, title=True):
     ax.set_zlim(mins[2] - pad, maxs[2] + pad)
     set_aspect(ax, tuple(float(v) + 2 * pad for v in spans), pts=P)
     ax.set_axis_off()                     # sin ejes ni reglas
+    if load_items:
+        draw_loads(ax, load_items)
     tl = prj.loads
     if title:
         ax.set_title("Geometria de la conexion"

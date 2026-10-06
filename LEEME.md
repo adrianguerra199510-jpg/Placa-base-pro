@@ -13,6 +13,17 @@ kN / N / tonf / kgf, momento y esfuerzo por separado. Se aplican a las entradas,
 tabla de resultados y a los reportes. El cálculo interno siempre corre en in-kip-ksi,
 que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
 
+## Barras U, cargas en el visor y elevacion (2.1)
+
+- **Barras U de refuerzo del arrancamiento** (pestaña Concreto): diametro de barra (#3 a #10), cantidad de U (cada una aporta 2 patas),
+  fy, profundidad del tramo horizontal y largo de pata (0 = automatico). Capacidad del refuerzo = φ·n_patas·Ab·fy con φ = 0.75
+  (ACI 17.5.2.1 / 17.7.2.5); sustituye al concreto en traccion y cortante si resiste mas. Se verifica ademas el desarrollo de la pata
+  bajo el cono de falla (ld, ACI 25.4.2.3; el cono se cruza a hef − d/1.5) y el gancho sobre el cono (ldh, ACI 25.4.3). Se dibujan en la
+  elevacion (con la cota Ld) y en el 3D. El analisis 3D de elementos finitos no modela las barras.
+- **Cargas en el visor 3D:** casilla "Mostrar cargas" en Modelo y vistas y en Analisis FEM: Pu (rojo), Vux/Vuy (azul) y Mux/Muy (violeta)
+  de la combinacion activa, con su valor.
+- **Elevacion:** el mortero se dibuja sobre el concreto y el stand-off como tuerca de nivelacion.
+
 ## Identidad visual (2.1)
 
 Icono propio del programa y del .exe (`placabase/data/placabasepro.ico`), logo en la ventana, pantalla de inicio, "Acerca de" y el encabezado de las memorias PDF y Word; barra con acento naranja y boton CALCULAR de marca. Los recursos estan en `placabase/data/` y los colores en `placabase/brand.py`.

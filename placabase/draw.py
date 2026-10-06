@@ -117,7 +117,12 @@ def elevation_view(ax, prj: Project):
     # de arriba hacia abajo: placa, separacion libre (stand-off), mortero y, debajo, el elemento de concreto
     so = max(0.0, getattr(b, "standoff", 0.0)) / k
     zc = -(gr + so)                       # cara superior del concreto (hef se mide desde aqui)
-    ax.add_patch(Rectangle((-B2 / 2, zc - hef - 6 * m), B2, hef + 6 * m,
+    from .ubar import ubar
+    ub = ubar(prj)
+    hc = hef + 6 * m
+    if ub is not None:                    # el bloque debe contener las patas de las U
+        hc = max(hc, (ub["depth"] + ub["leg"]) / k + 3 * m)
+    ax.add_patch(Rectangle((-B2 / 2, zc - hc), B2, hc,
                            facecolor="#e8e8e8", edgecolor="#999999", lw=1.0, zorder=1))
     if gr > 0:
         ax.add_patch(Rectangle((-Bx / 2, zc), Bx, gr,
@@ -168,14 +173,28 @@ def elevation_view(ax, prj: Project):
             ax.plot(x + eh / 2 + eh / 2 * np.cos(th), zc - hef + eh / 2 + eh / 2 * np.sin(th),
                     color="#333333", lw=2.0, zorder=7)
 
+    if ub is not None:
+        xl, xr = ub["xl"] / k, ub["xr"] / k
+        zt = zc - ub["depth"] / k
+        zb = zt - ub["leg"] / k
+        ax.plot([xl, xl, xr, xr], [zb, zt, zt, zb], color="#1b7f3b", lw=2.4, zorder=6,
+                solid_joinstyle="round")
+        ax.plot([xl, xr], [zb, zb], ls="none", marker="s", ms=3, color="#1b7f3b", zorder=6)
+        xd = xl - 1.2 * m
+        ax.annotate("", xy=(xd, zt), xytext=(xd, zb),
+                    arrowprops=dict(arrowstyle="<->", color="#1b7f3b", lw=0.9))
+        ax.text(xd - 0.6 * m, (zt + zb) / 2, f"Ld = {u.q('L', ub['leg'])}", fontsize=8, color="#1b7f3b",
+                rotation=90, va="center", ha="right")
+        ax.text(0.0, zt - 1.0 * m, f"{ub['n']} U {ub['size']}", fontsize=8, color="#1b7f3b",
+                ha="center", va="top")
     ax.annotate("", xy=(Bx / 2 + 2 * m, zc), xytext=(Bx / 2 + 2 * m, zc - hef),
                 arrowprops=dict(arrowstyle="<->", color=C_DIM, lw=0.9))
     ax.text(Bx / 2 + 2.6 * m, zc - hef / 2, f"hef = {u.q('L', b.hef)}", fontsize=8,
             color=C_DIM, rotation=90, va="center")
 
     ax.set_aspect("equal", adjustable="datalim")
-    ax.set_xlim(-B2 / 2 - 2 * m, B2 / 2 + 8 * m)
-    ax.set_ylim(zc - hef - 8 * m, tp + bh + 2 * m)
+    ax.set_xlim(-B2 / 2 - 2 * m - (6 * m if ub is not None else 0), B2 / 2 + 8 * m)
+    ax.set_ylim(zc - hc - 2 * m, tp + bh + 2 * m)
     ax.set_xlabel(f"X  ({u.L})")
     ax.set_ylabel(f"Z  ({u.L})")
     ax.set_title("ELEVACION (esquematica)", fontsize=9, loc="left")

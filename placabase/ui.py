@@ -27,7 +27,7 @@ from .model import (Project, PATTERNS, ANCHOR_TYPES, WELD_TYPES, PLATE_SHAPES,
                     LUG_DIRS, STIFF_POSITIONS, STIFF_SHAPES, STIFF_SPACING)
 from . import materials as M
 from .shapes import CATALOG, W_SHAPE, HSS_RECT, HSS_ROUND, PIPE, KIND_LABELS
-from .model import LUG_TYPES, save_book, load_book, MESH3D_MODES, WELD_MODELS, ENGINES, FIXITY, LoadCombo
+from .model import LUG_TYPES, save_book, load_book, MESH3D_MODES, WELD_MODELS, ENGINES, FIXITY, LoadCombo, REBAR
 from .dialogs import SectionDialog, MaterialsDialog
 from PySide6.QtWidgets import QListWidget, QInputDialog
 from .solver import solve
@@ -596,6 +596,14 @@ class MainWindow(QMainWindow):
         f.check("Concreto fisurado en servicio", "conc.cracked", help="Marque si el concreto estara fisurado en la zona del anclaje bajo cargas de servicio, que es la hipotesis por defecto de ACI. Sin fisurar, las resistencias del concreto aumentan.")
         f.check("Refuerzo suplementario (condicion A)", "conc.cond_A", help="Condicion A de ACI Tabla 17.5.3: hay refuerzo suplementario que ata el cono de falla al elemento. Sube el factor de reduccion de 0.70 a 0.75.")
         f.check("Diseno sismico (ACI 17.10, factor 0.75)", "conc.seismic", help="Aplica el factor 0.75 a la resistencia del concreto de los anclajes. No verifica por usted el requisito de que el anclaje sea gobernado por la fluencia ductil del acero.")
+        f.group("Refuerzo del arrancamiento (barras U)")
+        f.check("Agregar barras U de refuerzo", "conc.u_on", help="Barras en forma de U invertida (herradura) que abrazan el grupo de pernos: un tramo horizontal cerca de la superficie y dos patas verticales a cada lado. Segun ACI 318-19 17.5.2 el refuerzo del anclaje puede sustituir la resistencia del concreto al arrancamiento en traccion y en cortante: la capacidad pasa a ser φ·(n° de patas)·Ab·fy con φ = 0.75, siempre que las patas esten desarrolladas a ambos lados del cono de falla. Se dibujan en la elevacion y en el 3D. El analisis 3D no las modela (solo el calculo cerrado).")
+        f.combo("Diametro de la barra", "conc.u_size", list(REBAR.keys()), help="Numero de barra (ASTM A615). #4 = 1/2 in, #5 = 5/8 in, #6 = 3/4 in...")
+        f.int_("Cantidad de barras U", "conc.u_n", 1, 12, help="Cada barra U aporta 2 patas. Se reparten a lo largo de Y, dentro del grupo de pernos, y las patas quedan a 0.3·hef de los pernos extremos (maximo 0.5·hef, como exige ACI).")
+        f.num("fy de la barra", "conc.u_fy", 40, 100, uk="S", help="Esfuerzo de fluencia del refuerzo (Gr. 60 = 60 ksi).")
+        f.num("Profundidad del tramo horizontal", "conc.u_depth", 0.5, 24, uk="L", help="Distancia desde la superficie del concreto hasta el tramo horizontal de la U (recubrimiento + barras).")
+        f.num("Longitud de la pata (0 = automatica)", "conc.u_leg", 0, 200, uk="L", help="Largo de cada pata medido desde el tramo horizontal. 0 = automatica: la que desarrolla ld bajo la superficie de falla (el cono se cruza a hef − d/1.5). Si pone un valor, se verifica el desarrollo.")
+        f.note("Verifica: capacidad del refuerzo en traccion y cortante (ACI 17.5.2.1, φ = 0.75), desarrollo de la pata bajo el cono (ld, ACI 25.4.2.3) y gancho sobre el cono (ldh, ACI 25.4.3). El refuerzo sustituye al concreto solo si resiste mas que el.")
         f.finish()
 
         # ---- FEM 3D y modelo de apoyo
@@ -631,8 +639,16 @@ class MainWindow(QMainWindow):
         sph = QSplitter(Qt.Horizontal)
         self.cv_3d = Canvas3D()
         gw = QWidget(); gl = QVBoxLayout(gw); gl.setContentsMargins(0, 0, 0, 0)
+        gh = QHBoxLayout()
         self.lbl_geom = QLabel("<b>Geometria de la conexion</b>")     # misma altura que "Planta"
-        gl.addWidget(self.lbl_geom); gl.addWidget(self.cv_3d)
+        gh.addWidget(self.lbl_geom)
+        gh.addStretch(1)
+        self.chk_loads_geom = QCheckBox("Mostrar cargas")
+        self.chk_loads_geom.setChecked(True)
+        self.chk_loads_geom.setToolTip("Flechas de la combinacion activa: Pu (rojo), cortantes (azul) y momentos (violeta).")
+        self.chk_loads_geom.toggled.connect(self.draw_geom)
+        gh.addWidget(self.chk_loads_geom)
+        gl.addLayout(gh); gl.addWidget(self.cv_3d)
         sph.addWidget(gw)
         spv = QSplitter(Qt.Vertical)
         pw = QWidget(); pl = QVBoxLayout(pw); pl.setContentsMargins(0, 0, 0, 0)
@@ -687,6 +703,10 @@ class MainWindow(QMainWindow):
                               "los desplazamientos para poder verlos.")
         self.sp_sc.valueChanged.connect(self.draw_3d)
         t3.addWidget(self.sp_sc)
+        self.chk_loads_fem = QCheckBox("Mostrar cargas")
+        self.chk_loads_fem.setChecked(False)
+        self.chk_loads_fem.toggled.connect(self.draw_3d)
+        t3.addWidget(self.chk_loads_fem)
         t3.addStretch(1)
         lr3.addLayout(t3)
         sp3 = QSplitter(Qt.Vertical)
@@ -1355,7 +1375,7 @@ class MainWindow(QMainWindow):
             elev = azim = None
         self.cv_3d.reset(cbar=False)
         try:
-            view3d.plot_geometry(self.cv_3d.ax, self.prj, title=False)
+            view3d.plot_geometry(self.cv_3d.ax, self.prj, title=False, loads=self.chk_loads_geom.isChecked())
             tl = self.prj.loads
             self.lbl_geom.setText("<b>Geometria de la conexion</b>" + (
                 f"   —   columna inclinada  X {tl.tilt_x:g}°, Y {tl.tilt_y:g}°" if tl.tilted else ""))
@@ -1398,7 +1418,7 @@ class MainWindow(QMainWindow):
         fld = ["vm", "u", "uz"][self.cb_f3.currentIndex()]
         m = view3d.plot3d(self.cv_res3d.ax, raw, self.prj, fld,
                           float(self.sp_sc.value()), part=self.PARTS[self.cb_part.currentIndex()][0],
-                          bolts=self._bolt_loads())
+                          bolts=self._bolt_loads(), loads=self.chk_loads_fem.isChecked())
         if m is not None:
             cax = self.cv_res3d.fig.add_axes([0.90, 0.18, 0.018, 0.64])
             self.cv_res3d.fig.colorbar(m, cax=cax)

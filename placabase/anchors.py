@@ -12,6 +12,7 @@ from . import geometry as G
 from . import materials as MAT
 from .explain import Recorder
 from .design import Check, Bearing
+from .ubar import ubar
 
 
 def _sqrt_fc_psi(fc_ksi: float) -> float:
@@ -294,8 +295,28 @@ def anchor_checks(prj: Project, br: Bearing,
                   phi_ct * k_seis * Ncbg, "F",
                   Nua / (phi_ct * k_seis * Ncbg) if Ncbg > 0 else 0,
                   Nua <= phi_ct * k_seis * Ncbg, "ACI 17.6.2")
-    out.append(Check("aci_ncb", "Anclaje — arrancamiento del concreto en traccion",
-                     Nua, phi_ct * k_seis * Ncbg, "kip", "ACI 318-19 17.6.2",
+        _ub = ubar(prj)
+        if _ub is not None:
+            rec.section("E2. REFUERZO DEL ARRANCAMIENTO CON BARRAS U  (ACI 318-19 17.5.2)")
+            rec.add("barras U", f"{_ub['n']} U de {_ub['size']} (db = {_ub['db']:.3f} in, Ab = {_ub['Ab']:.2f} in²)",
+                    f"{_ub['n_legs']} patas, fy = {rec.n('S', _ub['fy'])}", None, "-")
+            rec.add("Nrs", "n_patas · Ab · fy", f"{_ub['n_legs']}·{_ub['Ab']:.2f}·{rec.n('S', _ub['fy'])}",
+                    _ub["Nrs"], "F", "ACI 17.5.2.1")
+            rec.check("Refuerzo U en traccion (φ = 0.75)", Nua, _ub["phi"] * _ub["Nrs"], "F",
+                      Nua / (_ub["phi"] * _ub["Nrs"]), Nua <= _ub["phi"] * _ub["Nrs"], "ACI 17.5.2.1")
+            rec.add("ld (pata recta)", "fy·ψt·ψe/(25 λ √f'c)·db  (20 si db > #6; min 12 in)", "", _ub["ld"], "L",
+                    "ACI 25.4.2.3")
+            rec.add("ldh (gancho)", "fy/(50 λ √f'c)·db  (min 8db, 6 in)", "", _ub["ldh"], "L", "ACI 25.4.3")
+            rec.add("pata", f"sobre el cono {rec.n('L', _ub['above'])} / bajo el cono {rec.n('L', _ub['below'])}",
+                    f"long. total = {rec.n('L', _ub['leg'])}", _ub["leg"], "L", "",
+                    "el cono de falla se cruza a z = hef − d/1.5 bajo la superficie")
+    ub = ubar(prj)
+    cap_ncb = phi_ct * k_seis * Ncbg
+    if ub is not None:
+        cap_ncb = max(cap_ncb, ub["phi"] * ub["Nrs"])          # ACI 17.5.2.1: el refuerzo sustituye al concreto
+    out.append(Check("aci_ncb", "Anclaje — arrancamiento del concreto en traccion"
+                     + (" (con refuerzo U)" if ub is not None else ""),
+                     Nua, cap_ncb, "kip", "ACI 318-19 17.6.2" + (" / 17.5.2.1" if ub is not None else ""),
                      f"hef = {u.q('L', hef)}, ANc/ANco = {ANc/ANco:.2f}, ψed = {psi_ed:.2f}, "
                      f"ψc = {psi_c:.2f}, " + (f"ψcp = {psi_cp:.2f}, kc = 17, " if adh else "")
                      + f"Nb = {u.q('F', Nb)}"))
@@ -492,8 +513,12 @@ def anchor_checks(prj: Project, br: Bearing,
                   phi_c * k_seis * Vcbg, "F",
                   Vua / (phi_c * k_seis * Vcbg) if Vcbg > 0 else 0,
                   Vua <= phi_c * k_seis * Vcbg, "ACI 17.7.2")
-    out.append(Check("aci_vcb", "Anclaje — arrancamiento del concreto en cortante",
-                     Vua, phi_c * k_seis * Vcbg, "kip", "ACI 318-19 17.7.2",
+    cap_vcb = phi_c * k_seis * Vcbg
+    if ub is not None:
+        cap_vcb = max(cap_vcb, ub["phi"] * ub["Nrs"])           # ACI 17.7.2.5: refuerzo de anclaje en cortante
+    out.append(Check("aci_vcb", "Anclaje — arrancamiento del concreto en cortante"
+                     + (" (con refuerzo U)" if ub is not None else ""),
+                     Vua, cap_vcb, "kip", "ACI 318-19 17.7.2" + (" / 17.7.2.5" if ub is not None else ""),
                      ("Cortante tomado por la llave de corte." if prj.lug.enabled else
                       f"ca1 = {u.q('L', ca1)}, Avc/Avco = {Avc/Avco:.2f}, ψed,V = {psi_edV:.2f}")))
 
@@ -513,6 +538,17 @@ def anchor_checks(prj: Project, br: Bearing,
         rec.check("Pryout", Vua, phi_c * k_seis * Vcpg, "F",
                   Vua / (phi_c * k_seis * Vcpg) if Vcpg > 0 else 0,
                   Vua <= phi_c * k_seis * Vcpg, "ACI 17.7.3")
+
+    if ub is not None:
+        short = ub["below"] < ub["ld"] - 1e-6
+        out.append(Check("aci_ubar_dev", "Refuerzo U — desarrollo de las patas bajo el cono de falla",
+                         ub["ld"], max(ub["below"], 0.0), "in", "ACI 318-19 17.5.2.1 / 25.4.2",
+                         f"{ub['n']} U {ub['size']}; pata {u.q('L', ub['leg'])} (sobre el cono {u.q('L', ub['above'])}, "
+                         f"bajo el cono {u.q('L', ub['below'])}); ld = {u.q('L', ub['ld'])}"
+                         + ("; la pata no cabe en el pedestal" if ub["depth"] + ub["leg"] > prj.conc.ha + 1e-6 else "")))
+        out.append(Check("aci_ubar_hook", "Refuerzo U — gancho sobre el cono de falla",
+                         ub["ldh"], max(ub["above"], 0.0), "in", "ACI 318-19 25.4.3",
+                         f"ldh = {u.q('L', ub['ldh'])}; tramo horizontal a {u.q('L', ub['depth'])} de la superficie"))
 
     # ============================================= ACI 17.8 interaccion
     rN = max([ch.ratio for ch in out if ch.key in ("aci_nsa", "aci_ncb", "aci_np", "aci_nsb", "aci_na")] + [0.0])
