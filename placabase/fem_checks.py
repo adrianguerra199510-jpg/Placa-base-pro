@@ -33,6 +33,7 @@ class Fem3D:
     n_elems: int = 0
     umax: float = 0.0
     vmmax: float = 0.0
+    peeq: tuple = None               # (PEEQ max en la placa [fraccion], x, y, z) si el analisis fue elasto-plastico
     folder: str = ""
     msg: str = ""
     sig: str = ""                    # firma (JSON) del proyecto con el que se corrio
@@ -65,11 +66,24 @@ def fem_checks(prj: Project, br: Bearing, fem: Fem3D, rec=None) -> list:
                      "AISC J8", "Distribucion real de la presion sobre el concreto (resortes de Winkler)."))
     # ---- placa
     va = fem.vm_avg
+    pk = getattr(fem, "peeq", None)
+    lim = float(getattr(prj.fea, "plastic_limit", 5.0))
+    if pk is not None:
+        out.append(Check("fem_peeq", "FEM 3D — deformacion plastica equivalente en la placa", pk[0] * 100.0, lim, "%",
+                         "criterio de IDEA StatiCa: ≤ 5 %",
+                         f"acero elasto-plastico con limite φ·Fy = {u.q('S', 0.9 * Fy)}; maximo en "
+                         f"({u.fmt('L', pk[1])}, {u.fmt('L', pk[2])}, z = {u.fmt('L', pk[3])}) {u.L}"))
     if va:
-        out.append(Check("fem_vm", "FEM 3D — von Mises promediado en la placa", va["vm"], 0.90 * Fy, "ksi",
-                         "criterio del programa: ≤ 0.90·Fy",
-                         f"promedio del tensor en r = {u.q('L', va['radius'])} sobre la cara de la placa; "
-                         f"pico puntual {u.q('S', fem.vmmax)} (no converge con la malla)"))
+        if pk is not None:        # con plasticidad el esfuerzo queda acotado por φ·Fy: se informa, no se verifica
+            out.append(Check("fem_vm", "FEM 3D — von Mises promediado en la placa (informativo)", va["vm"], 0.90 * Fy,
+                             "ksi", "informativo (placa elasto-plastica)",
+                             f"promedio en r = {u.q('L', va['radius'])}; pico puntual {u.q('S', fem.vmmax)}",
+                             skip=True))
+        else:
+            out.append(Check("fem_vm", "FEM 3D — von Mises promediado en la placa", va["vm"], 0.90 * Fy, "ksi",
+                             "criterio del programa: ≤ 0.90·Fy",
+                             f"promedio del tensor en r = {u.q('L', va['radius'])} sobre la cara de la placa; "
+                             f"pico puntual {u.q('S', fem.vmmax)} (no converge con la malla)"))
     # ---- soldadura
     for i, z in enumerate(getattr(post, "zones", [])):
         if not (z.fmax > 1e-9 or z.cap > 0):
@@ -103,6 +117,9 @@ def fem_checks(prj: Project, br: Bearing, fem: Fem3D, rec=None) -> list:
         rec.add("Tmax perno", "reaccion en los resortes del anillo de la tuerca", "",
                 max((b[3] for b in bolts), default=0.0), "F", "AISC J3.6")
         rec.add("pmax", "ks · hundimiento maximo", "", post.p_max, "S", "AISC J8")
+        if pk is not None:
+            rec.add("PEEQ placa", "deformacion plastica equivalente maxima (acero φ·Fy, perfectamente plastico)", "",
+                    pk[0] * 100.0, "-", "", f"limite {lim:g} %  (se muestra en %)")
         if va:
             rec.add("σvM promediado", "promedio del tensor en un circulo de radio r",
                     f"r = {rec.n('L', va['radius'])}", va["vm"], "S", "",

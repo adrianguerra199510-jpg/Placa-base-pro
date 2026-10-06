@@ -333,8 +333,12 @@ if "--3d" in sys.argv:
         print(f"{'3D PB-01':34} nodos={_fem.n_nodes:,}  R−ΣT−Pu = {_eq:+.3f} kip  filas: {_ks}")
         if abs(_eq) > 0.02 * max(1.0, abs(_p3.eloads.Pu)):
             FAIL.append(f"3D: equilibrio fuera de tolerancia ({_eq:+.2f} kip)")
-        if not {"fem_bolt", "fem_press", "fem_vm"} <= set(_ks):
-            FAIL.append("3D: faltan filas de verificacion FEM")
+        if not {"fem_bolt", "fem_press", "fem_vm", "fem_peeq"} <= set(_ks):
+            FAIL.append("3D: faltan filas de verificacion FEM (incluida la deformacion plastica)")
+        _pk = _fem.peeq
+        print(f"{'  deformacion plastica en la placa':34} {_pk[0]*100:.4f} %  (limite {_p3.fea.plastic_limit:g} %)")
+        if _pk is None or _pk[0] * 100.0 >= _p3.fea.plastic_limit:
+            FAIL.append("3D: la deformacion plastica de la placa debe quedar bajo el limite en PB-01")
         if any("pendientes" in w for w in _R.warnings):
             FAIL.append("3D: no debe quedar el aviso de pendiente")
         if not (_fem.rep or {}).get("plan", {}).get("top"):

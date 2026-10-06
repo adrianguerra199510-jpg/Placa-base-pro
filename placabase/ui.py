@@ -594,7 +594,7 @@ class MainWindow(QMainWindow):
         f.num("ha (altura del elemento)", "conc.ha", 4, 400, uk="L", help="Altura del elemento de concreto medida desde la superficie donde apoya la placa. Interviene en el factor de espesor del arrancamiento en cortante.")
         f.num("λa (concreto liviano)", "conc.lam", 0.5, 1.0, 0.05, 2, help="Factor de concreto liviano de ACI. Use 1.00 para concreto de peso normal.")
         f.check("Concreto fisurado en servicio", "conc.cracked", help="Marque si el concreto estara fisurado en la zona del anclaje bajo cargas de servicio, que es la hipotesis por defecto de ACI. Sin fisurar, las resistencias del concreto aumentan.")
-        f.check("Refuerzo suplementario (condicion A)", "conc.cond_A", help="Condicion A de ACI Tabla 17.5.3: hay refuerzo suplementario que ata el cono de falla al elemento. Sube el factor de reduccion de 0.70 a 0.75.")
+        self.chk_condA = f.check("Refuerzo suplementario (condicion A)", "conc.cond_A", help="Condicion A de ACI Tabla 17.5.3: hay refuerzo suplementario que ata el cono de falla al elemento. Sube el factor de reduccion de 0.70 a 0.75.")
         f.check("Diseno sismico (ACI 17.10, factor 0.75)", "conc.seismic", help="Aplica el factor 0.75 a la resistencia del concreto de los anclajes. No verifica por usted el requisito de que el anclaje sea gobernado por la fluencia ductil del acero.")
         f.group("Refuerzo del arrancamiento (barras U)")
         f.check("Agregar barras U de refuerzo", "conc.u_on", help="Barras en forma de U invertida (herradura) que abrazan el grupo de pernos: un tramo horizontal cerca de la superficie y dos patas verticales a cada lado. Segun ACI 318-19 17.5.2 el refuerzo del anclaje puede sustituir la resistencia del concreto al arrancamiento en traccion y en cortante: la capacidad pasa a ser φ·(n° de patas)·Ab·fy con φ = 0.75, siempre que las patas esten desarrolladas a ambos lados del cono de falla. Se dibujan en la elevacion y en el 3D. El analisis 3D no las modela (solo el calculo cerrado).")
@@ -617,6 +617,8 @@ class MainWindow(QMainWindow):
         f.text("CalculiX propio (opcional)", "fea.ccx_path", help="Dejelo vacio: el programa usa el CalculiX incluido en la carpeta solvers. Solo escriba una ruta si quiere usar otra version de ccx.exe.")
         f.combo("Calidad de la malla 3D", "fea.mesh3d_mode", MESH3D_MODES, help="Automatica (recomendada): el programa calcula el tamano de elemento del proyecto: el mayor entre 1.2 veces el radio de promedio del von Mises (con eso el esfuerzo promediado converge, ±2 % en el estudio de convergencia) y la raiz del area de la placa / 400 (limita el costo en placas grandes, ~70-90 mil nodos). Fina: 0.65 veces ese tamano (mas lenta). Si el calculo falla, el programa reintenta solo con una malla mas gruesa. Un tamano manual mayor que 0 (abajo) tiene prioridad.")
         f.combo("Modelo de la soldadura", "fea.weld_model", WELD_MODELS, help="Conectores (recomendado): el perfil y la placa son cuerpos separados; la compresion pasa por contacto y cada linea de cordon es un conector de traccion y cortante cuya fuerza se lee directo del resorte (una zona sin soldar o un lado sin cordon no transmite). Fusionado: union monolitica que equivale a una CJP; la fuerza del cordon se deduce de los esfuerzos del perfil y una zona sin soldar transmite igual.")
+        f.check("Placa elasto-plastica (sin picos de esfuerzo)", "fea.plastic", help="Modela el acero de la placa como elasto-plastico perfecto con limite φ·Fy (como IDEA StatiCa): el esfuerzo no pasa de φ·Fy, los picos puntuales desaparecen y la verificacion es la deformacion plastica equivalente (PEEQ) maxima de la placa. Solo la placa (y la llave) llevan plasticidad: es lo que se verifica y mantiene el tiempo de calculo bajo (~+25 %; con plasticidad en todo el modelo seria ~4 veces). Solo en el modelo solido. Desactivada vuelve al criterio elastico de von Mises promediado ≤ 0.9·Fy.")
+        f.num("Deformacion plastica maxima admitida (%)", "fea.plastic_limit", 0.1, 20, 0.5, 1, help="Limite de la deformacion plastica equivalente en la placa. IDEA StatiCa usa 5 %.")
         f.num("Radio de promedio del von Mises 3D (× espesor)", "fea.vm_avg_factor", 0.1, 3.0, 0.1, 2, help="El von Mises puntual del modelo solido crece sin limite al refinar la malla (singularidades en el borde de los agujeros y en el pie del perfil). El programa verifica el maximo PROMEDIADO: promedio del tensor de esfuerzos, ponderado por area, en un circulo de este radio (en espesores de placa) sobre la misma cara. Predeterminado 1.0. Un radio menor da valores mas altos y mas sensibles a la malla; el radio nunca baja de 1/1.2 del tamano del elemento. Este valor si converge con la malla.")
         f.num("Tamano de malla 3D (0 = automatico)", "fea.mesh3d", 0, 20, uk="L", help="Tamano caracteristico de los tetraedros. Deje 0 para que el programa lo calcule segun la placa y el radio de promedio (recomendado). Un valor manual muy pequeno en una placa grande hace el modelo enorme y el calculo muy lento o no converge; el radio de promedio nunca baja del tamano de elemento.")
         f.note("El analisis solido 3D es el unico analisis de elementos finitos del programa: sus "
@@ -818,7 +820,7 @@ class MainWindow(QMainWindow):
         "stf_flex": ["Flexion del rigidizador"], "stf_weld_col": ["Soldadura rigidizador-columna"],
         "stf_weld_pl": ["RIGIDIZADORES"], "stf_shear": ["RIGIDIZADORES"], "stf_fit": ["RIGIDIZADORES"],
         "stf_slend": ["RIGIDIZADORES"], "col_norm": ["DATOS DE PARTIDA"], "col_shear": ["DATOS DE PARTIDA"],
-        "fem_bolt": ["Tmax perno"], "fem_press": ["pmax"], "fem_vm": ["σvM promediado"],
+        "fem_bolt": ["Tmax perno"], "fem_peeq": ["PEEQ placa"], "fem_press": ["pmax"], "fem_vm": ["σvM promediado"],
     }
 
     def _goto_calc(self, row, _col=0):
@@ -1229,6 +1231,8 @@ class MainWindow(QMainWindow):
         self.timer.start(350)
 
     def _update_labels(self):
+        # con barras U de refuerzo la condicion A es automatica: la casilla manual deja de tener sentido
+        self.chk_condA.setVisible(not self.prj.conc.u_on)
         tilted = self.prj.loads.tilted
         self.chk_stiff.setEnabled(not tilted)
         self.chk_stiff.setToolTip("No disponible con la columna inclinada." if tilted else "")

@@ -73,14 +73,14 @@ def anchor_checks(prj: Project, br: Bearing,
     futa = min(mat.Fu, 1.9 * mat.Fy, 125.0)      # ACI 17.6.1.2 / 17.7.1.2
     phi_s_t = 0.75 if mat.ductile else 0.65
     phi_s_v = 0.65 if mat.ductile else 0.60
-    phi_c = 0.75 if c.cond_A else 0.70
+    phi_c = 0.75 if c.cond_A_eff else 0.70
     k_seis = 0.75 if c.seismic else 1.0
 
     # ---- anclaje postinstalado con adhesivo (ACI 318-19 17.6.5)
     adh = b.adhesive
     if adh:
         cat = {"Categoria 1": 0, "Categoria 2": 1, "Categoria 3": 2}.get(b.adh_cat, 0)
-        phi_ct = ((0.75, 0.65), (0.65, 0.55), (0.55, 0.45))[cat][0 if c.cond_A else 1]
+        phi_ct = ((0.75, 0.65), (0.65, 0.55), (0.55, 0.45))[cat][0 if c.cond_A_eff else 1]
         lam_brk = 0.8 * c.lam if c.lam < 1.0 else 1.0      # ACI Tabla 17.2.4.1
         lam_bond = 0.6 * c.lam if c.lam < 1.0 else 1.0
     else:
@@ -205,7 +205,7 @@ def anchor_checks(prj: Project, br: Bearing,
         rec.add("φ acero", "traccion / cortante",
                 f"{phi_s_t:.2f} / {phi_s_v:.2f}", None, "-", "ACI Tabla 17.5.3(a)",
                 "elemento " + ("ductil" if mat.ductile else "fragil"))
-        rec.add("φ concreto", "condicion " + ("A" if c.cond_A else "B"),
+        rec.add("φ concreto", "condicion " + ("A" if c.cond_A_eff else "B"),
                 f"{phi_c:.2f}", None, "-", "ACI Tabla 17.5.3(c)")
         if c.seismic:
             rec.add("factor sismico", "0.75 sobre la resistencia del concreto",
@@ -279,7 +279,7 @@ def anchor_checks(prj: Project, br: Bearing,
                     Nb, "F", "ACI Ec. 17.6.2.2.1",
                     "evaluada en unidades inglesas (psi, in) y convertida")
             rec.add("φ concreto (traccion)", f"{b.adh_cat}, condicion "
-                    + ("A" if c.cond_A else "B"), f"{phi_ct:.2f}", None, "-",
+                    + ("A" if c.cond_A_eff else "B"), f"{phi_ct:.2f}", None, "-",
                     "ACI Tabla 17.5.3(c)")
         else:
             rec.add("Nb", ("kc·λa·√f'c·hef^1.5" if hef <= 11 else

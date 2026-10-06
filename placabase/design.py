@@ -682,7 +682,7 @@ def _lug_section(prj: Project, rec: Recorder | None) -> list[Check]:
         tmin = min(min(c_ - a, e - b) for a, b, c_, e in rl)
     spec = WeldSpec(wtype="Filete", size=L.weld_size, electrode=L.electrode)
     FEXX = spec.FEXX()
-    phi_c = 0.75 if c.cond_A else 0.70
+    phi_c = 0.75 if c.cond_A_eff else 0.70
     psi_c = 1.0 if c.cracked else 1.4
     if rec:
         rec.add("Llave", f"perfil {sh.label}" + (" girado 90°" if rot90 else ""),
@@ -834,7 +834,7 @@ def shear_lug(prj: Project, rec: Recorder | None = None) -> list[Check]:
     Vb_lb = 9.0 * c.lam * math.sqrt(fc_psi) * ca1 ** 1.5
     psi_c = 1.0 if c.cracked else 1.4
     Vcb = (Avc / Avco) * psi_c * Vb_lb / 1000.0
-    phi_c = 0.75 if c.cond_A else 0.70
+    phi_c = 0.75 if c.cond_A_eff else 0.70
     out.append(Check("lug_brkout", "Llave — desprendimiento del concreto en cortante",
                      Vlug, phi_c * Vcb, "kip", "ACI 318-19 17.11.2.2 / 17.7.2",
                      f"ca1 = {u.q('L', ca1)}.  Se descuenta el area de la llave "

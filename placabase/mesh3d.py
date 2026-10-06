@@ -776,9 +776,9 @@ def build_inp(prj: Project, mesh_inp: str, out_inp: str, height: float = 0.0) ->
          "*MATERIAL, NAME=ACERO", "*ELASTIC",
          f"{ES_KSI:.1f}, {NU_STEEL:.3f}",
          ]
-    plastic = bool(os.environ.get("PB_PLASTIC"))
+    plastic = bool(getattr(prj.fea, "plastic", False))      # solo en la placa: es lo que se verifica y el costo se cuadruplicaria en el resto
     if plastic:
-        # PROTOTIPO: acero elasto-plastico perfectamente plastico con limite φ·Fy (como IDEA StatiCa)
+        # acero elasto-plastico perfectamente plastico con limite φ·Fy (como IDEA StatiCa), solo en la placa y la llave
         zmax = {}
         cur = None
         for ln in Path(mesh_inp).read_text(encoding="utf-8", errors="ignore").splitlines():
@@ -798,8 +798,9 @@ def build_inp(prj: Project, mesh_inp: str, out_inp: str, height: float = 0.0) ->
         fy_pl = 0.9 * p.mat().Fy
         fy_col = 0.9 * prj.section.mat().Fy
         for nm, fy in (("PLACA", fy_pl), ("COLUMNA", fy_col)):
-            L += [f"*MATERIAL, NAME={nm}", "*ELASTIC", f"{ES_KSI:.1f}, {NU_STEEL:.3f}",
-                  "*PLASTIC", f"{fy:.4f}, 0.0", f"{fy * 1.0005:.4f}, 0.25"]
+            L += [f"*MATERIAL, NAME={nm}", "*ELASTIC", f"{ES_KSI:.1f}, {NU_STEEL:.3f}"]
+            if nm == "PLACA":
+                L += ["*PLASTIC", f"{fy:.4f}, 0.0", f"{fy * 1.0005:.4f}, 0.25"]
         for vs in vol_sets:
             nm = "PLACA" if zmax.get(vs, 9e9) <= p.tp + 1e-4 else "COLUMNA"
             L.append(f"*SOLID SECTION, ELSET={vs}, MATERIAL={nm}")
@@ -1026,6 +1027,12 @@ def _full_3d_once(prj, folder, stem, lc, say, cancel, tag=""):
     except Exception:
         pass
     res = load_results(mesh_inp, frd)
+    if getattr(prj.fea, "plastic", False):
+        try:
+            from .view3d import read_peeq
+            res.peeq = read_peeq(frd)
+        except Exception:
+            res.peeq = {}
     if not res.ok:
         err = [ln for ln in out.splitlines() if "*ERROR" in ln][:3]
         return None, res.msg + ("\n" + "\n".join(err) if err else "")

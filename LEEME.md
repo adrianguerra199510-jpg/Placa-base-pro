@@ -13,6 +13,14 @@ kN / N / tonf / kgf, momento y esfuerzo por separado. Se aplican a las entradas,
 tabla de resultados y a los reportes. El cálculo interno siempre corre en in-kip-ksi,
 que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
 
+## Placa elasto-plastica (2.1)
+
+Por defecto el 3D solido usa acero elasto-plastico perfecto (limite φ·Fy) **solo en la placa y la llave**: el esfuerzo queda acotado, desaparecen
+los picos puntuales y la verificacion es la deformacion plastica equivalente (PEEQ) maxima de la placa ≤ 5 % (criterio de IDEA StatiCa). El von
+Mises promediado pasa a ser informativo. Con plasticidad solo en la placa el calculo cuesta ~+25 % (en todo el modelo seria ~4 veces).
+Tu caso del tubo (placa 300×300×20, A36): PEEQ = 0.02-0.09 % segun la malla, contra 0.0 % de IDEA. Se desactiva en Elementos finitos.
+Con barras U la condicion A de ACI es automatica (la casilla manual se oculta).
+
 ## Barras U, cargas en el visor y elevacion (2.1)
 
 - **Barras U de refuerzo del arrancamiento** (pestaña Concreto): diametro de barra (#3 a #10), cantidad de U (cada una aporta 2 patas),

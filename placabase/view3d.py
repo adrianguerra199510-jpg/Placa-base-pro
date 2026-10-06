@@ -121,6 +121,40 @@ def read_frd(path: str):
     return disp, stress, forc
 
 
+def read_peeq(path: str) -> dict:
+    """Deformacion plastica equivalente por nodo (bloque PE del .frd), o {} si el analisis fue elastico."""
+    pe, blk = {}, False
+    with open(path, encoding="utf-8", errors="ignore") as f:
+        for ln in f:
+            if len(ln) > 5 and ln[1:3] == "-4":
+                blk = ln[5:13].strip().upper() == "PE"
+                continue
+            if ln.startswith(" -3"):
+                blk = False
+                continue
+            if blk and ln.startswith(" -1"):
+                try:
+                    pe[int(ln[3:13])] = float(ln[13:25])
+                except ValueError:
+                    pass
+    return pe
+
+
+def plate_peeq(res, tp: float, tol: float = 1e-4):
+    """(PEEQ maximo en la placa [fraccion], x, y, z) o None."""
+    pe = getattr(res, "peeq", None)
+    if not pe:
+        return None
+    best = None
+    for n, v in pe.items():
+        xyz = res.nodes.get(n)
+        if xyz is None or xyz[2] > tp + tol:
+            continue
+        if best is None or v > best[0]:
+            best = (v, xyz[0], xyz[1], xyz[2])
+    return best
+
+
 def von_mises(sx, sy, sz, sxy, syz, szx):
     return math.sqrt(0.5 * ((sx - sy) ** 2 + (sy - sz) ** 2 + (sz - sx) ** 2)
                      + 3.0 * (sxy ** 2 + syz ** 2 + szx ** 2))
@@ -384,78 +418,124 @@ C_PU, C_V, C_M = "#c0392b", "#1d4ed8", "#7c3aed"
 def load_arrows(prj, kl, ztop=None):
     """Flechas de las cargas de la combinacion activa, en el sistema de la placa (ejes de la columna si no esta inclinada).
     -> (lista de elementos a dibujar, puntos para el encuadre).  Coordenadas ya divididas por kl."""
-    from . import geometry as G
     L = prj.eloads
     u = prj.units()
     s = prj.section.shape()
     N, B = (prj.plate.Dp, prj.plate.Dp) if prj.plate.shape == "Circular" else (prj.plate.N, prj.plate.B)
-    size = 1.0 * max(N, B)
+    size = 1.25 * max(N, B)
     H = max(3.0 * s.d, 12.0)
+    from . import geometry as _G
+    bw, bh = _G.profile_bbox(prj)
     R = _rot_matrix(prj.loads.tilt_x, prj.loads.tilt_y)
     T = np.array(R @ np.array([0.0, 0.0, H])) + np.array([0.0, 0.0, prj.plate.tp])
     if ztop is not None:                          # en los resultados el perfil tiene la altura del modelo
         T = np.array([0.0, 0.0, float(ztop)])
     items, pts = [], []
 
-    def arrow(tail, head, color, label):
-        items.append(("arrow", np.array(tail) / kl, np.array(head) / kl, color, label))
-        pts.extend([np.array(tail) / kl, np.array(head) / kl])
+    def arrow(tail, head, color, label, far):
+        a_, b_ = np.array(tail) / kl, np.array(head) / kl
+        items.append(("arrow", a_, b_, color, label, np.array(far) / kl))
+        pts.extend([a_, b_])
 
     F = [abs(L.Pu), abs(L.Vux), abs(L.Vuy)]
     fmax = max(F) if max(F) > 1e-9 else 1.0
 
     def ln(v):                                   # largo proporcional, con un minimo legible
-        return size * (0.35 + 0.65 * abs(v) / fmax)
+        return size * (0.45 + 0.55 * abs(v) / fmax)
 
     if abs(L.Pu) > 1e-9:
         l_ = ln(L.Pu)
         if L.Pu > 0:                              # compresion: la flecha empuja hacia abajo sobre la columna
-            arrow(T + np.array([0, 0, l_]), T, C_PU, f"Pu = {u.q('F', L.Pu)} (compresion)")
+            tail = T + np.array([0, 0, l_])
+            arrow(tail, T, C_PU, f"Pu = {u.q('F', L.Pu)} (compresion)", tail)
         else:                                     # traccion: tira hacia arriba
-            arrow(T, T + np.array([0, 0, l_]), C_PU, f"Pu = {u.q('F', abs(L.Pu))} (traccion)")
+            head = T + np.array([0, 0, l_])
+            arrow(T, head, C_PU, f"Pu = {u.q('F', abs(L.Pu))} (traccion)", head)
     for comp, name, vec in ((L.Vux, "Vux", np.array([1.0, 0, 0])), (L.Vuy, "Vuy", np.array([0, 1.0, 0]))):
         if abs(comp) > 1e-9:
-            l_ = ln(comp) * np.sign(comp)
-            arrow(T - vec * l_, T, C_V, f"{name} = {u.q('F', comp)}")
+            l_ = ln(comp)
+            sg = np.sign(comp)
+            hw = 0.5 * (bw if vec[0] > 0 else bh)
+            tip = T - vec * sg * hw                   # la punta toca la cara de la columna sobre la que empuja
+            tail = tip - vec * sg * l_
+            arrow(tail, tip, C_V, f"{name} = {u.q('F', comp)}", tail)
     for comp, name, axis in ((L.Mux, "Mux", 0), (L.Muy, "Muy", 1)):
         if abs(comp) > 1e-9:
-            r_ = 0.42 * size
-            th = np.linspace(-0.85, 0.85, 28)
+            r_ = 0.62 * size
+            # arco de ~250° sobre la columna, en el plano perpendicular al eje del momento; el sentido
+            # es el de la regla de la mano derecha respecto al eje +X (Mux) o +Y (Muy)
+            th = np.radians(np.linspace(90.0 - 125.0, 90.0 + 125.0, 60))
             if comp < 0:
                 th = th[::-1]
             if axis == 0:       # giro alrededor de +X: (y, z) = r(cos, sin)
                 P_ = [T + np.array([0, r_ * np.cos(t), r_ * np.sin(t)]) for t in th]
             else:               # giro alrededor de +Y: (z, x) = r(cos, sin)
                 P_ = [T + np.array([r_ * np.sin(t), 0, r_ * np.cos(t)]) for t in th]
-            items.append(("arc", [p / kl for p in P_], C_M, f"{name} = {u.q('M', comp)}"))
-            pts.extend([p / kl for p in P_])
+            P_ = [p / kl for p in P_]
+            items.append(("arc", P_, C_M, f"{name} = {u.q('M', comp)}"))
+            pts.extend(P_)
     return items, pts
+
+
+def _cone(tip, direction, length, radius, n=16):
+    """Triangulos de un cono (punta en `tip`, mirando a `direction`) y su base."""
+    d = np.array(direction, float)
+    d = d / max(np.linalg.norm(d), 1e-12)
+    ref = np.array([0.0, 0.0, 1.0]) if abs(d[2]) < 0.9 else np.array([1.0, 0.0, 0.0])
+    p1 = np.cross(d, ref); p1 /= np.linalg.norm(p1)
+    p2 = np.cross(d, p1)
+    base = np.array(tip, float) - d * length
+    ring = [base + radius * (np.cos(t) * p1 + np.sin(t) * p2) for t in np.linspace(0, 2 * np.pi, n + 1)]
+    tris = [[tuple(tip), tuple(ring[i]), tuple(ring[i + 1])] for i in range(n)]
+    tris += [[tuple(base), tuple(ring[i + 1]), tuple(ring[i])] for i in range(n)]
+    return tris
+
+
+def _arrow3d(ax, tail, head, color, lw=4.2):
+    """Flecha 3D solida: fuste grueso y cabeza conica grande."""
+    from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+    from matplotlib.colors import to_rgb
+    d = np.array(head, float) - np.array(tail, float)
+    L = float(np.linalg.norm(d))
+    if L < 1e-9:
+        return
+    u_ = d / L
+    hl = 0.25 * L                                   # largo de la cabeza
+    base = np.array(head) - u_ * hl
+    ax.plot([tail[0], base[0]], [tail[1], base[1]], [tail[2], base[2]], color=color, lw=lw, zorder=40,
+            solid_capstyle="butt", clip_on=False)
+    coll = Poly3DCollection(_cone(head, u_, hl, 0.55 * hl), facecolors=(*to_rgb(color), 1.0),
+                            edgecolors=(*to_rgb(color), 1.0), linewidths=0.3, zorder=41)
+    coll.set_clip_on(False)
+    ax.add_collection3d(coll)
 
 
 def draw_loads(ax, items):
     """Dibuja las flechas de load_arrows en un eje 3D."""
     for it in items:
         if it[0] == "arrow":
-            _, a, b, color, label = it
-            d = b - a
-            ax.plot([a[0], b[0]], [a[1], b[1]], [a[2], b[2]], color=color, lw=2.6, zorder=40,
-                    solid_capstyle="round", clip_on=False)
-            ax.quiver(a[0], a[1], a[2], d[0], d[1], d[2], color=color, arrow_length_ratio=0.16, linewidth=2.6,
-                      zorder=40)
-            mid = a if np.linalg.norm(b - a) < 1e-12 else a + 0.5 * d
-            # etiqueta en el extremo lejano al punto de aplicacion (tail si empuja, head si tira)
-            far = a if abs(b[2] - a[2]) < 1e-9 or d[2] < 0 else b
-            ax.text(*far, label, fontsize=8, color=color, fontweight="bold", zorder=41,
-                    ha="right" if d[0] > 0 else "left", va="bottom")
+            _, a, b, color, label, far = it
+            _arrow3d(ax, a, b, color)
+            ax.text(*far, label, fontsize=9, color=color, fontweight="bold", zorder=50,
+                    ha="center", va="bottom",
+                    bbox=dict(boxstyle="round,pad=0.2", fc="#ffffffcc", ec=color, lw=0.8))
         else:
             _, P_, color, label = it
             xs, ys, zs = zip(*[tuple(p) for p in P_])
-            ax.plot(xs, ys, zs, color=color, lw=2.4, zorder=40, clip_on=False)
-            d = np.array(P_[-1]) - np.array(P_[-3])
-            ax.quiver(P_[-3][0], P_[-3][1], P_[-3][2], d[0], d[1], d[2], color=color, arrow_length_ratio=0.9,
-                      linewidth=2.4, zorder=40)
-            ax.text(*P_[-1], label, fontsize=8, color=color, fontweight="bold", zorder=41,
-                    ha="left" if "Mux" in label else "right", va="top" if "Mux" in label else "bottom")
+            ax.plot(xs, ys, zs, color=color, lw=4.2, zorder=40, solid_capstyle="butt", clip_on=False)
+            from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+            from matplotlib.colors import to_rgb
+            p_end, p_prev = np.array(P_[-1]), np.array(P_[-4])
+            dirv = (p_end - p_prev) / max(np.linalg.norm(p_end - p_prev), 1e-12)
+            rad = float(np.linalg.norm(np.array(P_[0]) - np.array(P_[len(P_) // 2]))) / 1.6
+            hl = 0.38 * rad
+            coll = Poly3DCollection(_cone(p_end + dirv * hl, dirv, hl, 0.42 * hl), facecolors=(*to_rgb(color), 1.0),
+                                    edgecolors=(*to_rgb(color), 1.0), linewidths=0.3, zorder=41)
+            coll.set_clip_on(False)
+            ax.add_collection3d(coll)
+            mid = np.array(P_[len(P_) // 2])
+            ax.text(*mid, label, fontsize=9, color=color, fontweight="bold", zorder=50, ha="center", va="bottom",
+                    bbox=dict(boxstyle="round,pad=0.2", fc="#ffffffcc", ec=color, lw=0.8))
 
 
 def _clean_poly(poly):

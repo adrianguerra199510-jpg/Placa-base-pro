@@ -51,7 +51,7 @@ def input_rows(prj: Project, us: UnitSet) -> list[tuple[str, str]]:
         ("Concreto", f"f'c = {q('S', c.fc)}, pedestal {q('L', c.N2)} × {q('L', c.B2)}, "
                      f"ha = {q('L', c.ha)}, "
                      f"{'fisurado' if c.cracked else 'no fisurado'}, "
-                     f"condicion {'A' if c.cond_A else 'B'}"),
+                     f"condicion {'A' if c.cond_A_eff else 'B'}"),
         ("Llave de corte", (f"{q('L', prj.lug.W)} × {q('L', prj.lug.H)} × "
                             f"{q('L', prj.lug.t)}, {prj.lug.direction}"
                             if prj.lug.enabled else "No")),
@@ -731,7 +731,7 @@ def export_pdf(prj: Project, res: Results, path: str,
         ["Concreto", f"f'c = {us.q('S', c.fc)}; pedestal {us.q('L', c.N2)} × "
                      f"{us.q('L', c.B2)}; ha = {us.q('L', c.ha)}; "
                      f"{'fisurado' if c.cracked else 'no fisurado'}; "
-                     f"condicion {'A' if c.cond_A else 'B'}"],
+                     f"condicion {'A' if c.cond_A_eff else 'B'}"],
         ["Llave de corte", (f"{us.q('L', prj.lug.W)} × {us.q('L', prj.lug.H)} × "
                             f"{us.q('L', prj.lug.t)} — {prj.lug.direction}"
                             if prj.lug.enabled else "No")],

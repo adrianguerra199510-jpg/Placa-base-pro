@@ -317,6 +317,11 @@ class Concrete:
     u_depth: float = 2.0         # profundidad del tramo horizontal bajo la superficie, in
     u_leg: float = 0.0           # longitud de la pata, in (0 = automatica: la que desarrolla ld bajo el cono)
 
+    @property
+    def cond_A_eff(self) -> bool:
+        """Condicion A (ACI T.17.5.3): refuerzo suplementario marcado a mano o barras U de refuerzo del anclaje."""
+        return bool(self.cond_A or self.u_on)
+
 
 @dataclass
 class Loads:
@@ -384,6 +389,8 @@ class FEAOpts:
     mesh3d_mode: str = "Automatica (recomendada)"   # ver MESH3D_MODES
     shear_arm: float = -1.0      # brazo del cortante sobre la placa, in (-1 = automatico)
     vm_avg_factor: float = 1.0   # radio de promedio del von Mises 3D, en espesores de placa
+    plastic: bool = True         # placa elasto-plastica (limite φ·Fy): sin picos de esfuerzo; se verifica la deformacion plastica
+    plastic_limit: float = 5.0   # deformacion plastica equivalente maxima admitida en la placa, % (como IDEA StatiCa)
     weld_model: str = "Conectores (cordon como resortes entre cuerpos separados)"   # ver WELD_MODELS
 
 
