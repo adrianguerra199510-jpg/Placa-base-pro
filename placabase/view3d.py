@@ -140,6 +140,46 @@ def read_peeq(path: str) -> dict:
     return pe
 
 
+def clip_vm_to_yield(res, prj) -> int:
+    """Con acero elasto-plastico el esfuerzo en los puntos de integracion no pasa de φ·Fy, pero CalculiX lo extrapola
+    a los nodos y ahi puede quedar por encima (sobre todo en esquinas con singularidad).  Para mostrar lo mismo que
+    IDEA StatiCa se recorta el von Mises nodal en φ·Fy del acero de la pieza a la que pertenece cada nodo
+    (nodos compartidos entre piezas: el mayor).  El original queda en res.vm_raw.  Devuelve cuantos nodos se recortaron."""
+    tp = prj.plate.tp
+    caps = {"plate": prj.plate.mat().Fy, "washer": prj.plate.mat().Fy, "column": prj.section.mat().Fy,
+            "stiff": prj.stiff.mat().Fy, "lug": prj.lug.mat().Fy}
+    N = res.nodes
+    cap = {}
+    for e in res.elems:
+        c = e[:4]
+        xc = sum(N[n][0] for n in c) / 4.0
+        yc = sum(N[n][1] for n in c) / 4.0
+        zc = sum(N[n][2] for n in c) / 4.0
+        if zc < 0:
+            k = "lug"
+        elif zc < tp:
+            k = "plate"
+        elif washer_elements(prj, xc, yc, zc):
+            k = "washer"
+        elif _covered_by_profile(prj, xc, yc):
+            k = "column"
+        else:
+            k = "stiff"
+        f = 0.9 * caps[k]
+        for n in e:
+            if f > cap.get(n, 0.0):
+                cap[n] = f
+    res.vm_raw = dict(res.vm)
+    n_clip = 0
+    for n, v_ in res.vm.items():
+        c_ = cap.get(n)
+        if c_ is not None and v_ > c_:
+            res.vm[n] = c_
+            n_clip += 1
+    res.vmmax = max(res.vm.values(), default=0.0)
+    return n_clip
+
+
 def part_peeq(res, prj, radius: float) -> dict:
     """PEEQ por pieza -> {pieza: {"raw": (v, x, y, z), "avg": (v, x, y, z)}}.
     raw = maximo nodal; avg = maximo del promedio de los nodos de la pieza dentro de `radius` (no depende de la

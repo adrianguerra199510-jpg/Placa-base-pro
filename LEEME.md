@@ -25,7 +25,7 @@ Por defecto el 3D usa acero elasto-plastico perfecto (limite φ·Fy del acero de
 arandelas): el esfuerzo queda acotado, desaparecen los picos puntuales y se verifica la deformacion plastica equivalente (PEEQ) ≤ 5 %. La
 placa se verifica con el maximo nodal; el perfil, los rigidizadores y la llave, con el promedio en un circulo de radio ≈ espesor, porque el
 borde del cordon es una singularidad de malla (en el tubo de comparacion: placa 0.016 %, perfil 0.2 % promedio y 1.3 % puntual). El von Mises
-promediado pasa a ser informativo. Se desactiva en Elementos finitos (vuelve al criterio elastico ≤ 0.9·Fy); si CalculiX no converge con
+promediado pasa a ser informativo. El von Mises que se dibuja se **recorta en φ·Fy** del acero de cada pieza (CalculiX extrapola a los nodos y puede pasarse del tope; en el tubo de comparacion 359 → 285 MPa, 154 nodos), como lo muestra IDEA StatiCa; la verificacion no cambia. Se desactiva en Elementos finitos (vuelve al criterio elastico ≤ 0.9·Fy); si CalculiX no converge con
 plasticidad, el programa usa el criterio elastico y lo avisa.
 Con barras U la condicion A de ACI (φ = 0.75) se aplica sola; la casilla manual se elimino. En el visor, el analisis elasto-plastico reporta
 solo el punto maximo, bajo la escala de colores.

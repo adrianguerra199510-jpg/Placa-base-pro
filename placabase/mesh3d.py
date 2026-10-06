@@ -1067,7 +1067,8 @@ def _full_3d_once(prj, folder, stem, lc, say, cancel, tag=""):
         res.parts = {}
     if getattr(res, "peeq", None):
         try:
-            from .view3d import part_peeq
+            from .view3d import part_peeq, clip_vm_to_yield
+            res.vm_clipped = clip_vm_to_yield(res, prj)
             res.peeq_parts = part_peeq(res, prj, max(prj.plate.tp, lc / 1.2))
         except Exception as e:
             res.peeq_parts = {}
