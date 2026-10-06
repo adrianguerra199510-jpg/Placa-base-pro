@@ -426,6 +426,8 @@ def load_arrows(prj, kl, ztop=None):
     """Flechas de las cargas de la combinacion activa, en el sistema de la placa (ejes de la columna si no esta inclinada).
     -> (lista de elementos a dibujar, puntos para el encuadre).  Coordenadas ya divididas por kl."""
     L = prj.eloads
+    if not all(np.isfinite(x) for x in (L.Pu, L.Mux, L.Muy, L.Vux, L.Vuy)):
+        return [], []                           # cargas invalidas: no se dibujan flechas
     u = prj.units()
     s = prj.section.shape()
     N, B = (prj.plate.Dp, prj.plate.Dp) if prj.plate.shape == "Circular" else (prj.plate.N, prj.plate.B)
@@ -832,6 +834,11 @@ def plot_geometry(ax, prj, show_concrete=True, title=True, loads=False):
             continue
         v = [[(x / kl, y / kl, z / kl) for x, y, z in f] for f in faces]
         allp += [pt for f in v for pt in f]      # incluye el concreto: si no, queda fuera del encuadre
+        # Matplotlib deja SIN INICIALIZAR (np.empty) los vertices sobrantes de las listas con poligonos de distinto
+        # numero de lados, y add_collection3d los usa para el encuadre: basura -> "Axis limits cannot be NaN or Inf"
+        # de forma intermitente.  Se igualan los poligonos repitiendo el ultimo vertice (no cambia el dibujo).
+        nmax = max(len(f) for f in v)
+        v = np.array([f + [f[-1]] * (nmax - len(f)) for f in v], dtype=float)
         rgb = to_rgb(color)
         # los triangulos de la malla de la placa no llevan aristas
         edge = (*rgb, 1.0) if flat else ((0, 0, 0, 0.35) if alpha > 0.5 else (0.3, 0.35, 0.4, 0.35))

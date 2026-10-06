@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Ventana principal de PlacaBasePro (PySide6)."""
 from __future__ import annotations
+import math
 import os
 import sys
 import datetime
@@ -640,20 +641,25 @@ class MainWindow(QMainWindow):
         sph = QSplitter(Qt.Horizontal)
         self.cv_3d = Canvas3D()
         gw = QWidget(); gl = QVBoxLayout(gw); gl.setContentsMargins(0, 0, 0, 0)
-        gh = QHBoxLayout()
-        self.lbl_geom = QLabel("<b>Geometria de la conexion</b>")     # misma altura que "Planta"
-        gh.addWidget(self.lbl_geom)
-        gh.addStretch(1)
+        def header(widget_left, widget_right=None):
+            """Fila de cabecera de altura fija: las barras de herramientas (linea naranja) quedan alineadas."""
+            hw = QWidget(); hl = QHBoxLayout(hw); hl.setContentsMargins(0, 0, 0, 0)
+            hl.addWidget(widget_left)
+            hl.addStretch(1)
+            if widget_right is not None:
+                hl.addWidget(widget_right)
+            hw.setFixedHeight(28)
+            return hw
+        self.lbl_geom = QLabel("<b>Geometria de la conexion</b>")
         self.chk_loads_geom = QCheckBox("Mostrar cargas")
         self.chk_loads_geom.setChecked(True)
         self.chk_loads_geom.setToolTip("Flechas de la combinacion activa: Pu (rojo), cortantes (azul) y momentos (violeta).")
         self.chk_loads_geom.toggled.connect(self.draw_geom)
-        gh.addWidget(self.chk_loads_geom)
-        gl.addLayout(gh); gl.addWidget(self.cv_3d)
+        gl.addWidget(header(self.lbl_geom, self.chk_loads_geom)); gl.addWidget(self.cv_3d)
         sph.addWidget(gw)
         spv = QSplitter(Qt.Vertical)
         pw = QWidget(); pl = QVBoxLayout(pw); pl.setContentsMargins(0, 0, 0, 0)
-        pl.addWidget(QLabel("<b>Planta</b>")); pl.addWidget(self.cv_plan)
+        pl.addWidget(header(QLabel("<b>Planta</b>"))); pl.addWidget(self.cv_plan)
         ew = QWidget(); el = QVBoxLayout(ew); el.setContentsMargins(0, 0, 0, 0)
         eh = QHBoxLayout()
         eh.addWidget(QLabel("<b>Vista:</b>"))
@@ -1368,37 +1374,63 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.statusBar().showMessage(f"Error de dibujo: {e}", 8000)
 
+    @staticmethod
+    def _log_error(tag, exc):
+        """Guarda el traceback en error.log (carpeta de datos del programa) y devuelve la ruta."""
+        try:
+            base = Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir())) / "PlacaBasePro"
+            base.mkdir(parents=True, exist_ok=True)
+            fn = base / "error.log"
+            with open(fn, "a", encoding="utf-8") as f:
+                f.write(f"\n=== {datetime.datetime.now():%Y-%m-%d %H:%M:%S}  {tag}\n")
+                f.write("".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
+            return str(fn)
+        except Exception:
+            return ""
+
     def draw_geom(self):
-        """Pestaña 'Modelo y vistas': solo la geometria, nunca resultados."""
+        """Pestaña 'Modelo y vistas': solo la geometria, nunca resultados.  Si falla con las flechas de carga se
+        reintenta sin ellas (el fallo queda en error.log); si falla la geometria se muestra el motivo en el lienzo."""
+        import math as _m
         try:                                    # conserva la orientacion de la camara
             elev, azim = self.cv_3d.ax.elev, self.cv_3d.ax.azim
+            if not (_m.isfinite(elev) and _m.isfinite(azim)):
+                elev = azim = None
         except Exception:
             elev = azim = None
-        self.cv_3d.reset(cbar=False)
-        try:
-            view3d.plot_geometry(self.cv_3d.ax, self.prj, title=False, loads=self.chk_loads_geom.isChecked())
-            tl = self.prj.loads
-            self.lbl_geom.setText("<b>Geometria de la conexion</b>" + (
-                f"   —   columna inclinada  X {tl.tilt_x:g}°, Y {tl.tilt_y:g}°" if tl.tilted else ""))
-        except Exception as e:
+        want_loads = self.chk_loads_geom.isChecked()
+        err, first_err, log = None, None, ""
+        for with_loads in ([True, False] if want_loads else [False]):
+            self.cv_3d.reset(cbar=False)
+            try:
+                view3d.plot_geometry(self.cv_3d.ax, self.prj, title=False, loads=with_loads)
+                err = None
+                if want_loads and not with_loads:
+                    self.statusBar().showMessage(
+                        f"No se pudieron dibujar las flechas de carga ({first_err}). Detalle en {log}", 12000)
+                break
+            except Exception as e:
+                err = e
+                first_err = first_err or e
+                log = self._log_error("draw_geom" + (" con cargas" if with_loads else ""), e)
+                traceback.print_exc()
+        if err is not None:
             # no deja la vista en blanco: muestra el error en el propio lienzo
             self.cv_3d.reset()
             self.cv_3d.ax.set_axis_off()
             self.cv_3d.ax.text2D(0.5, 0.5, "No se pudo dibujar la geometria 3D:\n"
-                                 f"{type(e).__name__}: {str(e)[:160]}",
+                                 f"{type(err).__name__}: {str(err)[:160]}\n\nDetalle en: {log}",
                                  ha="center", va="center", color="#9c0006",
                                  transform=self.cv_3d.ax.transAxes, fontsize=9)
-            self.statusBar().showMessage(f"Error de dibujo 3D: {e}", 8000)
-            traceback.print_exc()
+            self.statusBar().showMessage(f"Error de dibujo 3D: {err}", 8000)
+        else:
+            tl = self.prj.loads
+            self.lbl_geom.setText("<b>Geometria de la conexion</b>" + (
+                f"   —   columna inclinada  X {tl.tilt_x:g}°, Y {tl.tilt_y:g}°" if tl.tilted else ""))
         if elev is not None:
             self.cv_3d.ax.view_init(elev=elev, azim=azim)
         view3d.fit_to_axes(self.cv_3d.ax)
         self.cv_3d.cv.draw_idle()
-
-    def _bolt_loads(self):
-        fem = self._fem_now()
-        post = getattr(fem, "post", None) if fem is not None else None
-        return list(getattr(post, "bolts", []) or [])
 
     def draw_3d(self):
         """Pestaña 'Analisis FEM': campo de resultados; vacia hasta que el calculo termina."""
@@ -1474,6 +1506,8 @@ class MainWindow(QMainWindow):
             try:
                 nm = t.item(i, 0).text().strip() or f"Comb {i + 1}"
                 v = [float(t.item(i, j).text().replace(",", "")) for j in range(1, 6)]
+                if not all(math.isfinite(x) for x in v):
+                    raise ValueError("valor no finito")
             except (AttributeError, ValueError):
                 old = self.prj.combos[i] if i < len(self.prj.combos) else LoadCombo(f"Comb {i + 1}")
                 cs.append(old)
