@@ -23,6 +23,11 @@ Mises promediado pasa a ser informativo. Con plasticidad solo en la placa el cal
 Tu caso del tubo (placa 300×300×20, A36): PEEQ = 0.02-0.09 % segun la malla, contra 0.0 % de IDEA. Se desactiva en Elementos finitos.
 Con barras U la condicion A de ACI (φ = 0.75) se aplica sola; la casilla manual se elimino. En el visor, el analisis elasto-plastico reporta solo el punto maximo, bajo la escala de colores.
 
+**Motor de placas (shell):** tambien usa la placa elasto-plastica (solo la placa; paso en pequenas deformaciones) y la fila de deformacion
+plastica. En el motor de placas CalculiX converge menos que en el solido (en PB-02 si: 0.003 %; en casos de compresion con contacto unilateral
+a veces no): si no converge, el programa pasa solo al criterio elastico (von Mises promediado ≤ 0.9·Fy) y lo avisa en el resultado. En casos
+sin convergencia el intento elastico puede tardar varios minutos en el motor de placas; el solido es mas robusto y mas rapido ahi.
+
 ## Barras U, cargas en el visor y elevacion (2.1)
 
 - **Barras U de refuerzo del arrancamiento** (pestaña Concreto): diametro de barra (#3 a #10), cantidad de U (cada una aporta 2 patas),

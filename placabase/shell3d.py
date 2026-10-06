@@ -392,6 +392,12 @@ def build_inp(prj: Project, mesh: dict, out_inp: str, spec: dict) -> dict:
             L.append(f"{eid}, " + ", ".join(map(str, c)))
             eid += 1
     L += ["*MATERIAL, NAME=ACERO", "*ELASTIC", f"{ES_KSI:.1f}, {NU_STEEL:.3f}"]
+    plastic = bool(getattr(prj.fea, "plastic", False))
+    if plastic:
+        # placa elasto-plastica perfecta con limite φ·Fy (igual que en el modelo solido); el resto, elastico
+        fy = 0.9 * prj.plate.mat().Fy
+        L += ["*MATERIAL, NAME=PLACA", "*ELASTIC", f"{ES_KSI:.1f}, {NU_STEEL:.3f}",
+              "*PLASTIC", f"{fy:.4f}, 0.0", f"{fy * 1.0005:.4f}, 0.25"]
     for gname, es in names.items():
         if gname == "plate":
             th = tp
@@ -399,7 +405,7 @@ def build_inp(prj: Project, mesh: dict, out_inp: str, spec: dict) -> dict:
             th = spec["walls"][int(gname[4:])]["t"]
         else:
             th = spec["stiff"][int(gname[5:])]["t"]
-        L += [f"*SHELL SECTION, ELSET={es}, MATERIAL=ACERO", f"{th:.6f}"]
+        L += [f"*SHELL SECTION, ELSET={es}, MATERIAL={'PLACA' if (plastic and gname == 'plate') else 'ACERO'}", f"{th:.6f}"]
 
     # ---- ligadura de la huella
     if eqs:
@@ -459,7 +465,10 @@ def build_inp(prj: Project, mesh: dict, out_inp: str, spec: dict) -> dict:
         L += [f"*SPRING, ELSET=EFRIC{dof}", str(dof), f"{kfric:.8f}"]
 
     L += ["*BOUNDARY", "NTIERRA, 1, 3", f"{ref + 1}, 3, 3",
-          "*STEP, NLGEOM, INC=300", "*STATIC", "0.5, 1.0, 1e-3, 1.0", "*CLOAD", f"{ref}, 3, {-ld.Pu:.5f}"]
+          # con plasticidad se resuelve en pequenas deformaciones (sin NLGEOM): converge en mas casos
+          ("*STEP, INC=60" if plastic else "*STEP, NLGEOM, INC=300"), "*STATIC",
+          # el intento plastico falla rapido (incremento minimo mayor) para pasar pronto al criterio elastico
+          ("0.5, 1.0, 0.02, 1.0" if plastic else "0.5, 1.0, 1e-3, 1.0"), "*CLOAD", f"{ref}, 3, {-ld.Pu:.5f}"]
     if abs(ld.Vux) > 0:
         L.append(f"{ref}, 1, {ld.Vux:.5f}")
     if abs(ld.Vuy) > 0:
@@ -468,7 +477,7 @@ def build_inp(prj: Project, mesh: dict, out_inp: str, spec: dict) -> dict:
         L.append(f"{ref + 1}, 1, {ld.Mux:.5f}")
     if abs(ld.Muy) > 0:
         L.append(f"{ref + 1}, 2, {ld.Muy:.5f}")
-    L += ["*NODE FILE", "U, RF", "*EL FILE", "S", "*END STEP"]
+    L += ["*NODE FILE", "U, RF", "*EL FILE", "S" + (", PEEQ" if plastic else ""), "*END STEP"]
     Path(out_inp).write_text("\n".join(L), encoding="utf-8")
     meta = {"ks": ks, "kb": kb, "tp": tp, "z_wall": tpm, "ztop": ztop, "shell": True,
             "base": sorted(plate_nodes), "base_ground": [gg for _, gg in conc_pairs],
@@ -561,6 +570,21 @@ def load_shell_results(frd: str, mesh: dict, prj: Project, spec: dict):
                 disp[n] = tuple(float(sum(d[q] for d in ds) / len(ds)) for q in range(3))
     vm.update(mid_vm)
     r.vm = vm
+    if getattr(prj.fea, "plastic", False):
+        from .view3d import read_peeq
+        pe_all = read_peeq(frd)
+        pe_mid = {}
+        for n in sorted({n for c in groups.get("plate", []) for n in c}):
+            x0, y0, z0 = nodes[n] if n in nodes else mesh_xyz[n]
+            best = 0.0
+            for k in tree.query_ball_point((x0, y0, z0), prj.plate.tp / 2.0 + 1e-3):
+                nid = int(ids[k])
+                xk, yk, _zk = nodes[nid]
+                if abs(xk - x0) > 1e-3 or abs(yk - y0) > 1e-3:
+                    continue
+                best = max(best, pe_all.get(nid, 0.0))
+            pe_mid[n] = best
+        r.peeq = pe_mid
     tris_all, parts = [], {"plate": [], "column": [], "stiff": []}
     for gname, lst in groups.items():
         key = "plate" if gname == "plate" else ("column" if gname.startswith("wall") else "stiff")
@@ -595,15 +619,25 @@ def full_shell(prj: Project, folder: str, stem: str = "modelo_placas", progress=
 
     lc0 = lc if lc else mesh3d.mesh_size_for(prj)
     last = "No se pudo completar el analisis."
-    for k, f in enumerate((1.0, 1.35, 1.8)):
+    import copy
+    elastic = copy.deepcopy(prj)
+    elastic.fea.plastic = False
+    # con plasticidad primero un intento; si CalculiX no converge se pasa al criterio elastico (mallas 1.0, 1.35, 1.8)
+    plan = ([(prj, 1.0, "")] if getattr(prj.fea, "plastic", False) else []) + \
+           [(elastic if getattr(prj.fea, "plastic", False) else prj, f, "") for f in (1.0, 1.35, 1.8)]
+    for k, (pj, f, _) in enumerate(plan):
         if cancel is not None and cancel.cancelled:
             return None, CANCELADO
-        tag = "" if k == 0 else f"  (reintento {k} con malla mas gruesa)"
-        res, msg = _full_shell_once(prj, folder, stem, lc0 * f, say, cancel, tag)
+        fallback = pj is elastic
+        tag = "" if k == 0 else (f"  (la plasticidad no convergio: criterio elastico)" if (fallback and f == 1.0 and k == 1)
+                                 else f"  (reintento con malla mas gruesa x{f:g})")
+        res, msg = _full_shell_once(pj, folder, stem, lc0 * f, say, cancel, tag)
         if res is not None or msg == CANCELADO or (cancel is not None and cancel.cancelled):
-            return res, (CANCELADO if (cancel is not None and cancel.cancelled) else msg)
+            if res is not None and fallback:
+                res.msg += "   (La plasticidad no convergio en este caso: se uso el criterio elastico de von Mises promediado.)"
+            return res, (CANCELADO if (cancel is not None and cancel.cancelled) else (res.msg if res is not None else msg))
         last = msg
-    return None, last + "\n\n(Se probaron tres tamanos de malla; revise la geometria o aumente el tamano manual.)"
+    return None, last + "\n\n(Se probaron varios tamanos de malla; revise la geometria o aumente el tamano manual.)"
 
 
 def _full_shell_once(prj, folder, stem, lc, say, cancel, tag=""):

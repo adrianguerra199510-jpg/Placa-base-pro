@@ -371,7 +371,8 @@ if "--3d" in sys.argv:
     # motor de placas (shell): corre, equilibra y entrega vistas y filas
     print()
     print("ANALISIS CON PLACAS (--3d)")
-    _ps = Project(); _ps.fea.engine = ENGINES[1]
+    from placabase.model import load_book
+    _ps = load_book("ejemplos/PB-02_HSS12_rigidizada.pbase")[0]; _ps.fea.engine = ENGINES[1]
     _rs, _ms = mesh3d.full_3d(_ps, tempfile.mkdtemp(prefix="pbsh_"))
     if _rs is None:
         FAIL.append(f"placas: no corrio: {_ms[-300:]}")
@@ -381,7 +382,11 @@ if "--3d" in sys.argv:
         _ps_ = _fs.post
         _eqs = _ps_.R_conc - _ps_.T_bolts - _ps.eloads.Pu
         _ks = [c.key for c in _Rs.checks if c.key.startswith("fem_")]
-        print(f"{'placas PB-01':34} nodos={_fs.n_nodes:,}  R−ΣT−Pu = {_eqs:+.3f} kip  filas: {_ks}")
+        print(f"{'placas PB-02':34} nodos={_fs.n_nodes:,}  R−ΣT−Pu = {_eqs:+.3f} kip  filas: {_ks}")
+        if _fs.peeq is None or "fem_peeq" not in _ks:
+            FAIL.append("placas: debe verificar la deformacion plastica (o caer al criterio elastico con aviso)")
+        else:
+            print(f"{'  deformacion plastica (placas)':34} {_fs.peeq[0]*100:.4f} %")
         if abs(_eqs) > 0.02 * max(1.0, abs(_ps.eloads.Pu)):
             FAIL.append(f"placas: equilibrio fuera de tolerancia ({_eqs:+.2f} kip)")
         if not {"fem_bolt", "fem_press", "fem_vm"} <= set(_ks):

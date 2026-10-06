@@ -976,14 +976,23 @@ def full_3d(prj: Project, folder: str, stem: str = "modelo3d", progress=None, ca
 
     lc0 = mesh_size_for(prj)
     last = "No se pudo completar el analisis."
-    for k, f in enumerate((1.0, 1.35, 1.8)):
+    import copy
+    elastic = copy.deepcopy(prj)
+    elastic.fea.plastic = False
+    plan = ([(prj, 1.0)] if getattr(prj.fea, "plastic", False) else []) + \
+           [(elastic if getattr(prj.fea, "plastic", False) else prj, f) for f in (1.0, 1.35, 1.8)]
+    for k, (pj, f) in enumerate(plan):
         if cancel is not None and cancel.cancelled:
             return None, CANCELADO
         lc = lc0 * f
-        tag = "" if k == 0 else f"  (reintento {k} con malla mas gruesa)"
-        res, msg = _full_3d_once(prj, folder, stem, lc, say, cancel, tag)
+        fallback = pj is elastic
+        tag = "" if k == 0 else ("  (la plasticidad no convergio: criterio elastico)" if (fallback and k == 1)
+                                 else f"  (reintento con malla mas gruesa x{f:g})")
+        res, msg = _full_3d_once(pj, folder, stem, lc, say, cancel, tag)
         if res is not None or (cancel is not None and cancel.cancelled) or msg == CANCELADO:
-            return res, (CANCELADO if (cancel is not None and cancel.cancelled) else msg)
+            if res is not None and fallback:
+                res.msg += "   (La plasticidad no convergio en este caso: se uso el criterio elastico de von Mises promediado.)"
+            return res, (CANCELADO if (cancel is not None and cancel.cancelled) else (res.msg if res is not None else msg))
         last = msg
     return None, last + "\n\n(Se probaron tres tamanos de malla; revise la geometria o aumente el tamano manual.)"
 
