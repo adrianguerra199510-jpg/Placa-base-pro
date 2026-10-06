@@ -13,6 +13,8 @@ kN / N / tonf / kgf, momento y esfuerzo por separado. Se aplican a las entradas,
 tabla de resultados y a los reportes. El cálculo interno siempre corre en in-kip-ksi,
 que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
 
+Los proyectos nuevos arrancan en **mm, kN, MPa, kN·m** (se cambia en la pestaña Proyecto; los archivos guardados conservan sus unidades).
+
 ## Placa elasto-plastica (2.1)
 
 Por defecto el 3D solido usa acero elasto-plastico perfecto (limite φ·Fy) **solo en la placa y la llave**: el esfuerzo queda acotado, desaparecen

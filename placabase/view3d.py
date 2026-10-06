@@ -541,8 +541,14 @@ def draw_loads(ax, items):
                                     edgecolors=(*to_rgb(color), 1.0), linewidths=0.3, zorder=41)
             coll.set_clip_on(False)
             ax.add_collection3d(coll)
-            mid = np.array(P_[len(P_) // 2])
-            ax.text(*mid, label, fontsize=9, color=color, fontweight="bold", zorder=50, ha="center", va="bottom",
+            # la etiqueta va junto a la punta de la flecha, hacia afuera del arco (no en el vertice, donde se
+            # cruzan los arcos de Mux y Muy)
+            centre = 0.5 * (np.array(P_[0]) + np.array(P_[-1]))
+            out_ = p_end - centre
+            out_[2] = 0.0
+            out_ = out_ / max(np.linalg.norm(out_), 1e-12)
+            pos = p_end + out_ * 0.55 * rad + np.array([0.0, 0.0, -0.35 * rad])
+            ax.text(*pos, label, fontsize=9, color=color, fontweight="bold", zorder=50, ha="center", va="center",
                     bbox=dict(boxstyle="round,pad=0.2", fc="#ffffffcc", ec=color, lw=0.8))
 
 

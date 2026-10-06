@@ -401,10 +401,10 @@ class Project:
     author: str = ""
     date: str = ""
     metric: bool = False
-    u_len: str = "in"
-    u_force: str = "kip"
-    u_stress: str = "ksi"
-    u_moment: str = "kip·in"
+    u_len: str = "mm"
+    u_force: str = "kN"
+    u_stress: str = "MPa"
+    u_moment: str = "kN·m"
 
     section: Section = field(default_factory=Section)
     plate: Plate = field(default_factory=Plate)
