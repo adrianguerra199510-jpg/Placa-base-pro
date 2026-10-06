@@ -312,6 +312,25 @@ if len(_its) != 2 or not _pts:
     FAIL.append("cargas 3D: se esperaban flechas de Pu y Vux")
 
 
+# ---------------------------------------------------- interfaz (solo si hay Qt): que existan y corran los metodos clave
+try:
+    os_ = __import__("os"); os_.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication as _QA
+    from placabase import ui as _ui
+    _app = _QA.instance() or _QA([])
+    _w = _ui.MainWindow()
+    for _m in ("_bolt_loads", "_fem_now", "_raw_now", "draw_geom", "draw_3d", "_goto_calc", "export_target", "recalc"):
+        if not hasattr(_w, _m):
+            FAIL.append(f"interfaz: falta el metodo {_m}")
+    _w.recalc(); _w.draw_geom(); _w.draw_3d()
+    _q, _R = _w.export_target()
+    print(f"{'interfaz (offscreen)':34} recalc, dibujo y exportacion OK   metodos: {len(dir(_w))}")
+except ImportError:
+    print(f"{'interfaz':34} omitida (sin PySide6)")
+except Exception as _e:
+    FAIL.append(f"interfaz: {type(_e).__name__}: {_e}")
+
+
 if "--3d" in sys.argv:
     # prueba de extremo a extremo con Gmsh + CalculiX (~30 s con la malla rapida)
     import tempfile

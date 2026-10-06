@@ -1336,9 +1336,13 @@ class MainWindow(QMainWindow):
         self._fill_combo_box()
         if not self.calculated:
             self._lbl_3d_idle()
-        self.draw_all()
-        self.fill_table()
-        self.fill_3d_tables()
+        for fn in (self.draw_all, self.fill_table, self.fill_3d_tables):
+            try:
+                fn()
+            except Exception as e:                  # un error de dibujo o de tabla no debe tumbar el resto
+                log = self._log_error(fn.__name__, e)
+                traceback.print_exc()
+                self.statusBar().showMessage(f"Error en {fn.__name__}: {e}  (detalle en {log})", 15000)
         if self.calculated and self.res.rec is not None:
             self.txt_mem.setHtml(self.res.rec.to_html())
         else:
@@ -1431,6 +1435,12 @@ class MainWindow(QMainWindow):
         view3d.fit_to_axes(self.cv_3d.ax)
         self.cv_3d.cv.draw_idle()
 
+    def _bolt_loads(self):
+        """(k, x, y, T) de cada perno del ultimo 3D vigente de la combinacion mostrada."""
+        fem = self._fem_now()
+        post = getattr(fem, "post", None) if fem is not None else None
+        return list(getattr(post, "bolts", []) or [])
+
     def draw_3d(self):
         """Pestaña 'Analisis FEM': campo de resultados; vacia hasta que el calculo termina."""
         try:
@@ -1448,12 +1458,23 @@ class MainWindow(QMainWindow):
             self.cv_res3d.cv.draw_idle()
             return
         fld = ["vm", "u", "uz"][self.cb_f3.currentIndex()]
-        m = view3d.plot3d(self.cv_res3d.ax, raw, self.prj, fld,
-                          float(self.sp_sc.value()), part=self.PARTS[self.cb_part.currentIndex()][0],
-                          bolts=self._bolt_loads(), loads=self.chk_loads_fem.isChecked())
-        if m is not None:
-            cax = self.cv_res3d.fig.add_axes([0.90, 0.18, 0.018, 0.64])
-            self.cv_res3d.fig.colorbar(m, cax=cax)
+        try:
+            m = view3d.plot3d(self.cv_res3d.ax, raw, self.prj, fld,
+                              float(self.sp_sc.value()), part=self.PARTS[self.cb_part.currentIndex()][0],
+                              bolts=self._bolt_loads(), loads=self.chk_loads_fem.isChecked())
+            if m is not None:
+                cax = self.cv_res3d.fig.add_axes([0.90, 0.18, 0.018, 0.64])
+                self.cv_res3d.fig.colorbar(m, cax=cax)
+        except Exception as e:
+            log = self._log_error("draw_3d (resultados)", e)
+            self.cv_res3d.reset(cbar=False)
+            self.cv_res3d.ax.set_axis_off()
+            self.cv_res3d.ax.text2D(0.5, 0.5, f"No se pudo dibujar el campo de resultados:\n{type(e).__name__}: "
+                                    f"{str(e)[:160]}\n\nDetalle en: {log}", ha="center", va="center",
+                                    color="#9c0006", transform=self.cv_res3d.ax.transAxes, fontsize=9)
+            self.statusBar().showMessage(f"Error al dibujar los resultados: {e}", 10000)
+            self.cv_res3d.cv.draw_idle()
+            return
         if elev is not None:
             self.cv_res3d.ax.view_init(elev=elev, azim=azim)
         view3d.fit_to_axes(self.cv_res3d.ax)
@@ -1605,6 +1626,19 @@ class MainWindow(QMainWindow):
             self.worker.cancel()
 
     def _on_3d(self, out, _msg=""):
+        """Termino el calculo: cualquier error al procesar o dibujar se muestra (y se guarda en error.log) en vez
+        de dejar la ventana sin resultados."""
+        try:
+            self._on_3d_impl(out, _msg)
+        except Exception as e:
+            log = self._log_error("fin del calculo", e)
+            traceback.print_exc()
+            self.btn3d.setEnabled(True)
+            QMessageBox.critical(self, "Error al mostrar los resultados",
+                                 f"El calculo termino pero no se pudieron mostrar los resultados:\n\n"
+                                 f"{type(e).__name__}: {e}\n\nDetalle en: {log}")
+
+    def _on_3d_impl(self, out, _msg=""):
         try:
             self.dlg3d.canceled.disconnect(self._cancel_3d)
         except Exception:
