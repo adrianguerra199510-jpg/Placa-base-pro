@@ -776,8 +776,36 @@ def build_inp(prj: Project, mesh_inp: str, out_inp: str, height: float = 0.0) ->
          "*MATERIAL, NAME=ACERO", "*ELASTIC",
          f"{ES_KSI:.1f}, {NU_STEEL:.3f}",
          ]
-    for vs in vol_sets:
-        L.append(f"*SOLID SECTION, ELSET={vs}, MATERIAL=ACERO")
+    plastic = bool(os.environ.get("PB_PLASTIC"))
+    if plastic:
+        # PROTOTIPO: acero elasto-plastico perfectamente plastico con limite φ·Fy (como IDEA StatiCa)
+        zmax = {}
+        cur = None
+        for ln in Path(mesh_inp).read_text(encoding="utf-8", errors="ignore").splitlines():
+            t = ln.strip()
+            if t.upper().startswith("*ELEMENT"):
+                m_ = re.search(r"ELSET\s*=\s*([^,\s]+)", t, re.I)
+                cur = m_.group(1) if m_ and re.search(r"TYPE\s*=\s*C3D", t, re.I) else None
+                continue
+            if t.startswith("*"):
+                cur = None
+                continue
+            if cur and t:
+                for n_ in t.rstrip(",").split(",")[1:]:
+                    n_ = n_.strip()
+                    if n_:
+                        zmax[cur] = max(zmax.get(cur, -1e9), nodes[int(n_)][2])
+        fy_pl = 0.9 * p.mat().Fy
+        fy_col = 0.9 * prj.section.mat().Fy
+        for nm, fy in (("PLACA", fy_pl), ("COLUMNA", fy_col)):
+            L += [f"*MATERIAL, NAME={nm}", "*ELASTIC", f"{ES_KSI:.1f}, {NU_STEEL:.3f}",
+                  "*PLASTIC", f"{fy:.4f}, 0.0", f"{fy * 1.0005:.4f}, 0.25"]
+        for vs in vol_sets:
+            nm = "PLACA" if zmax.get(vs, 9e9) <= p.tp + 1e-4 else "COLUMNA"
+            L.append(f"*SOLID SECTION, ELSET={vs}, MATERIAL={nm}")
+    else:
+        for vs in vol_sets:
+            L.append(f"*SOLID SECTION, ELSET={vs}, MATERIAL=ACERO")
     if cps:
         L.append("** ELSET de superficie que exporta Gmsh y CalculiX no usa: "
                  + ", ".join(sorted(set(cps))[:6]))
@@ -887,7 +915,7 @@ def build_inp(prj: Project, mesh_inp: str, out_inp: str, height: float = 0.0) ->
         L.append(f"{rot}, 1, {ld.Mux:.5f}")          # traccion en +Y
     if abs(ld.Muy) > 0:
         L.append(f"{rot}, 2, {ld.Muy:.5f}")
-    L += ["*NODE FILE", "U, RF", "*EL FILE", "S, E", "*END STEP"]
+    L += ["*NODE FILE", "U, RF", "*EL FILE", "S, E" + (", PEEQ" if plastic else ""), "*END STEP"]
 
     Path(out_inp).write_text("\n".join(L), encoding="utf-8")
     import json
