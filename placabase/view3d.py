@@ -140,6 +140,29 @@ def read_peeq(path: str) -> dict:
     return pe
 
 
+def part_peeq(res, prj, radius: float) -> dict:
+    """PEEQ por pieza -> {pieza: {"raw": (v, x, y, z), "avg": (v, x, y, z)}}.
+    raw = maximo nodal; avg = maximo del promedio de los nodos de la pieza dentro de `radius` (no depende de la
+    singularidad de un solo nodo, igual que el von Mises promediado)."""
+    from scipy.spatial import cKDTree
+    pe = getattr(res, "peeq", None)
+    out = {}
+    if not pe:
+        return out
+    for part, tris in res.parts.items():
+        ids_ = sorted({n for t in tris for n in t if n in pe and n in res.nodes})
+        if not ids_:
+            continue
+        P = np.array([res.nodes[n] for n in ids_], float)
+        V = np.array([pe[n] for n in ids_], float)
+        i = int(V.argmax())
+        tree = cKDTree(P)
+        sm = np.array([V[ix].mean() for ix in tree.query_ball_point(P, radius)])
+        j = int(sm.argmax())
+        out[part] = {"raw": (float(V[i]), *map(float, P[i])), "avg": (float(sm[j]), *map(float, P[j]))}
+    return out
+
+
 def plate_peeq(res, tp: float, tol: float = 1e-4):
     """(PEEQ maximo en la placa [fraccion], x, y, z) o None."""
     pe = getattr(res, "peeq", None)

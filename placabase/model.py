@@ -11,7 +11,6 @@ import dataclasses
 # --------------------------------------------------------------- catalogos
 WELD_MODELS = ["Conectores (cordon como resortes entre cuerpos separados)",
                "Fusionado (union monolitica, equivale a CJP)"]
-ENGINES = ["Solido 3D (tetraedros, recomendado)", "Placas (shell S6, experimental)"]
 FIXITY = ["Doble empotramiento (placa restringida)", "Voladizo (placa libre de girar)"]
 # barras de refuerzo ASTM A615 (diametro in, area in2)
 REBAR = {"#3": (0.375, 0.11), "#4": (0.500, 0.20), "#5": (0.625, 0.31), "#6": (0.750, 0.44),
@@ -385,12 +384,11 @@ class FEAOpts:
     ccx_path: str = "ccx"
     gmsh_path: str = "gmsh"
     mesh3d: float = 0.0          # tamano de malla 3D (0 = automatico)
-    engine: str = "Solido 3D (tetraedros, recomendado)"   # ver ENGINES
     mesh3d_mode: str = "Automatica (recomendada)"   # ver MESH3D_MODES
     shear_arm: float = -1.0      # brazo del cortante sobre la placa, in (-1 = automatico)
     vm_avg_factor: float = 1.0   # radio de promedio del von Mises 3D, en espesores de placa
-    plastic: bool = True         # placa elasto-plastica (limite φ·Fy): sin picos de esfuerzo; se verifica la deformacion plastica
-    plastic_limit: float = 5.0   # deformacion plastica equivalente maxima admitida en la placa, % (como IDEA StatiCa)
+    plastic: bool = True         # acero elasto-plastico en TODAS las piezas (limite φ·Fy): sin picos de esfuerzo; se verifica la deformacion plastica
+    plastic_limit: float = 5.0   # deformacion plastica equivalente maxima admitida, % (como IDEA StatiCa)
     weld_model: str = "Conectores (cordon como resortes entre cuerpos separados)"   # ver WELD_MODELS
 
 

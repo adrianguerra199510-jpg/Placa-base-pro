@@ -33,6 +33,8 @@ class Fem3D:
     n_elems: int = 0
     umax: float = 0.0
     vmmax: float = 0.0
+    peeq_r: float = 0.0              # radio de promedio de la PEEQ, in
+    peeq_parts: dict = None          # PEEQ por pieza (plate/column/stiff/lug/washer): {'raw': ..., 'avg': ...}
     peeq: tuple = None               # (PEEQ max en la placa [fraccion], x, y, z) si el analisis fue elasto-plastico
     folder: str = ""
     msg: str = ""
@@ -73,6 +75,17 @@ def fem_checks(prj: Project, br: Bearing, fem: Fem3D, rec=None) -> list:
                          "deformacion plastica admisible",
                          f"acero elasto-plastico con limite φ·Fy = {u.q('S', 0.9 * Fy)}; maximo en "
                          f"({u.fmt('L', pk[1])}, {u.fmt('L', pk[2])}, z = {u.fmt('L', pk[3])}) {u.L}"))
+    PN = {"column": "columna", "stiff": "rigidizadores", "lug": "llave de corte"}
+    for part, nm in PN.items():
+        d = (getattr(fem, "peeq_parts", None) or {}).get(part)
+        if d is None or pk is None:
+            continue
+        a = d["avg"]
+        out.append(Check(f"fem_peeq_{part}", f"FEM 3D — deformacion plastica equivalente en {nm}", a[0] * 100.0, lim, "%",
+                         "deformacion plastica admisible",
+                         f"promedio en r = {u.q('L', getattr(fem, 'peeq_r', 0.0) or 0.0)}; pico nodal {d['raw'][0] * 100:.3f} % "
+                         f"(singularidad de malla en el cordon, no se verifica); maximo en "
+                         f"({u.fmt('L', a[1])}, {u.fmt('L', a[2])}, z = {u.fmt('L', a[3])}) {u.L}"))
     if va:
         if pk is not None:        # con plasticidad el esfuerzo queda acotado por φ·Fy: se informa, no se verifica
             out.append(Check("fem_vm", "FEM 3D — von Mises promediado en la placa (informativo)", va["vm"], 0.90 * Fy,

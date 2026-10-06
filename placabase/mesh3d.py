@@ -33,7 +33,7 @@ import sys
 from .model import Project
 from . import geometry as G
 from .units import ES_KSI, NU_STEEL, Ec_ksi
-from .params3d import washer_radius, washer_thickness
+from .params3d import washer_radius, washer_thickness, washer_elements
 from .shapes import W_SHAPE, HSS_RECT
 
 
@@ -776,34 +776,52 @@ def build_inp(prj: Project, mesh_inp: str, out_inp: str, height: float = 0.0) ->
          "*MATERIAL, NAME=ACERO", "*ELASTIC",
          f"{ES_KSI:.1f}, {NU_STEEL:.3f}",
          ]
-    plastic = bool(getattr(prj.fea, "plastic", False))      # solo en la placa: es lo que se verifica y el costo se cuadruplicaria en el resto
+    plastic = bool(getattr(prj.fea, "plastic", False))
     if plastic:
-        # acero elasto-plastico perfectamente plastico con limite φ·Fy (como IDEA StatiCa), solo en la placa y la llave
-        zmax = {}
-        cur = None
+        # TODAS las piezas son de acero elasto-plastico perfecto con limite φ·Fy de su propio acero (como IDEA
+        # StatiCa).  Cada elemento se asigna a su pieza por su centroide (igual que classify_parts): asi funciona
+        # tambien con la union fusionada, donde placa, perfil y rigidizadores son un solo volumen.
+        from .view3d import _covered_by_profile
+        zl = max(z for (_x, _y, z) in nodes.values())
+        by_cls = {"PLACA": [], "COLUMNA": [], "RIGID": [], "LLAVE": [], "ARANDELA": []}
+        cur_ok = False
         for ln in Path(mesh_inp).read_text(encoding="utf-8", errors="ignore").splitlines():
             t = ln.strip()
             if t.upper().startswith("*ELEMENT"):
-                m_ = re.search(r"ELSET\s*=\s*([^,\s]+)", t, re.I)
-                cur = m_.group(1) if m_ and re.search(r"TYPE\s*=\s*C3D", t, re.I) else None
+                cur_ok = bool(re.search(r"TYPE\s*=\s*C3D", t, re.I))
                 continue
             if t.startswith("*"):
-                cur = None
+                cur_ok = False
                 continue
-            if cur and t:
-                for n_ in t.rstrip(",").split(",")[1:]:
-                    n_ = n_.strip()
-                    if n_:
-                        zmax[cur] = max(zmax.get(cur, -1e9), nodes[int(n_)][2])
-        fy_pl = 0.9 * p.mat().Fy
-        fy_col = 0.9 * prj.section.mat().Fy
-        for nm, fy in (("PLACA", fy_pl), ("COLUMNA", fy_col)):
-            L += [f"*MATERIAL, NAME={nm}", "*ELASTIC", f"{ES_KSI:.1f}, {NU_STEEL:.3f}"]
-            if nm == "PLACA":
-                L += ["*PLASTIC", f"{fy:.4f}, 0.0", f"{fy * 1.0005:.4f}, 0.25"]
-        for vs in vol_sets:
-            nm = "PLACA" if zmax.get(vs, 9e9) <= p.tp + 1e-4 else "COLUMNA"
-            L.append(f"*SOLID SECTION, ELSET={vs}, MATERIAL={nm}")
+            if cur_ok and t:
+                v_ = [x_.strip() for x_ in t.rstrip(",").split(",") if x_.strip()]
+                c4 = [nodes[int(n_)] for n_ in v_[1:5]]
+                xc = sum(q[0] for q in c4) / 4.0
+                yc = sum(q[1] for q in c4) / 4.0
+                zc = sum(q[2] for q in c4) / 4.0
+                if zc < 0:
+                    k_ = "LLAVE"
+                elif zc < p.tp:
+                    k_ = "PLACA"
+                elif washer_elements(prj, xc, yc, zc):
+                    k_ = "ARANDELA"
+                elif _covered_by_profile(prj, xc, yc):
+                    k_ = "COLUMNA"
+                else:
+                    k_ = "RIGID"
+                by_cls[k_].append(int(v_[0]))
+        fy_of = {"PLACA": p.mat().Fy, "ARANDELA": p.mat().Fy, "COLUMNA": prj.section.mat().Fy,
+                 "RIGID": prj.stiff.mat().Fy, "LLAVE": prj.lug.mat().Fy}
+        for nm, ids_ in by_cls.items():
+            if not ids_:
+                continue
+            fy = 0.9 * fy_of[nm]
+            L += [f"*MATERIAL, NAME=M{nm}", "*ELASTIC", f"{ES_KSI:.1f}, {NU_STEEL:.3f}",
+                  "*PLASTIC", f"{fy:.4f}, 0.0", f"{fy * 1.0005:.4f}, 0.25",
+                  f"*ELSET, ELSET=EL{nm}"]
+            for i_ in range(0, len(ids_), 16):
+                L.append(", ".join(str(x_) for x_ in ids_[i_:i_ + 16]))
+            L.append(f"*SOLID SECTION, ELSET=EL{nm}, MATERIAL=M{nm}")
     else:
         for vs in vol_sets:
             L.append(f"*SOLID SECTION, ELSET={vs}, MATERIAL=ACERO")
@@ -970,10 +988,6 @@ def full_3d(prj: Project, folder: str, stem: str = "modelo3d", progress=None, ca
         if progress:
             progress(m_)
 
-    if str(getattr(prj.fea, "engine", "")).startswith("Placas"):
-        from . import shell3d
-        return shell3d.full_shell(prj, folder, "modelo_placas", progress, cancel)
-
     lc0 = mesh_size_for(prj)
     last = "No se pudo completar el analisis."
     import copy
@@ -1051,6 +1065,13 @@ def _full_3d_once(prj, folder, stem, lc, say, cancel, tag=""):
         res.parts = classify_parts(res, prj)
     except Exception:
         res.parts = {}
+    if getattr(res, "peeq", None):
+        try:
+            from .view3d import part_peeq
+            res.peeq_parts = part_peeq(res, prj, max(prj.plate.tp, lc / 1.2))
+        except Exception as e:
+            res.peeq_parts = {}
+            res.msg += f"   (PEEQ por pieza no disponible: {e})"
     try:                                            # caras de la interfaz: no son superficie visible
         dup = set(_json.loads(Path(inp).with_suffix(".meta.json").read_text(encoding="utf-8"))
                   .get("conn", {}).get("dup", {}).values())

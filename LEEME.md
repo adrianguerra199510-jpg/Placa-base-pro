@@ -1,6 +1,6 @@
 <p align="center"><img src="placabase/data/logo.png" width="420" alt="PlacaBasePro"></p>
 
-# PlacaBasePro 2.1
+# PlacaBasePro 3.0
 
 Diseño y verificación de placas base para perfiles **W, HSS cuadrado/rectangular,
 HSS circular y Pipe**, con dibujo paramétrico, anclajes ACI 318-19, llave de corte,
@@ -15,18 +15,20 @@ que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
 
 Los proyectos nuevos arrancan en **mm, kN, MPa, kN·m** (se cambia en la pestaña Proyecto; los archivos guardados conservan sus unidades).
 
-## Placa elasto-plastica (2.1)
+## Version 3.0: acero elasto-plastico en todas las piezas y sin motor de placas
 
-Por defecto el 3D solido usa acero elasto-plastico perfecto (limite φ·Fy) **solo en la placa y la llave**: el esfuerzo queda acotado, desaparecen
-los picos puntuales y la verificacion es la deformacion plastica equivalente (PEEQ) maxima de la placa ≤ 5 % (criterio de IDEA StatiCa). El von
-Mises promediado pasa a ser informativo. Con plasticidad solo en la placa el calculo cuesta ~+25 % (en todo el modelo seria ~4 veces).
-Tu caso del tubo (placa 300×300×20, A36): PEEQ = 0.02-0.09 % segun la malla, contra 0.0 % de IDEA. Se desactiva en Elementos finitos.
-Con barras U la condicion A de ACI (φ = 0.75) se aplica sola; la casilla manual se elimino. En el visor, el analisis elasto-plastico reporta solo el punto maximo, bajo la escala de colores.
+Se **retira el motor de placas (shell)** de la 2.0: el unico analisis es el **solido 3D** (tetraedros, con arandelas y conectores de soldadura). Con plasticidad el motor de placas no convergia en varios casos (compresion con contacto unilateral, el tubo de comparacion) y modelaba peor la soldadura y el von Mises. Los archivos antiguos con ese motor elegido se abren sin problema y usan el solido.
 
-**Motor de placas (shell):** tambien usa la placa elasto-plastica (solo la placa; paso en pequenas deformaciones) y la fila de deformacion
-plastica. En el motor de placas CalculiX converge menos que en el solido (en PB-02 si: 0.003 %; en casos de compresion con contacto unilateral
-a veces no): si no converge, el programa pasa solo al criterio elastico (von Mises promediado ≤ 0.9·Fy) y lo avisa en el resultado. En casos
-sin convergencia el intento elastico puede tardar varios minutos en el motor de placas; el solido es mas robusto y mas rapido ahi.
+### Plasticidad
+
+Por defecto el 3D usa acero elasto-plastico perfecto (limite φ·Fy del acero de CADA pieza: placa, perfil, rigidizadores, llave y
+arandelas): el esfuerzo queda acotado, desaparecen los picos puntuales y se verifica la deformacion plastica equivalente (PEEQ) ≤ 5 %. La
+placa se verifica con el maximo nodal; el perfil, los rigidizadores y la llave, con el promedio en un circulo de radio ≈ espesor, porque el
+borde del cordon es una singularidad de malla (en el tubo de comparacion: placa 0.016 %, perfil 0.2 % promedio y 1.3 % puntual). El von Mises
+promediado pasa a ser informativo. Se desactiva en Elementos finitos (vuelve al criterio elastico ≤ 0.9·Fy); si CalculiX no converge con
+plasticidad, el programa usa el criterio elastico y lo avisa.
+Con barras U la condicion A de ACI (φ = 0.75) se aplica sola; la casilla manual se elimino. En el visor, el analisis elasto-plastico reporta
+solo el punto maximo, bajo la escala de colores.
 
 ## Barras U, cargas en el visor y elevacion (2.1)
 
@@ -45,8 +47,6 @@ Icono propio del programa y del .exe (`placabase/data/placabasepro.ico`), logo e
 
 ## Novedades de la 2.1: combinaciones de carga, flexion del perno y nueva organizacion
 
-- **Motor por defecto: solido 3D** (tetraedros, con arandelas y conectores de soldadura). El de placas (shell)
-  de la 2.0 sigue disponible como "experimental" en Elementos finitos > Tipo de elementos.
 - **Flexion en los anclajes (stand-off):** Pernos > "Separacion libre placa-concreto". Con valor > 0 el cortante
   flexiona el perno en el tramo libre l = stand-off + mortero + tp/2 (se verifica si stand-off + mortero > db/2; un mortero mas delgado lo cubre el factor 0.80 de ACI): M = V·l/2 (doble empotramiento) o V·l (voladizo);
   se verifica φMn = 0.90·Fy·Z (AISC F11) y la interaccion traccion-flexion T/φTn + M/φMn ≤ 1 (AISC H1-1a). La
@@ -59,35 +59,9 @@ Icono propio del programa y del .exe (`placabase/data/placabasepro.ico`), logo e
   D/C, memoria ni tabla de resultados ("SIN CALCULAR"); si se edita algo, el resultado vuelve a quedar sin calcular.
 - **Pestañas:** "Modelo y vistas" (solo geometria: 3D + planta + elevacion, que tambien alterna con el detalle del rigidizador; sin cuadricula), "Analisis FEM" (selector de combinacion, campos, soldadura y pernos; con "Placa base" se rotulan los anclajes y el mas exigido va en rojo) y "Resultados" (combinaciones, verificaciones, botones de memoria PDF/Word y, con "Mostrar calculos detallados", la memoria; al hacer clic en una fila se salta a su calculo). CALCULAR esta junto a Guardar; el D/C, en la esquina superior derecha.
 
-## Novedades de la 2.0: modelo de placas (shell) en lugar de solido 3D
+## Novedades de la 2.0 (motor de placas, retirado en la 3.0)
 
-El analisis de elementos finitos usa ahora **elementos tipo placa** (triangulos cuadraticos S6, Reissner-Mindlin,
-CalculiX) por defecto (`Tipo de elementos` en la pestana de elementos finitos). El solido de tetraedros sigue
-disponible como referencia (`Solido 3D (tetraedros, referencia)`).
-
-- Se modelan a media superficie: placa base, alas/alma/caras del perfil y rigidizadores (poligono prolongado hasta
-  el eje de la pared). La huella del perfil y de los rigidizadores se une a la placa con ecuaciones lineales
-  solo en los nodos que caen sobre sus bordes (unir toda la huella rigidiza de mas).
-- Concreto: resortes Winkler solo a compresion; pernos: resortes solo a traccion en el anillo de la arandela;
-  llave de corte: resortes horizontales. Acoplamiento superior por MPC lineal (cuerpo rigido).
-- Paso no lineal con NLGEOM (necesario para que CalculiX itere los resortes unilaterales).
-- Soldadura: se extrae del campo de esfuerzos (union fusionada); los conectores y las arandelas solo existen en
-  el modelo solido.
-
-Validacion contra el solido (malla rapida), mismos casos:
-
-| Caso | ΣT pernos (placas / solido) | p max (ksi) | von Mises promediado (ksi) |
-|---|---|---|---|
-| PB-02 | 43.8 / 45.9 | 1.734 / 1.736 | 24.1 / 22.9 |
-| PB-01 (sin llave) | 93.9 / 99.6 | 3.56 / 3.74 | 42.4 / 26.9 (cara inferior 27.1) |
-| IDEA 1000 kN (kN, 3 pernos tipicos) | 127/92/155 / 121/100/158 (IDEA 112/104/172) | — | ~593 / ~517-540 MPa |
-
-Los pernos salen entre −9 % y +5 % del solido (tendencia ligeramente no conservadora, ~5-9 %); la presion
-coincide ±5 %; el von Mises es conservador (+5 a +57 %) junto a la huella del perfil.
-**Limitaciones:** no usar placas con espesor muy grande frente a su vuelo (regimen de viga de gran peralte; con
-tp = 8 in el resultado no es valido: use el solido); no modela arandelas ni conectores de soldadura; la llave
-de corte es un conjunto de resortes. La compatibilidad del CalculiX 2.14 incluido en Windows no se ha probado
-con ecuaciones/resortes; con CalculiX 2.21 se probo completo.
+La 2.0 incluyo un motor de elementos tipo placa (shell S6). Se retiro en la 3.0; ver arriba.
 
 ## Novedades: malla 3D automatica, reintentos y boton para cancelar
 

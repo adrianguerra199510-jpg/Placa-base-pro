@@ -34,8 +34,9 @@ def make_fem(prj, res, rep=None) -> Fem3D:
     """`res` es el Result3D de mesh3d.full_3d.  La firma es la del proyecto con que se corrio."""
     if rep is None:
         rep = make_rep3d(prj, res)
-    pk = view3d.plate_peeq(res, prj.plate.tp) if getattr(prj.fea, "plastic", False) else None
-    return Fem3D(peeq=pk, post=getattr(res, "post", None), vm_avg=getattr(res, "vm_avg", None), rep=rep,
+    pp = getattr(res, "peeq_parts", None) or {}
+    pk = pp["plate"]["raw"] if "plate" in pp else None
+    return Fem3D(peeq=pk, peeq_parts=pp, peeq_r=max(prj.plate.tp, getattr(res, 'lc', 0.0) / 1.2), post=getattr(res, "post", None), vm_avg=getattr(res, "vm_avg", None), rep=rep,
                  fast=mesh3d.is_fast_mesh(prj), lc=getattr(res, "lc", 0.0), n_nodes=res.n_nodes, n_elems=res.n_elems,
                  umax=res.umax, vmmax=res.vmmax, folder=getattr(res, "folder", ""),
                  msg=getattr(getattr(res, "post", None), "msg", ""), sig=prj.sig3d())
