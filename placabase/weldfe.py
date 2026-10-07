@@ -213,7 +213,7 @@ def _weld_stiff(spec):
         return 5.0 * ES_KSI, 5.0 * GS
     if spec.wtype.startswith("PJP"):
         return ES_KSI, GS
-    return 0.707 * ES_KSI, 0.707 * GS
+    return 0.707 * GS, 0.707 * GS          # filete: rigidez del throat a cortante, 0.272·E, en las tres direcciones (Xara/PB-01)
 
 
 def free_faces(S: Split):
@@ -376,12 +376,13 @@ def _weld_cards_plastic(prj, on, H, eid_box, D):
             L.append(f"{eid}, {r['dn']}, {H[r['dn']]}")
             eid += 1
         if dy > 0:
+            fy_, fm = kk * dy, kk * dy + SLOPE * kk * (D - dy)
             L += [f"*SPRING, ELSET={name}, NONLINEAR",
-                  f"{-kk * 1e-6 * D:.6e}, {-D:.1f}", "0.0, 0.0", f"{kk * dy:.6e}, {dy:.8f}",
-                  f"{kk * dy + SLOPE * kk * (D - dy):.6e}, {D:.1f}"]
+                  f"{-fm:.6e}, {-D:.1f}", f"{-fy_:.6e}, {-dy:.8f}", "0.0, 0.0",
+                  f"{fy_:.6e}, {dy:.8f}", f"{fm:.6e}, {D:.1f}"]
         else:
             L += [f"*SPRING, ELSET={name}, NONLINEAR",
-                  f"{-kk * 1e-6 * D:.6e}, {-D:.1f}", "0.0, 0.0", f"{kk * D:.6e}, {D:.1f}"]
+                  f"{-kk * D:.6e}, {-D:.1f}", "0.0, 0.0", f"{kk * D:.6e}, {D:.1f}"]
     # cortante x e y : clase por (k·w, fluencia del resorte)
     for dof in (1, 2):
         cls = {}
@@ -456,7 +457,7 @@ def write_cards(prj, S: Split, recs, eid: int):
                 L.append(f"{eid}, {r['dn']}, {H[r['dn']]}")
                 eid += 1
             L += [f"*SPRING, ELSET=EWELDN{ci + 200}, NONLINEAR",
-                  f"{-kk * 1e-6 * D:.6e}, {-D:.1f}", "0.0, 0.0", f"{kk * D:.6e}, {D:.1f}"]
+                  f"{-kk * D:.6e}, {-D:.1f}", "0.0, 0.0", f"{kk * D:.6e}, {D:.1f}"]    # el elemento transmite tambien compresion
         cl_s = _classes([(i, r["ks"] * r["w"]) for i, r in enumerate(on)])
         for ci, lst in sorted(cl_s.items()):
             kk = sum(v for _, v in lst) / len(lst)
@@ -501,13 +502,13 @@ def prepare_and_cards(prj, mesh_in, mesh_split, eid_start):
 def _cap_line(prj, spec, fn, fl, ft, beta=1.0):
     """Capacidad por unidad de longitud de UNA linea de cordon (AISC J2.4) y su D/C.
     -> (cap, ratio, kd).  Filete/PJP: φ·0.60·FEXX·garganta·kd.  CJP: no se verifica por linea."""
-    f = math.sqrt(max(fn, 0.0) ** 2 + fl * fl + ft * ft)
+    f = math.sqrt(fn * fn + fl * fl + ft * ft)             # el elemento toma tambien compresion: cuenta su modulo (Ec. 23 del paper)
     if spec.wtype.startswith("CJP") or spec.wtype == "Sin soldadura" or f < 1e-12:
         return 0.0, 0.0, 1.0
     thr = 0.707 * spec.size if spec.wtype == "Filete" else spec.size
     kd = 1.0
     if spec.wtype == "Filete" and prj.welds.directional:
-        sin_th = min(1.0, math.sqrt(max(fn, 0.0) ** 2 + ft * ft) / f)
+        sin_th = min(1.0, math.sqrt(fn * fn + ft * ft) / f)
         kd = 1.0 + 0.5 * sin_th ** 1.5                                   # AISC Ec. J2-5
     cap = 0.75 * 0.60 * spec.FEXX() * thr * kd * beta
     return cap, f / cap, kd
@@ -537,7 +538,7 @@ def _wall_ratio(prj, spec, key, t, fn, fl, ft):
     if matching_electrode(spec.FEXX(), Fu):
         return 0.0                    # AISC J2.4: con electrodo compatible no se verifica el metal base (paper, Ec. 23)
     cap_b = 0.75 * 0.60 * Fu * t
-    return math.sqrt(max(fn, 0.0) ** 2 + fs * fs) / cap_b
+    return math.sqrt(fn * fn + fs * fs) / cap_b
 
 
 def _smooth(a, w, comps, win, period=None):
@@ -594,7 +595,7 @@ def postprocess_conn(prj, res, conn, WeldZone, spec_txt):
                 wl = walls_all[r["wall"]]
                 spec_r = wl["spec"]
                 fyl, fyt = yield_levels(prj, spec_r, r.get("beta", 1.0))
-                dn_ = max(elong(r["up"], r["dn"]), 0.0)
+                dn_ = elong(r["up"], r["dn"])
                 fn, pn = spring_force(dn_, r["kn"], (fyt / r["kn"]) if fyt > 0 else 0.0)
                 fyx, fyy = shear_yields(fyl, fyt, r["ux"], r["uy"])
                 fx, px = spring_force(e[0], r["ks"], (fyx / r["ks"]) if fyx > 0 else 0.0)
@@ -602,7 +603,7 @@ def postprocess_conn(prj, res, conn, WeldZone, spec_txt):
                 leg = max(spec_r.size, 1e-6)
                 epl = math.sqrt(pn * pn + px * px + py * py) / leg
             else:
-                fn = r["kn"] * max(elong(r["up"], r["dn"]), 0.0)
+                fn = r["kn"] * elong(r["up"], r["dn"])
                 fx, fy = r["ks"] * e[0], r["ks"] * e[1]
         else:
             fn = fx = fy = 0.0
@@ -691,7 +692,7 @@ def postprocess_conn(prj, res, conn, WeldZone, spec_txt):
             # plastico: el pico se juzga por la deformacion plastica del cordon (la redistribucion ya esta en el modelo);
             # la rotura del metal base se exige con la fuerza MEDIA de la pared (ver ra mas abajo)
             rat = rw if (plas and cap > 0) else max(rw, rb)
-            f = math.sqrt(max(fn, 0.0) ** 2 + fl * fl + ft * ft)
+            f = math.sqrt(fn * fn + fl * fl + ft * ft)
             Z.samples.append((r["x"], r["y"], f, rat))
             if rat >= Z.ratio and (f > 1e-9 or rat > 0):
                 Z.fmax, Z.fn, Z.fl, Z.ft = f, fn, fl, ft
