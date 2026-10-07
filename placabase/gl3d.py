@@ -288,14 +288,16 @@ class Scene:
             if how == "hide":
                 continue
             if how == "ghost":
+                # fantasma: relleno tenue del color de la pieza y contorno nitido (se lee la huella del perfil sobre la placa)
+                fill, edge = GHOST.get(grp, ((0.55, 0.58, 0.62), (0.30, 0.33, 0.38)))
                 g = arr.copy()
                 if kind == "l":
-                    g[:, 6:9] = (0.55, 0.58, 0.62)
-                    g[:, 9] = 0.30
+                    g[:, 6:9] = edge
+                    g[:, 9] = 0.95
                     l.append(g)
                 else:
-                    g[:, 6:9] = (0.55, 0.58, 0.62)
-                    g[:, 9] = 0.30
+                    g[:, 6:9] = fill
+                    g[:, 9] = 0.42
                     t.append(g)
                 continue
             {"o": o, "t": t, "l": l}[kind].append(arr)
@@ -355,6 +357,9 @@ class Scene:
             texts.append((tuple((q1 + q2) / 2 + np.array(d.get("tshift", (0, 0, 0)), float)), d["text"]))
         return np.array(seg, np.float32).reshape(-1, FLOATS), texts
 
+
+GHOST = {"column": ((0.36, 0.55, 0.78), (0.10, 0.25, 0.50)),      # (relleno, contorno) de las piezas en gris tenue
+         "stiff": ((0.45, 0.72, 0.40), (0.20, 0.45, 0.18))}
 
 # vistas: grupo -> 'show' | 'ghost' | 'hide'.  Planta: solo la placa y el mortero, la columna y los rigidizadores en gris tenue
 MODE_RULES = {
