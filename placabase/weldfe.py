@@ -633,6 +633,8 @@ def postprocess_conn(prj, res, conn, WeldZone, spec_txt):
             period = 2.0 * math.pi * rr
         mean_w = float(np.mean(w)) if w else 0.1
         win = max(4.0 * spec.size, 6.0 * mean_w, 0.5)
+        if plas:
+            win = 1e-9      # cordon plastico (IDEA / Ghimire et al.): valor por elemento, sin suavizar; la fluencia redistribuye
         S = _smooth(a, w, [[r["fn"] for r in lst], [r["fl"] for r in lst], [r["ft"] for r in lst],
                            [r["epl"] for r in lst]], win, period)
         smoothed[gk] = (lst, S, period, win)
