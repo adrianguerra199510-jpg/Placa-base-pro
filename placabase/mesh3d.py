@@ -993,17 +993,26 @@ def full_3d(prj: Project, folder: str, stem: str = "modelo3d", progress=None, ca
     import copy
     elastic = copy.deepcopy(prj)
     elastic.fea.plastic = False
-    plan = ([(prj, 1.0)] if getattr(prj.fea, "plastic", False) else []) + \
-           [(elastic if getattr(prj.fea, "plastic", False) else prj, f) for f in (1.0, 1.35, 1.8)]
+    elastic.fea.weld_criterion = "Elastico (pico limitado y media)"
+    plan = ([(prj, 1.0)] if getattr(prj.fea, "plastic", False) else [])
+    if str(getattr(prj.fea, "weld_criterion", "")).startswith("Plastico") and getattr(prj.fea, "plastic", False):
+        weld_el = copy.deepcopy(prj)                   # plasticidad en las piezas pero cordon elastico
+        weld_el.fea.weld_criterion = "Elastico (pico limitado y media)"
+        plan.append((weld_el, 1.0))
+    plan += [(elastic if getattr(prj.fea, "plastic", False) else prj, f) for f in (1.0, 1.35, 1.8)]
     for k, (pj, f) in enumerate(plan):
         if cancel is not None and cancel.cancelled:
             return None, CANCELADO
         lc = lc0 * f
         fallback = pj is elastic
-        tag = "" if k == 0 else ("  (la plasticidad no convergio: criterio elastico)" if (fallback and k == 1)
+        weld_fb = (pj is not prj) and (not fallback) and pj.fea.plastic
+        tag = "" if k == 0 else ("  (el cordon plastico no convergio: cordon elastico)" if weld_fb else
+                                 "  (la plasticidad no convergio: criterio elastico)" if (fallback and k == 1)
                                  else f"  (reintento con malla mas gruesa x{f:g})")
         res, msg = _full_3d_once(pj, folder, stem, lc, say, cancel, tag)
         if res is not None or (cancel is not None and cancel.cancelled) or msg == CANCELADO:
+            if res is not None and weld_fb:
+                res.msg += "   (El cordon plastico no convergio en este caso: se uso el cordon elastico, con pico limitado.)"
             if res is not None and fallback:
                 res.msg += "   (La plasticidad no convergio en este caso: se uso el criterio elastico de von Mises promediado.)"
             return res, (CANCELADO if (cancel is not None and cancel.cancelled) else (res.msg if res is not None else msg))

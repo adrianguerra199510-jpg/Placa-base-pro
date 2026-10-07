@@ -9,6 +9,8 @@ from .shapes import CATALOG, Shape, W_SHAPE, GENERIC_KINDS, rect_props
 import dataclasses
 
 # --------------------------------------------------------------- catalogos
+WELD_CRITERIA = ["Plastico 5 % (Ghimire et al. 2023, como IDEA StatiCa)",
+                 "Elastico (pico limitado y media)"]
 WELD_MODELS = ["Conectores (cordon como resortes entre cuerpos separados)",
                "Fusionado (union monolitica, equivale a CJP)"]
 FIXITY = ["Doble empotramiento (placa restringida)", "Voladizo (placa libre de girar)"]
@@ -391,6 +393,9 @@ class FEAOpts:
     plastic_limit: float = 5.0   # deformacion plastica equivalente maxima admitida, % (como IDEA StatiCa)
     weld_peak_factor: float = 1.5   # el D/C PICO local de la soldadura (FEM) se admite hasta este valor; la media, hasta 1.0
     weld_model: str = "Conectores (cordon como resortes entre cuerpos separados)"   # ver WELD_MODELS
+    weld_criterion: str = "Plastico 5 % (Ghimire et al. 2023, como IDEA StatiCa)"   # ver WELD_CRITERIA
+    weld_plastic_limit: float = 5.0     # deformacion plastica de la garganta a la que el D/C del cordon vale 1, %
+    weld_long_reduction: bool = True    # reduccion por cordon largo, AISC J2.2b(d): L > 100·w (el FEM no la captura)
 
 
 @dataclass

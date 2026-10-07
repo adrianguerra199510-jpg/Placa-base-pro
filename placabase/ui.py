@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (QAbstractSpinBox, QApplication, QMainWindow, QWid
 from . import __version__
 from .model import (INSTALL_TYPES, ADH_ENV, ADH_CATEGORY)
 from .model import (Project, PATTERNS, ANCHOR_TYPES, WELD_TYPES, PLATE_SHAPES,
-                    LUG_DIRS, STIFF_POSITIONS, STIFF_SHAPES, STIFF_SPACING)
+                    LUG_DIRS, STIFF_POSITIONS, STIFF_SHAPES, STIFF_SPACING, WELD_CRITERIA)
 from . import materials as M
 from .shapes import CATALOG, W_SHAPE, HSS_RECT, HSS_ROUND, PIPE, KIND_LABELS
 from .model import LUG_TYPES, save_book, load_book, MESH3D_MODES, WELD_MODELS, FIXITY, LoadCombo, REBAR
@@ -629,6 +629,9 @@ class MainWindow(QMainWindow):
         f.text("CalculiX propio (opcional)", "fea.ccx_path", help="Dejelo vacio: el programa usa el CalculiX incluido en la carpeta solvers. Solo escriba una ruta si quiere usar otra version de ccx.exe.")
         f.combo("Calidad de la malla 3D", "fea.mesh3d_mode", MESH3D_MODES, help="Automatica (recomendada): el programa calcula el tamano de elemento del proyecto: el mayor entre 1.2 veces el radio de promedio del von Mises (con eso el esfuerzo promediado converge, ±2 % en el estudio de convergencia) y la raiz del area de la placa / 400 (limita el costo en placas grandes, ~70-90 mil nodos). Fina: 0.65 veces ese tamano (mas lenta). Si el calculo falla, el programa reintenta solo con una malla mas gruesa. Un tamano manual mayor que 0 (abajo) tiene prioridad.")
         f.combo("Modelo de la soldadura", "fea.weld_model", WELD_MODELS, help="Conectores (recomendado): el perfil y la placa son cuerpos separados; la compresion pasa por contacto y cada linea de cordon es un conector de traccion y cortante cuya fuerza se lee directo del resorte (una zona sin soldar o un lado sin cordon no transmite). Fusionado: union monolitica que equivale a una CJP; la fuerza del cordon se deduce de los esfuerzos del perfil y una zona sin soldar transmite igual.")
+        f.combo("Criterio del cordon (FEM)", "fea.weld_criterion", WELD_CRITERIA, help="Plastico 5 % (Ghimire et al. 2023, como IDEA StatiCa): los conectores del cordon son elasto-plasticos; fluyen en la resistencia de diseno AISC J2.4 con una rama plastica corta, lo que redistribuye los picos locales, y el D/C del cordon vale 1 cuando la deformacion plastica de su garganta llega al limite. Elastico: los conectores son lineales; el D/C PICO se admite hasta el limite indicado y la MEDIA hasta 1.0.")
+        f.num("Deformacion plastica limite del cordon (%)", "fea.weld_plastic_limit", 1, 20, 0.5, 1, help="Deformacion plastica de la garganta del cordon a la que el D/C vale 1.0. 5 % es el valor de IDEA StatiCa y del articulo de Ghimire et al. (2023); AISC 360 admite hasta 10 % en cordones transversales y 48 % en longitudinales, pero no se debe contar con la ductilidad del cordon.")
+        f.check("Reduccion por cordon largo (AISC J2.2b(d))", "fea.weld_long_reduction", help="El FEM no captura la reduccion de resistencia de los cordones largos (Ghimire et al. 2023). Si se marca, la capacidad de los filetes con L > 100·w se multiplica por β = 1.2 − 0.002·L/w (β = 0.6 a 300·w; longitud efectiva 180·w despues). Es conservador para cordones que no estan cargados en sus extremos.")
         f.check("Acero elasto-plastico en todas las piezas (sin picos de esfuerzo)", "fea.plastic", help="Modela el acero de TODAS las piezas (placa, perfil, rigidizadores, llave y arandelas) como elasto-plastico perfecto con limite φ·Fy de su propio acero (como IDEA StatiCa): el esfuerzo no pasa de φ·Fy, los picos puntuales desaparecen y se verifica la deformacion plastica equivalente (PEEQ). Placa: maximo nodal; perfil, rigidizadores y llave: promedio en un circulo de radio ≈ espesor (el borde del cordon es una singularidad de malla). Cuesta unas 4 veces mas tiempo que el calculo elastico. El von Mises que se muestra se recorta en φ·Fy de cada pieza (CalculiX lo extrapola a los nodos y puede pasarse del tope aunque el material no lo haga). Si CalculiX no converge con plasticidad, el programa usa solo el criterio elastico y lo avisa. Desactivado: criterio elastico de von Mises promediado ≤ 0.9·Fy.")
         f.num("Deformacion plastica maxima admitida (%)", "fea.plastic_limit", 0.1, 20, 0.5, 1, help="Limite de la deformacion plastica equivalente en la placa. IDEA StatiCa usa 5 %.")
         f.num("Limite del D/C pico de la soldadura (FEM)", "fea.weld_peak_factor", 1.0, 3.0, 0.05, 2, help="El FEM da en cada cara del cordon un D/C PICO (el punto mas cargado, tipicamente en las esquinas, en regimen elastico) y un D/C MEDIA (la fuerza de la cara repartida en su longitud). Un filete ductil redistribuye plasticamente el pico antes de fallar, y RAM e IDEA StatiCa no lo penalizan, por eso el pico se admite hasta este valor (1.5 por defecto) y la media hasta 1.0. El D/C de la fila es max(pico / limite, media). Ponga 1.0 para exigir el pico completo (muy conservador).")
@@ -1320,7 +1323,11 @@ class MainWindow(QMainWindow):
         ff, fe = F["Elementos finitos"], prj.fea
         ff.show_field("fea.ks_manual", fe.ks_mode == "manual")
         ff.show_field("fea.plastic_limit", bool(fe.plastic))
-        ff.show_field("fea.weld_peak_factor", str(fe.weld_model).startswith("Conectores"))
+        conn = str(fe.weld_model).startswith("Conectores")
+        pl = str(fe.weld_criterion).startswith("Plastico")
+        ff.show_field("fea.weld_criterion", conn)
+        ff.show_field("fea.weld_plastic_limit", conn and pl)
+        ff.show_field("fea.weld_peak_factor", conn and not pl)
 
     def _update_labels(self):
         self._update_visibility()

@@ -62,6 +62,9 @@ class WeldZone:
     L: float = 0.0           # longitud de la pared
     f_avg: float = 0.0       # demanda media (resultante / longitud)
     ratio_avg: float = 0.0
+    plastic: bool = False    # criterio plastico (conectores elasto-plasticos): el D/C pico es eps / limite
+    eps: float = 0.0         # deformacion plastica maxima de la garganta (suavizada), fraccion
+    beta: float = 1.0        # reduccion por cordon largo aplicada (AISC J2.2b(d))
 
 
 @dataclass

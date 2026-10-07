@@ -108,10 +108,22 @@ def fem_checks(prj: Project, br: Bearing, fem: Fem3D, rec=None) -> list:
         # la resistencia, por la redistribucion plastica de un filete ductil (AISC J2.4 lo permite; RAM e IDEA
         # no lo penalizan); la MEDIA de la cara se exige completa.  D/C de la fila = max(pico/F, media).
         F = max(1.0, float(getattr(prj.fea, "weld_peak_factor", 1.5)))
+        if getattr(z, "plastic", False) and z.cap > 0:
+            # criterio plastico (Ghimire et al. 2023): D/C = deformacion plastica de la garganta / limite; media <= 1.0
+            lim_w = float(getattr(prj.fea, "weld_plastic_limit", 5.0))
+            dem = max(z.ratio, z.ratio_avg) * z.cap
+            out.append(Check(f"fem_weld{i}", f"FEM 3D — soldadura {z.name}", dem, z.cap, "kip/in",
+                             "AISC J2.4 + plastico 5 %",
+                             f"{z.spec}; deformacion plastica de la garganta {z.eps * 100:.2f} % (limite {lim_w:g} %); "
+                             f"pico {u.q('LF', z.fmax)} (D/C pico {z.ratio:.3f}); media {u.q('LF', z.f_avg)} "
+                             f"(D/C media {z.ratio_avg:.3f}); {z.note}"
+                             + (f"; reduccion por cordon largo β = {z.beta:.2f}" if z.beta < 0.999 else "")))
+            continue
         dem = max(z.fmax / F, z.f_avg) if cap > 0 else z.fmax
         out.append(Check(f"fem_weld{i}", f"FEM 3D — soldadura {z.name}", dem, cap, "kip/in",
                          "AISC J2.4", f"{z.spec}; pico {u.q('LF', z.fmax)} (D/C pico {z.ratio:.3f}, limite {F:g}); "
-                         f"media {u.q('LF', z.f_avg)} (D/C media {z.ratio_avg:.3f}, limite 1.0); {z.note}"))
+                         f"media {u.q('LF', z.f_avg)} (D/C media {z.ratio_avg:.3f}, limite 1.0); {z.note}"
+                         + (f"; reduccion por cordon largo β = {z.beta:.2f}" if z.beta < 0.999 else "")))
     if rec:
         rec.section("I.  ELEMENTOS FINITOS SOLIDOS 3D  (Gmsh + CalculiX)")
         rec.text("Modelo solido de tetraedros cuadraticos: placa con los agujeros taladrados, perfil, "
@@ -122,9 +134,16 @@ def fem_checks(prj: Project, br: Bearing, fem: Fem3D, rec=None) -> list:
                      "(resortes solo-compresion) y cada linea de cordon es un conector de traccion y cortante "
                      "cuya fuerza se lee directo del resorte (F = k·Δ); un lado sin cordon no transmite. La "
                      "fuerza por unidad de longitud se suaviza en una ventana de 4 veces el cateto y se compara "
-                     "con φ·0.60·FEXX·garganta·kd por linea (AISC J2.4) y con la rotura del metal base. El D/C PICO "
-                     "(punto mas cargado, en regimen elastico) se admite hasta el limite del proyecto (por defecto 1.5, "
-                     "por la redistribucion plastica del filete) y la MEDIA de cada cara hasta 1.0.")
+                     "con φ·0.60·FEXX·garganta·kd por linea (AISC J2.4) y con la rotura del metal base. "
+                     + ("Los conectores son ELASTO-PLASTICOS (Ghimire et al. 2023, como IDEA StatiCa): fluyen en esa "
+                        "resistencia de diseno con una rama plastica corta (pendiente k/1000), lo que redistribuye los "
+                        "picos; el D/C del cordon vale 1 cuando la deformacion plastica de la garganta llega al limite "
+                        f"({getattr(prj.fea, 'weld_plastic_limit', 5.0):g} %) y la MEDIA de cada cara se exige hasta 1.0."
+                        if str(getattr(prj.fea, "weld_criterion", "")).startswith("Plastico") else
+                        "El D/C PICO (punto mas cargado, en regimen elastico) se admite hasta el limite del proyecto "
+                        "(por defecto 1.5, por la redistribucion plastica del filete) y la MEDIA de cada cara hasta 1.0.")
+                     + (" El FEM no captura la reduccion por cordon largo: se aplica β (AISC J2.2b(d)) cuando L > 100·w."
+                        if getattr(prj.fea, "weld_long_reduction", True) else ""))
         else:
             rec.text("Soldadura: union perfil-placa monolitica (equivale a CJP); la fuerza del cordon se deduce "
                      "de los esfuerzos del perfil sobre el pie y se verifica con AISC J2.4.")

@@ -317,6 +317,30 @@ if len(_its) != 2 or not _pts:
     FAIL.append("cargas 3D: se esperaban flechas de Pu y Vux")
 
 
+# ---------------------------------------------------- criterios del cordon (Ghimire et al. 2023)
+try:
+    from placabase import weldfe as _wf
+    from placabase.model import WeldSpec as _WS
+    _pw = Project()
+    _sp = _WS("Filete", 0.5, _pw.welds.flange.electrode, True)
+    _mk = lambda L: {"periodic": False, "spec": _sp, "p1": (0.0, 0.0), "p2": (L, 0.0)}
+    _b = [_wf.long_beta(_pw, _mk(L)) for L in (40.0, 60.0, 100.0, 150.0, 200.0)]       # L/w = 80, 120, 200, 300, 400
+    _exp = [1.0, 0.96, 0.8, 0.6, 0.45]
+    if any(abs(a - b) > 1e-9 for a, b in zip(_b, _exp)):
+        FAIL.append(f"β de cordon largo incorrecto: {_b} (esperado {_exp})")
+    _pw.fea.weld_long_reduction = False
+    if _wf.long_beta(_pw, _mk(200.0)) != 1.0:
+        FAIL.append("β de cordon largo: la opcion desactivada debe dar 1.0")
+    _f, _p = _wf.spring_force(0.001, 1000.0, 0.0005)
+    if abs(_f - (0.5 + 0.0005)) > 1e-9 or abs(_p - 0.0005) > 1e-12 or _wf.spring_force(0.0003, 1000.0, 0.0005) != (0.3, 0.0):
+        FAIL.append("conector elasto-plastico: fuerza o deformacion plastica incorrectas")
+    _fl, _ft = _wf.yield_levels(_pw, _sp)
+    if abs(_ft / _fl - 1.5) > 1e-9 or abs(_fl - 0.75 * 0.60 * _sp.FEXX() * 0.707 * 0.5) > 1e-9:
+        FAIL.append("fluencia del cordon: debe ser φ·0.60·FEXX·garganta (x1.5 transversal)")
+    print(f"{'cordon: β, conector plastico':34} β = {[round(v, 2) for v in _b]}   fluencia = {_fl:.2f} / {_ft:.2f} kip/in")
+except Exception as _e:
+    FAIL.append(f"criterios del cordon: {type(_e).__name__}: {_e}")
+
 # ---------------------------------------------------- visor OpenGL: la escena se arma sin necesitar GPU
 try:
     from placabase import gl3d as _gl

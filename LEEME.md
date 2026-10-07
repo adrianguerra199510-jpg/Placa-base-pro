@@ -1,6 +1,6 @@
 <p align="center"><img src="placabase/data/logo.png" width="420" alt="PlacaBasePro"></p>
 
-# PlacaBasePro 3.1.3
+# PlacaBasePro 3.2.0
 
 Diseño y verificación de placas base para perfiles **W, HSS cuadrado/rectangular,
 HSS circular y Pipe**, con dibujo paramétrico, anclajes ACI 318-19, llave de corte,
@@ -14,6 +14,36 @@ tabla de resultados y a los reportes. El cálculo interno siempre corre en in-ki
 que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
 
 Los proyectos nuevos arrancan en **mm, kN, MPa, kN·m** (se cambia en la pestaña Proyecto; los archivos guardados conservan sus unidades).
+
+## Novedades de la 3.2.0: criterios del paper de soldaduras
+
+Basado en Ghimire, Wald, Vild y Kabelac, *Numerical design calculation of the fillet weld resistance*, Welding in the World (2023):
+
+- **Cordon plastico (5 %), como IDEA StatiCa.** Con el modelo de conectores, la soldadura es ahora elasto-plastica: cada conector
+  (normal solo-traccion y cortante x, y) fluye en la resistencia de diseno AISC J2.4, φ·0.60·FEXX·garganta (x1.5 si trabaja
+  transversal, J2-5), con una rama plastica corta de pendiente k/1000. Eso redistribuye los picos locales de las esquinas en lugar de
+  limitarlos con un factor. El D/C del cordon vale 1 cuando la deformacion plastica de la garganta llega al limite (5 %, editable) y la
+  MEDIA de cada cara se exige hasta 1.0. El criterio anterior (elastico con pico limitado) sigue disponible en Elementos finitos. Si
+  CalculiX no converge con el cordon plastico, se repite con el cordon elastico y se avisa.
+- **Reduccion por cordon largo (AISC J2.2b(d)).** El paper confirma que el FEM no captura esta reduccion. Se aplica β a los filetes con
+  L > 100·w: β = 1.2 − 0.002·L/w (0.6 a 300·w; longitud efectiva 180·w despues). Es conservador para cordones no cargados en sus
+  extremos; se puede desactivar en Elementos finitos.
+- La resistencia por linea sigue siendo la de AISC con el incremento direccional (coincide con la Ec. 23 del paper).
+
+## Novedades de la 3.2.0: criterios del paper de soldaduras
+
+Basado en Ghimire, Wald, Vild y Kabelac, *Numerical design calculation of the fillet weld resistance*, Welding in the World (2023):
+
+- **Cordon plastico (5 %), como IDEA StatiCa.** Con el modelo de conectores, la soldadura es ahora elasto-plastica: cada conector
+  (normal solo-traccion y cortante x, y) fluye en la resistencia de diseno AISC J2.4, φ·0.60·FEXX·garganta (x1.5 si trabaja
+  transversal, J2-5), con una rama plastica corta de pendiente k/1000. Eso redistribuye los picos locales de las esquinas en lugar de
+  limitarlos con un factor. El D/C del cordon vale 1 cuando la deformacion plastica de la garganta llega al limite (5 %, editable) y la
+  MEDIA de cada cara se exige hasta 1.0. El criterio anterior (elastico con pico limitado) sigue disponible en Elementos finitos. Si
+  CalculiX no converge con el cordon plastico, se repite con el cordon elastico y se avisa.
+- **Reduccion por cordon largo (AISC J2.2b(d)).** El paper confirma que el FEM no captura esta reduccion. Se aplica β a los filetes con
+  L > 100·w: β = 1.2 − 0.002·L/w (0.6 a 300·w; longitud efectiva 180·w despues). Es conservador para cordones no cargados en sus
+  extremos; se puede desactivar en Elementos finitos.
+- La resistencia por linea sigue siendo la de AISC con el incremento direccional (coincide con la Ec. 23 del paper).
 
 ## Novedades de la 3.1.3
 
