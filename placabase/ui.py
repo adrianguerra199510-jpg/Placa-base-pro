@@ -14,9 +14,9 @@ matplotlib.use("QtAgg")
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
 
-from PySide6.QtCore import Qt, QTimer, QThread, Signal, QObject
+from PySide6.QtCore import Qt, QTimer, QThread, Signal, QObject, QEvent
 from PySide6.QtGui import QAction, QKeySequence, QColor, QFont, QIcon, QPixmap
-from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QTabWidget, QSplitter,
+from PySide6.QtWidgets import (QAbstractSpinBox, QComboBox, QApplication, QMainWindow, QWidget, QTabWidget, QSplitter,
                                QVBoxLayout, QHBoxLayout, QLabel, QTableWidget,
                                QTableWidgetItem, QHeaderView, QFileDialog, QMessageBox,
                                QComboBox, QPushButton, QTextEdit, QToolBar, QCheckBox,
@@ -224,7 +224,10 @@ class MainWindow(QMainWindow):
             bt = QPushButton(txt); bt.clicked.connect(fn); hb.addWidget(bt)
         cl.addLayout(hb)
         left.addWidget(cw)
-        left.addWidget(self.tabs_in)
+        tw = QWidget(); tl = QVBoxLayout(tw); tl.setContentsMargins(4, 2, 4, 0); tl.setSpacing(4)
+        tl.addWidget(self.btn3d)
+        tl.addWidget(self.tabs_in)
+        left.addWidget(tw)
         left.setSizes([190, 800])
         spl = QSplitter(Qt.Horizontal)
         spl.addWidget(left)
@@ -287,16 +290,21 @@ class MainWindow(QMainWindow):
         act(m_exp, "Reportes PDF de TODAS las conexiones...", lambda: self.export_all("pdf"))
         act(m_exp, "Reportes Word de TODAS las conexiones...", lambda: self.export_all("docx"))
 
-        tb.addSeparator()
         self.btn3d = QPushButton("CALCULAR  (F8)")
         self.btn3d.setStyleSheet(f"QPushButton{{background:{brand.ORANGE};color:white;font-weight:bold;"
-                                 f"padding:4px 14px;border-radius:4px;margin-left:6px;margin-right:6px;}}"
+                                 f"padding:7px 14px;border-radius:4px;font-size:10pt;}}"
                                  f"QPushButton:hover{{background:{brand.ORANGE_DK};}}"
                                  f"QPushButton:disabled{{background:#e9b999;}}")
         self.btn3d.setToolTip("Corre el analisis 3D (Gmsh + CalculiX) de todas las combinaciones de carga y "
                               "entrega el veredicto. Mientras no se calcule no se muestra ningun resultado.")
         self.btn3d.clicked.connect(self.run_3d)
-        tb.addWidget(self.btn3d)
+        tb.addSeparator()
+        self.act_dark = QAction("Tema oscuro", self)
+        self.act_dark.setCheckable(True)
+        self.act_dark.setChecked(_theme_dark())
+        self.act_dark.setToolTip("Cambia entre tema claro y oscuro (los graficos siguen sobre fondo blanco)")
+        self.act_dark.toggled.connect(self._set_dark)
+        tb.addAction(self.act_dark)
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         tb.addWidget(spacer)                     # empuja el D/C a la esquina superior derecha
@@ -1988,11 +1996,48 @@ class MainWindow(QMainWindow):
             "Los resultados deben ser revisados por un ingeniero responsable.")
         mb.exec()
 
+    def _set_dark(self, on):
+        brand.apply_theme(QApplication.instance(), on)
+        try:
+            from PySide6.QtCore import QSettings
+            QSettings("PlacaBasePro", "PlacaBasePro").setValue("dark", bool(on))
+        except Exception:
+            pass
+
     def closeEvent(self, ev):
         if self.worker is not None and self.worker.isRunning():
             self.worker.cancel()                  # no deja Gmsh/CalculiX corriendo al cerrar
             self.worker.wait(5000)
         ev.accept()
+
+
+def _theme_dark():
+    """El programa abre en claro salvo que el usuario haya elegido el tema oscuro."""
+    try:
+        from PySide6.QtCore import QSettings
+        v = QSettings("PlacaBasePro", "PlacaBasePro").value("dark", False)
+        return str(v).lower() in ("true", "1")
+    except Exception:
+        return False
+
+
+class _WheelGuard(QObject):
+    """La rueda del raton solo cambia campos numericos/listas que tengan el foco (clic previo);
+    si no, el giro se reenvia al panel para que haga scroll."""
+    def eventFilter(self, obj, ev):
+        if ev.type() != QEvent.Wheel or not isinstance(obj, QWidget):
+            return False
+        w = obj
+        while w is not None and not w.isWindow():
+            if isinstance(w, (QAbstractSpinBox, QComboBox)):
+                if w.hasFocus() or (w.isEditable() if isinstance(w, QComboBox) else False) and w.lineEdit().hasFocus():
+                    return False
+                par = w.parentWidget()
+                if par is not None:
+                    QApplication.sendEvent(par, ev)
+                return True
+            w = w.parentWidget()
+        return False
 
 
 def main():
@@ -2006,7 +2051,9 @@ def main():
     app.setApplicationName("PlacaBasePro")
     app.setStyle("Fusion")
     app.setWindowIcon(QIcon(brand.ICO()))
-    app.setStyleSheet(brand.STYLE)
+    brand.apply_theme(app, _theme_dark())
+    app._wheel_guard = _WheelGuard(app)
+    app.installEventFilter(app._wheel_guard)
     splash = None
     pm = QPixmap(brand.LOGO())
     if not pm.isNull():
