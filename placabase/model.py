@@ -389,6 +389,7 @@ class FEAOpts:
     vm_avg_factor: float = 1.0   # radio de promedio del von Mises 3D, en espesores de placa
     plastic: bool = True         # acero elasto-plastico en TODAS las piezas (limite φ·Fy): sin picos de esfuerzo; se verifica la deformacion plastica
     plastic_limit: float = 5.0   # deformacion plastica equivalente maxima admitida, % (como IDEA StatiCa)
+    weld_peak_factor: float = 1.5   # el D/C PICO local de la soldadura (FEM) se admite hasta este valor; la media, hasta 1.0
     weld_model: str = "Conectores (cordon como resortes entre cuerpos separados)"   # ver WELD_MODELS
 
 

@@ -104,9 +104,14 @@ def fem_checks(prj: Project, br: Bearing, fem: Fem3D, rec=None) -> list:
         cap = (z.fmax / z.ratio) if (z.ratio > 1e-12 and z.ratio != float("inf")) else z.cap
         if z.ratio == float("inf"):
             cap = 0.0
-        out.append(Check(f"fem_weld{i}", f"FEM 3D — soldadura {z.name}", z.fmax, cap, "kip/in",
-                         "AISC J2.4", f"{z.spec}; media {u.q('LF', z.f_avg)} "
-                         f"(D/C media {z.ratio_avg:.3f}); {z.note}"))
+        # El pico elastico local (esquinas, donde el perfil llega a la placa) se admite hasta `weld_peak_factor` veces
+        # la resistencia, por la redistribucion plastica de un filete ductil (AISC J2.4 lo permite; RAM e IDEA
+        # no lo penalizan); la MEDIA de la cara se exige completa.  D/C de la fila = max(pico/F, media).
+        F = max(1.0, float(getattr(prj.fea, "weld_peak_factor", 1.5)))
+        dem = max(z.fmax / F, z.f_avg) if cap > 0 else z.fmax
+        out.append(Check(f"fem_weld{i}", f"FEM 3D — soldadura {z.name}", dem, cap, "kip/in",
+                         "AISC J2.4", f"{z.spec}; pico {u.q('LF', z.fmax)} (D/C pico {z.ratio:.3f}, limite {F:g}); "
+                         f"media {u.q('LF', z.f_avg)} (D/C media {z.ratio_avg:.3f}, limite 1.0); {z.note}"))
     if rec:
         rec.section("I.  ELEMENTOS FINITOS SOLIDOS 3D  (Gmsh + CalculiX)")
         rec.text("Modelo solido de tetraedros cuadraticos: placa con los agujeros taladrados, perfil, "
@@ -117,7 +122,9 @@ def fem_checks(prj: Project, br: Bearing, fem: Fem3D, rec=None) -> list:
                      "(resortes solo-compresion) y cada linea de cordon es un conector de traccion y cortante "
                      "cuya fuerza se lee directo del resorte (F = k·Δ); un lado sin cordon no transmite. La "
                      "fuerza por unidad de longitud se suaviza en una ventana de 4 veces el cateto y se compara "
-                     "con φ·0.60·FEXX·garganta·kd por linea (AISC J2.4) y con la rotura del metal base.")
+                     "con φ·0.60·FEXX·garganta·kd por linea (AISC J2.4) y con la rotura del metal base. El D/C PICO "
+                     "(punto mas cargado, en regimen elastico) se admite hasta el limite del proyecto (por defecto 1.5, "
+                     "por la redistribucion plastica del filete) y la MEDIA de cada cara hasta 1.0.")
         else:
             rec.text("Soldadura: union perfil-placa monolitica (equivale a CJP); la fuerza del cordon se deduce "
                      "de los esfuerzos del perfil sobre el pie y se verifica con AISC J2.4.")

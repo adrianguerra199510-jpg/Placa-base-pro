@@ -346,6 +346,11 @@ if "--3d" in sys.argv:
         _fem = make_fem(_p3, _res)
         _R = solve(_p3, fem=_fem)
         _ks = [c.key for c in _R.checks if c.key.startswith("fem_")]
+        _p3s = Project.from_json(_p3.to_json()); _p3s.fea.weld_peak_factor = 1.0
+        _Rs1 = {c.key: c for c in solve(_p3s, fem=_fem).checks}
+        for c in _R.checks:
+            if c.key.startswith("fem_weld") and _Rs1[c.key].ratio + 1e-9 < c.ratio:
+                FAIL.append("3D: un limite de pico mas holgado no puede aumentar el D/C de la soldadura")
         _post = _fem.post
         _eq = _post.R_conc - _post.T_bolts - _p3.eloads.Pu
         print(f"{'3D PB-01':34} nodos={_fem.n_nodes:,}  R−ΣT−Pu = {_eq:+.3f} kip  filas: {_ks}")

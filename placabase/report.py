@@ -830,7 +830,7 @@ def export_pdf(prj: Project, res: Results, path: str,
         for i, r in enumerate(wr[1:], start=1):
             for j in (5, 6):
                 try:
-                    ok = float(r[j]) <= 1.0
+                    ok = float(r[j]) <= (float(getattr(prj.fea, "weld_peak_factor", 1.5)) if j == 5 else 1.0)
                 except ValueError:
                     ok = False
                 st.append(("BACKGROUND", (j, i), (j, i),

@@ -15,6 +15,12 @@ que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
 
 Los proyectos nuevos arrancan en **mm, kN, MPa, kN·m** (se cambia en la pestaña Proyecto; los archivos guardados conservan sus unidades).
 
+## Soldadura en el FEM: pico y media
+
+Cada cara del cordon se evalua con un **D/C pico** (punto mas cargado, elastico) y un **D/C media** (fuerza de la cara / su longitud). El pico se admite
+hasta `Limite del D/C pico` (Elementos finitos; 1.5 por defecto, por la redistribucion plastica de un filete ductil, y porque RAM e IDEA no lo
+penalizan) y la media hasta 1.0; el D/C de la fila es max(pico / limite, media). El calculo cerrado equivale a la media.
+
 ## Version 3.0: acero elasto-plastico en todas las piezas y sin motor de placas
 
 Se **retira el motor de placas (shell)** de la 2.0: el unico analisis es el **solido 3D** (tetraedros, con arandelas y conectores de soldadura). Con plasticidad el motor de placas no convergia en varios casos (compresion con contacto unilateral, el tubo de comparacion) y modelaba peor la soldadura y el von Mises. Los archivos antiguos con ese motor elegido se abren sin problema y usan el solido.
