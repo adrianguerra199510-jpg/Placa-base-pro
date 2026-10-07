@@ -488,7 +488,7 @@ C_PU, C_V, C_M = "#c0392b", "#1d4ed8", "#7c3aed"
 def load_arrows(prj, kl, ztop=None):
     """Flechas de las cargas de la combinacion activa, en el sistema de la placa (ejes de la columna si no esta inclinada).
     -> (lista de elementos a dibujar, puntos para el encuadre).  Coordenadas ya divididas por kl."""
-    L = prj.eloads
+    L = prj.loads if (prj.loads.tilted and ztop is None) else prj.eloads      # inclinada: las cargas se dan en ejes de la columna y asi se dibujan
     if not all(np.isfinite(x) for x in (L.Pu, L.Mux, L.Muy, L.Vux, L.Vuy)):
         return [], []                           # cargas invalidas: no se dibujan flechas
     u = prj.units()
