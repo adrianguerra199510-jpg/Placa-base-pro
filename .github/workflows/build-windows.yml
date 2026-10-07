@@ -22,6 +22,7 @@ jobs:
           python -m pip install -r requirements.txt pyinstaller
       - name: Autoprueba del motor
         run: python selftest.py
+        shell: pwsh
         env:
           QT_QPA_PLATFORM: offscreen
       - name: Compilar

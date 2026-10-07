@@ -2,6 +2,11 @@
 """Autopruebas del motor de calculo (sin interfaz grafica)."""
 import sys, math, traceback
 sys.path.insert(0, ".")
+for _st in (sys.stdout, sys.stderr):          # consolas de Windows (cp1252/cp850) no codifican φ, ° ni —
+    try:
+        _st.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 from placabase.model import Project
 from placabase.solver import solve
