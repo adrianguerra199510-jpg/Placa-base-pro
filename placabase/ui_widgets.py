@@ -36,6 +36,7 @@ class Form(QWidget):
         self.us = UnitSet()       # la ventana principal la reemplaza
         self._lay = None
         self._help = {}           # widget -> descripcion
+        self.groups = {}          # titulo -> caja del grupo
         self.info = None          # panel de ayuda al pie del formulario
         self.group("")
 
@@ -79,12 +80,33 @@ class Form(QWidget):
     # ----------------------------------------------------------- estructura
     def group(self, title):
         box = QGroupBox(title) if title else QWidget()
+        self.groups[title] = box
         lay = QFormLayout(box)
         lay.setLabelAlignment(Qt.AlignRight)
         lay.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         self.outer.addWidget(box)
         self._lay = lay
         return box
+
+    def w(self, path):
+        """Widget del campo enlazado a `path` ('plate.N')."""
+        for f in self.fields:
+            if f[0] == path:
+                return f[1]
+        raise KeyError(path)
+
+    def show_field(self, path_or_widget, on):
+        """Muestra u oculta la fila completa (etiqueta + campo) de un campo."""
+        wd = self.w(path_or_widget) if isinstance(path_or_widget, str) else path_or_widget
+        par = wd.parentWidget()
+        lay = par.layout() if par is not None else None
+        if isinstance(lay, QFormLayout):
+            lay.setRowVisible(wd, bool(on))
+        else:
+            wd.setVisible(bool(on))
+
+    def show_group(self, title, on):
+        self.groups[title].setVisible(bool(on))
 
     def note(self, text):
         lb = QLabel(text)

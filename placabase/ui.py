@@ -315,10 +315,13 @@ class MainWindow(QMainWindow):
         self.tabs_in = QTabWidget()
         self.forms = []
 
+        self.fnamed = {}
+
         def new_form(title):
             f = Form()
             f.changed.connect(self.on_change)
             self.forms.append(f)
+            self.fnamed[title] = f
             self.tabs_in.addTab(scroll(f), title)
             return f
 
@@ -915,6 +918,7 @@ class MainWindow(QMainWindow):
             self._combo_load()
         finally:
             self._loading = False
+        self._update_visibility()
         self._update_labels()
 
     def store_ui(self):
@@ -1241,7 +1245,79 @@ class MainWindow(QMainWindow):
         self._update_labels()
         self.timer.start(350)
 
+    def _update_visibility(self):
+        """Cada pestaña muestra solo los campos que aplican a lo seleccionado."""
+        prj, F = self.prj, self.fnamed
+        # ---- placa
+        fp, pl = F["Placa"], prj.plate
+        circ = pl.shape == "Circular"
+        fp.show_field("plate.N", not circ)
+        fp.show_field("plate.B", not circ)
+        fp.show_field("plate.Dp", circ)
+        # ---- perfil
+        F["Perfil"].show_field("section.gap", bool(prj.section.double))
+        # ---- pernos
+        fb, b = F["Pernos"], prj.bolts
+        recto = b.atype.startswith("Recto")
+        gancho = "Gancho" in b.atype
+        adh = recto and b.install == INSTALL_TYPES[1]
+        fb.show_field("bolts.install", recto)
+        fb.show_group("Anclaje adhesivo (postinstalado)", adh)
+        fb.show_field("bolts.eh", gancho)
+        fb.show_field("bolts.Abrg_user", b.atype.startswith("Con cabeza"))
+        fb.show_field("bolts.fixity", float(getattr(b, "standoff", 0.0)) > 1e-9)
+        manual = b.pattern.startswith("Coordenadas")
+        circp = b.pattern == "Circular" or circ
+        fb.show_field("bolts.n_major", not manual and not circp)
+        fb.show_field("bolts.n_minor", not manual and not circp)
+        fb.show_field("bolts.n_circ", not manual and circp)
+        fb.show_field("bolts.ex", not manual)
+        fb.show_field("bolts.ey", not manual and not circp)
+        fb.show_group("Coordenadas manuales", manual)
+        # ---- llave de corte
+        fl, lg = F["Llave de corte"], prj.lug
+        on = bool(lg.enabled)
+        sec = on and lg.is_section
+        for path in ("lug.ltype", "lug.H", "lug.steel", "lug.weld_size", "lug.electrode"):
+            fl.show_field(path, on)
+        fl.show_field(self.cb_lugfam, sec)
+        fl.show_field("lug.label", sec)
+        fl.show_field("lug.rotation", sec)
+        fl.show_field("lug.direction", on and not sec)
+        fl.show_field("lug.W", on and not sec)
+        fl.show_field("lug.t", on and not sec)
+        # ---- rigidizadores
+        fr, st = F["Rigidizadores"], prj.stiff
+        on = bool(st.enabled) and not prj.loads.tilted
+        for path in ("stiff.position", "stiff.count", "stiff.L", "stiff.h", "stiff.t", "stiff.steel",
+                     "stiff.spacing_mode", "stiff.offset", "stiff.shape", "stiff.clip_root", "stiff.weld_size",
+                     "stiff.electrode"):
+            fr.show_field(path, on)
+        fr.show_field("stiff.spacing", on and st.spacing_mode == STIFF_SPACING[1])
+        fr.show_field("stiff.offset_angle", on and prj.section.shape().is_round)
+        recort = st.shape == STIFF_SHAPES[2]
+        fr.show_field("stiff.clip_h", on and recort)
+        fr.show_field("stiff.clip_v", on and recort)
+        for g in ("Ubicacion a lo largo de la cara", "Forma de la pletina", "Soldadura"):
+            fr.show_group(g, on)
+        # ---- soldadura (segun el perfil)
+        fw = F["Soldadura"]
+        hollow = prj.section.shape().is_hollow
+        fw.show_group("Alas (perfiles W)", not hollow)
+        fw.show_group("Alma (perfiles W)", not hollow)
+        fw.show_group("Perimetral (HSS / Pipe)", hollow)
+        # ---- concreto: barras U
+        fc, cn = F["Concreto"], prj.conc
+        for path in ("conc.u_size", "conc.u_n", "conc.u_fy", "conc.u_depth", "conc.u_leg"):
+            fc.show_field(path, bool(cn.u_on))
+        # ---- elementos finitos
+        ff, fe = F["Elementos finitos"], prj.fea
+        ff.show_field("fea.ks_manual", fe.ks_mode == "manual")
+        ff.show_field("fea.plastic_limit", bool(fe.plastic))
+        ff.show_field("fea.weld_peak_factor", str(fe.weld_model).startswith("Conectores"))
+
     def _update_labels(self):
+        self._update_visibility()
         tilted = self.prj.loads.tilted
         self.chk_stiff.setEnabled(not tilted)
         self.chk_stiff.setToolTip("No disponible con la columna inclinada." if tilted else "")
