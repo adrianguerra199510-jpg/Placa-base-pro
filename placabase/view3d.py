@@ -500,8 +500,10 @@ def load_arrows(prj, kl, ztop=None):
     bw, bh = _G.profile_bbox(prj)
     R = _rot_matrix(prj.loads.tilt_x, prj.loads.tilt_y)
     T = np.array(R @ np.array([0.0, 0.0, H])) + np.array([0.0, 0.0, prj.plate.tp])
-    if ztop is not None:                          # en los resultados el perfil tiene la altura del modelo
+    if ztop is not None:                          # en los resultados el perfil tiene la altura del modelo (vertical)
         T = np.array([0.0, 0.0, float(ztop)])
+        R = np.eye(3)
+    ex, ey, ez = R[:, 0], R[:, 1], R[:, 2]        # ejes de la columna (inclinada o no) en el sistema de la placa
     items, pts = [], []
 
     def arrow(tail, head, color, label, far):
@@ -518,16 +520,16 @@ def load_arrows(prj, kl, ztop=None):
     if abs(L.Pu) > 1e-9:
         l_ = ln(L.Pu)
         if L.Pu > 0:                              # compresion: la flecha empuja hacia abajo sobre la columna
-            tail = T + np.array([0, 0, l_])
+            tail = T + ez * l_                    # la flecha sigue el eje de la columna
             arrow(tail, T, C_PU, f"Pu = {u.q('F', L.Pu)} (compresion)", tail)
         else:                                     # traccion: tira hacia arriba
-            head = T + np.array([0, 0, l_])
+            head = T + ez * l_
             arrow(T, head, C_PU, f"Pu = {u.q('F', abs(L.Pu))} (traccion)", head)
-    for comp, name, vec in ((L.Vux, "Vux", np.array([1.0, 0, 0])), (L.Vuy, "Vuy", np.array([0, 1.0, 0]))):
+    for comp, name, vec, hw_ in ((L.Vux, "Vux", ex, 0.5 * bw), (L.Vuy, "Vuy", ey, 0.5 * bh)):
         if abs(comp) > 1e-9:
             l_ = ln(comp)
             sg = np.sign(comp)
-            hw = 0.5 * (bw if vec[0] > 0 else bh)
+            hw = hw_
             tip = T - vec * sg * hw                   # la punta toca la cara de la columna sobre la que empuja
             tail = tip - vec * sg * l_
             arrow(tail, tip, C_V, f"{name} = {u.q('F', comp)}", tail)
@@ -541,9 +543,9 @@ def load_arrows(prj, kl, ztop=None):
             if (axis == 0 and comp < 0) or (axis == 1 and comp > 0):
                 th = th[::-1]
             if axis == 0:       # giro alrededor de +X, plano YZ: de +y a -y por arriba si Mux > 0
-                P_ = [T + np.array([0, r_ * np.cos(t), r_ * np.sin(t)]) for t in th]
+                P_ = [T + ey * r_ * np.cos(t) + ez * r_ * np.sin(t) for t in th]
             else:               # giro alrededor de +Y, plano ZX: de -x a +x por arriba si Muy > 0
-                P_ = [T + np.array([r_ * np.cos(t), 0, r_ * np.sin(t)]) for t in th]
+                P_ = [T + ex * r_ * np.cos(t) + ez * r_ * np.sin(t) for t in th]
             P_ = [p / kl for p in P_]
             items.append(("arc", P_, C_M, f"{name} = {u.q('M', comp)}"))
             pts.extend(P_)
