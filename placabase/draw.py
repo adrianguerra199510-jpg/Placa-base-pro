@@ -154,8 +154,16 @@ def elevation_view(ax, prj: Project):
     Fh = g.Fhex / k
     xs_b = sorted({round(x / k, 4) for x, _ in G.bolt_positions(prj)})
     for x in xs_b:
-        ax.plot([x, x], [tp + 2 * m, zc - hef], color="#333333", lw=2.0, zorder=6)
-        ax.plot([x - Fh / 2, x + Fh / 2], [tp + 0.9 * m, tp + 0.9 * m],
+        _hook = b.atype.startswith("Gancho")
+        ax.plot([x, x], [tp + 2 * m, zc - hef + (2.0 * g.db / k if _hook else 0.0)], color="#333333", lw=2.0,
+                zorder=6)                                                  # vastago (con gancho: hasta el doblez)
+        from .params3d import washer_radius, washer_thickness
+        tw_ = max(washer_thickness(prj), 0.0) / k
+        if tw_ > 0:                                                        # arandela
+            rw_ = washer_radius(prj) / k
+            ax.add_patch(Rectangle((x - rw_, tp), 2 * rw_, tw_, facecolor="#aab2bb", edgecolor="#555555",
+                                   lw=0.8, zorder=6))
+        ax.plot([x - Fh / 2, x + Fh / 2], [tp + tw_ + 0.9 * m, tp + tw_ + 0.9 * m],
                 color="#333333", lw=3.5, solid_capstyle="butt", zorder=7)   # tuerca
         if so > 0:                                                         # tuerca de nivelacion
             ax.plot([x - Fh / 2, x + Fh / 2], [-0.4 * m, -0.4 * m],
@@ -164,14 +172,12 @@ def elevation_view(ax, prj: Project):
         if t.startswith("Con cabeza"):
             ax.plot([x - Fh / 2, x + Fh / 2], [zc - hef, zc - hef],
                     color="#333333", lw=4.0, solid_capstyle="butt", zorder=7)
-        elif t.startswith("Gancho en L"):
-            eh = (b.eh if b.eh > 0 else 3 * g.db) / k
-            ax.plot([x, x + eh], [zc - hef, zc - hef], color="#333333", lw=2.0, zorder=7)
-        elif t.startswith("Gancho en J"):
-            eh = (b.eh if b.eh > 0 else 3 * g.db) / k
-            th = np.linspace(-math.pi, 0, 24)
-            ax.plot(x + eh / 2 + eh / 2 * np.cos(th), zc - hef + eh / 2 + eh / 2 * np.sin(th),
-                    color="#333333", lw=2.0, zorder=7)
+        elif t.startswith("Gancho en L") or t.startswith("Gancho en J"):
+            from .params3d import hook_profile
+            eh_ = b.eh if b.eh > 0 else 3 * g.db
+            prof, rc = hook_profile("gancho_L" if t.startswith("Gancho en L") else "gancho_J", g.db, eh_)
+            ax.plot([x + s_ / k for s_, _ in prof], [zc - hef + z_ / k for _, z_ in prof],
+                    color="#333333", lw=2.0, zorder=7, solid_joinstyle="round")
 
     if ub is not None:
         xl, xr = ub["xl"] / k, ub["xr"] / k

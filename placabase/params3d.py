@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """Parametros comunes del modelo 3D: brazo del cortante, modulo de balasto y rigidez axial del perno."""
 from __future__ import annotations
+import math
+import numpy as np
 
 from .model import Project
 from .units import ES_KSI, Ec_ksi
@@ -55,3 +57,21 @@ def washer_elements(prj: Project, x: float, y: float, z: float) -> bool:
         return False
     rw = washer_radius(prj)
     return any((x - bx) ** 2 + (y - by) ** 2 <= (rw + 1e-4) ** 2 for bx, by in G.bolt_positions(prj))
+
+
+def hook_profile(kind: str, db: float, eh: float, steps: int = 14):
+    """Eje del doblez del gancho en el plano (s, z): s = distancia radial hacia afuera desde el eje del perno, z = altura
+    sobre el fondo del anclaje (eje de la barra en el punto mas bajo = 0).  El primer punto es donde termina el vastago
+    recto (z = rc).  Radio de doblez al eje rc = 2·db (radio interior 1.5·db).
+    L: 90° y pata recta de largo eh;  J: 180° y cola recta de 4·db (o eh/2 si es mayor).  -> (puntos, rc)."""
+    rc = 2.0 * db
+    pts = [(0.0, rc)]
+    if kind == "gancho_L":
+        for a in np.linspace(math.pi, 1.5 * math.pi, steps)[1:]:
+            pts.append((rc + rc * math.cos(a), rc + rc * math.sin(a)))
+        pts.append((max(eh, rc + 1.5 * db), 0.0))
+    else:
+        for a in np.linspace(math.pi, 2.0 * math.pi, 2 * steps)[1:]:
+            pts.append((rc + rc * math.cos(a), rc + rc * math.sin(a)))
+        pts.append((2.0 * rc, rc + max(4.0 * db, 0.5 * eh)))
+    return pts, rc

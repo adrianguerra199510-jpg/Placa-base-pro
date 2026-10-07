@@ -484,11 +484,25 @@ class GLView(QOpenGLWidget):
 
     # ------------------------------------------------------------------ escena
     def set_scene(self, scene: Scene, keep_view=True):
+        """Cambia la escena.  Si ya habia una vista (o el usuario la movio), la camara se conserva: solo se ajusta
+        proporcionalmente al nuevo tamano del modelo, sin saltos al editar.  El primer dibujo, o 'Encuadrar', re-encuadra."""
+        first = not getattr(self, "_has_scene", False)
+        old_r, old_c = self.radius, self.center.copy()
         self.scene = scene
-        self._user = False
         self._dirty = True
-        self.radius = 1.0
-        self.fit()
+        pts = scene.bounds_points()
+        if first or len(pts) < 2 or not keep_view:
+            self._has_scene = len(pts) >= 2
+            self.radius = 1.0
+            self.fit()
+            return
+        lo, hi = pts.min(axis=0), pts.max(axis=0)
+        new_c, new_r = (lo + hi) / 2, float(np.linalg.norm(hi - lo)) / 2 or 1.0
+        k = new_r / max(old_r, 1e-9)
+        if abs(k - 1.0) > 0.02 or float(np.linalg.norm(new_c - old_c)) > 0.02 * old_r:
+            self.dist *= k                      # el modelo cambio de tamano: mismo encuadre relativo
+        self.radius, self.center = new_r, new_c
+        self.update()
 
     # ------------------------------------------------------------------ OpenGL
     def initializeGL(self):

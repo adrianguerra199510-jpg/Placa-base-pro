@@ -713,6 +713,27 @@ def _plate_top_mesh(prj, holes, zt):
     return out
 
 
+def _tube(path, r, axis_n, n=16):
+    """Barra redonda barrida a lo largo de `path` (puntos 3D de un recorrido plano); `axis_n` = normal al plano del
+    recorrido.  -> caras (cuadrilateros) + dos tapas."""
+    P = [np.array(q, float) for q in path]
+    ring = []
+    for i, q in enumerate(P):
+        t = (P[min(i + 1, len(P) - 1)] - P[max(i - 1, 0)])
+        t = t / max(np.linalg.norm(t), 1e-12)
+        w = np.cross(t, axis_n)
+        w = w / max(np.linalg.norm(w), 1e-12)
+        ring.append([q + r * (math.cos(a) * axis_n + math.sin(a) * w) for a in np.linspace(0, 2 * math.pi, n + 1)[:-1]])
+    faces = []
+    for i in range(len(P) - 1):
+        for k in range(n):
+            k2 = (k + 1) % n
+            faces.append([tuple(ring[i][k]), tuple(ring[i][k2]), tuple(ring[i + 1][k2]), tuple(ring[i + 1][k])])
+    faces.append([tuple(x) for x in ring[0]])
+    faces.append([tuple(x) for x in ring[-1]])
+    return faces
+
+
 def geometry_faces(prj):
     """Piezas de la conexion como caras 3D (pulgadas).
     -> lista de (grupo, caras, color, alfa); grupo: 'conc' | 'below' | 'plate' | 'above'.
@@ -738,7 +759,10 @@ def geometry_faces(prj):
     parts.append(("plate", wall, "#3b434b", 1.0))
 
     # ---- pernos (vastago inferior / parte sobre la placa) y tuercas
-    low, up, nuts, ends = [], [], [], []
+    from .params3d import washer_radius, washer_thickness
+    low, up, nuts, ends, wash = [], [], [], [], []
+    tw = max(washer_thickness(prj), 0.0)
+    rw = washer_radius(prj)
     hef = max(float(b.hef), 1.0)
     eh = float(b.eh) if b.eh and b.eh > 0 else 3.0 * g.db
     kind = ("gancho_L" if "en L" in b.atype else "gancho_J" if "en J" in b.atype
@@ -746,47 +770,38 @@ def geometry_faces(prj):
     for (bx, by) in bpos:
         r = g.db / 2
         c = [(bx + r * math.cos(a), by + r * math.sin(a)) for a in np.linspace(0, 2 * math.pi, 17)[:-1]]
-        low += _prism(c, -hef, 0.0, cap=True)
         # extremo embebido segun el tipo de anclaje
         if kind == "cabeza":                       # cabeza hexagonal pesada
+            low += _prism(c, -hef, 0.0, cap=True)
             F = max(g.Fhex, 1.5 * g.db)
             hr = F / math.sqrt(3.0)
             hx = [(bx + hr * math.cos(math.radians(60 * k)), by + hr * math.sin(math.radians(60 * k)))
                   for k in range(6)]
             ends += _prism(hx, -hef - 0.7 * g.db, -hef)
-        elif kind in ("gancho_L", "gancho_J"):     # doblez hacia el exterior (radial)
+        elif kind in ("gancho_L", "gancho_J"):     # doblez circular (radio interior 1.5·db) hacia el exterior
+            from .params3d import hook_profile
             n = math.hypot(bx, by)
             ux, uy = (bx / n, by / n) if n > 1e-6 else (1.0, 0.0)
-            px, py = -uy, ux
-            L = eh
-
-            # pata horizontal como prisma rectangular de seccion db x db
-            def q(s, t, z):
-                return (bx + ux * s + px * t, by + uy * s + py * t, z)
-            s0, s1, t0, t1 = -r, L, -r, r
-            z0, z1 = -hef - r, -hef + r
-            ends += [[q(s0, t0, z0), q(s1, t0, z0), q(s1, t1, z0), q(s0, t1, z0)],
-                     [q(s0, t0, z1), q(s1, t0, z1), q(s1, t1, z1), q(s0, t1, z1)],
-                     [q(s0, t0, z0), q(s1, t0, z0), q(s1, t0, z1), q(s0, t0, z1)],
-                     [q(s0, t1, z0), q(s1, t1, z0), q(s1, t1, z1), q(s0, t1, z1)],
-                     [q(s1, t0, z0), q(s1, t1, z0), q(s1, t1, z1), q(s1, t0, z1)],
-                     [q(s0, t0, z0), q(s0, t1, z0), q(s0, t1, z1), q(s0, t0, z1)]]
-            if kind == "gancho_J":                  # pata corta hacia arriba en el extremo
-                h = min(1.5 * g.db + eh * 0.5, 0.5 * hef)
-                ends += [[q(s1 - 2 * r, t0, z1), q(s1, t0, z1), q(s1, t0, z1 + h), q(s1 - 2 * r, t0, z1 + h)],
-                         [q(s1 - 2 * r, t1, z1), q(s1, t1, z1), q(s1, t1, z1 + h), q(s1 - 2 * r, t1, z1 + h)],
-                         [q(s1 - 2 * r, t0, z1), q(s1 - 2 * r, t1, z1), q(s1 - 2 * r, t1, z1 + h), q(s1 - 2 * r, t0, z1 + h)],
-                         [q(s1, t0, z1), q(s1, t1, z1), q(s1, t1, z1 + h), q(s1, t0, z1 + h)],
-                         [q(s1 - 2 * r, t0, z1 + h), q(s1, t0, z1 + h), q(s1, t1, z1 + h), q(s1 - 2 * r, t1, z1 + h)]]
-        up += _prism(c, 0.0, p.tp + 1.25 * g.db, cap=True)
+            prof, rc = hook_profile(kind, g.db, eh)
+            low += _prism(c, -hef + rc, 0.0, cap=True)           # vastago recto hasta donde empieza el doblez
+            path = [(bx + ux * s_, by + uy * s_, -hef + z_) for s_, z_ in prof]
+            ends += _tube(path, r, np.array([-uy, ux, 0.0]), n=16)
+        else:                                      # recto: sin anclaje mecanico
+            low += _prism(c, -hef, 0.0, cap=True)
+        up += _prism(c, 0.0, p.tp + tw + 1.25 * g.db, cap=True)
+        if tw > 0:                                 # arandela sobre la placa, bajo la tuerca
+            wr_ = [(bx + rw * math.cos(a), by + rw * math.sin(a)) for a in np.linspace(0, 2 * math.pi, 33)[:-1]]
+            wash += _prism(wr_, p.tp, p.tp + tw)
         hexr = 0.9 * g.db
         hx = [(bx + hexr * math.cos(math.radians(60 * k)), by + hexr * math.sin(math.radians(60 * k)))
               for k in range(6)]
-        nuts += _prism(hx, p.tp, p.tp + 0.875 * g.db)
+        nuts += _prism(hx, p.tp + tw, p.tp + tw + 0.875 * g.db)
     parts.append(("below", low, "#c9a227", 1.0))
     parts.append(("below", ends, "#a8861c", 1.0))
     parts.append(("above", up, "#c9a227", 1.0))
     parts.append(("above", nuts, "#8d7514", 1.0))
+    if wash:
+        parts.append(("above", wash, "#aab2bb", 1.0))
 
     # ---- columna (inclinada y con la base cortada a bisel sobre la placa)
     H = max(3.0 * s.d, 12.0)
