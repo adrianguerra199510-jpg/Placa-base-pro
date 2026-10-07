@@ -859,21 +859,32 @@ def geometry_faces(prj):
     return parts
 
 
-_GROUP_ORDER_ABOVE = {"conc": 10, "below": 2, "plate": 3, "above": 4}
+ZSORT = "min"          # criterio de orden de las caras del acero: "min" (el que mejor resuelve placa, pernos y columna), "average" o "max"
+
+
+def _pad_faces(faces):
+    """Poligonos de distinto numero de lados -> arreglo uniforme (se repite el ultimo vertice: no cambia el dibujo)."""
+    nmax = max(len(f) for f in faces)
+    return np.array([list(f) + [f[-1]] * (nmax - len(f)) for f in faces], dtype=float)
 
 
 def update_order(ax):
-    """Ordena el dibujo segun la camara: vista desde arriba -> lo de abajo se pinta
-    primero y la placa lo tapa; desde abajo, al reves."""
-    colls = getattr(ax, "_pb_groups", None)
-    if not colls:
+    """Pedestal translucido segun la camara: las caras traseras se pintan ANTES del acero y las delanteras DESPUES.
+    (El acero va en una sola coleccion cuyas caras matplotlib ordena por profundidad todas juntas.)"""
+    conc = getattr(ax, "_pb_conc", None)
+    if not conc:
         return
-    from_above = ax.elev >= 0
-    for grp, coll in colls:
-        z = _GROUP_ORDER_ABOVE[grp]          # el concreto (translucido) va siempre al final
-        if not from_above and grp in ("below", "above"):
-            z = 6 - z                                   # above <-> below invertidos
-        coll.set_zorder(z)
+    e, a = math.radians(float(ax.elev)), math.radians(float(ax.azim))
+    cam = np.array([math.cos(e) * math.cos(a), math.cos(e) * math.sin(a), math.sin(e)])
+    front = [f for f, n in zip(conc["faces"], conc["normals"]) if float(n @ cam) > 1e-9]
+    back = [f for f, n in zip(conc["faces"], conc["normals"]) if float(n @ cam) <= 1e-9]
+    for key, lst in (("back", back), ("front", front)):
+        coll = conc[key]
+        if lst:
+            coll.set_verts(lst)
+            coll.set_visible(True)
+        else:
+            coll.set_visible(False)
 
 
 def plot_geometry(ax, prj, show_concrete=True, title=True, loads=False):
@@ -888,28 +899,56 @@ def plot_geometry(ax, prj, show_concrete=True, title=True, loads=False):
         pass
     u = prj.units()
     kl = u.fl
-    groups = []
     allp = []
+    steel_f, steel_fc, steel_ec = [], [], []
+    conc_f = None
     for part in geometry_faces(prj):
         grp, faces, color, alpha = part[:4]
         flat = len(part) > 4 and part[4] == "flat"
         if not faces or (grp == "conc" and not show_concrete):
             continue
-        v = [[(x / kl, y / kl, z / kl) for x, y, z in f] for f in faces]
-        allp += [pt for f in v for pt in f]      # incluye el concreto: si no, queda fuera del encuadre
-        # Matplotlib deja SIN INICIALIZAR (np.empty) los vertices sobrantes de las listas con poligonos de distinto
-        # numero de lados, y add_collection3d los usa para el encuadre: basura -> "Axis limits cannot be NaN or Inf"
-        # de forma intermitente.  Se igualan los poligonos repitiendo el ultimo vertice (no cambia el dibujo).
-        nmax = max(len(f) for f in v)
-        v = np.array([f + [f[-1]] * (nmax - len(f)) for f in v], dtype=float)
+        v_ = [[(x / kl, y / kl, z / kl) for x, y, z in f] for f in faces]
+        allp += [pt for f in v_ for pt in f]      # incluye el concreto: si no, queda fuera del encuadre
         rgb = to_rgb(color)
+        if grp == "conc":
+            conc_f = (v_, rgb, alpha)
+            continue
         # los triangulos de la malla de la placa no llevan aristas
         edge = (*rgb, 1.0) if flat else ((0, 0, 0, 0.35) if alpha > 0.5 else (0.3, 0.35, 0.4, 0.35))
-        coll = Poly3DCollection(v, facecolors=(*rgb, alpha), edgecolors=edge,
-                                linewidths=0.35)
+        steel_f += v_
+        steel_fc += [(*rgb, alpha)] * len(v_)
+        steel_ec += [edge] * len(v_)
+    groups = []
+    if steel_f:
+        # TODAS las caras opacas en una sola coleccion: matplotlib las ordena por profundidad juntas (algoritmo del
+        # pintor por cara), en vez de ordenar por pieza.  Se ordena por el vertice mas lejano de cada cara.
+        coll = Poly3DCollection(_pad_faces(steel_f), facecolors=steel_fc, edgecolors=steel_ec, linewidths=0.35)
+        coll.set_zsort(ZSORT)
         coll.set_clip_on(False)
+        coll.set_zorder(2)
         ax.add_collection3d(coll)
-        groups.append((grp, coll))
+        groups.append(("acero", coll))
+    ax._pb_conc = None
+    if conc_f is not None:
+        cf, rgb, alpha = conc_f
+        centre = np.mean(np.array([p for f in cf for p in f]), axis=0)
+        normals = []
+        for f in cf:
+            n = np.cross(np.array(f[1]) - np.array(f[0]), np.array(f[2]) - np.array(f[0]))
+            n = n / max(np.linalg.norm(n), 1e-12)
+            if float(n @ (np.mean(np.array(f), axis=0) - centre)) < 0:      # normal hacia afuera del pedestal
+                n = -n
+            normals.append(n)
+        cols = []
+        for z_ in (1, 3):                    # 1: caras traseras (antes del acero), 3: delanteras (despues)
+            c_ = Poly3DCollection(_pad_faces(cf), facecolors=(*rgb, alpha), edgecolors=(0.3, 0.35, 0.4, 0.35),
+                                  linewidths=0.35)
+            c_.set_clip_on(False)
+            c_.set_zorder(z_)
+            ax.add_collection3d(c_)
+            cols.append(c_)
+        ax._pb_conc = {"faces": [np.array(f) for f in cf], "normals": normals, "back": cols[0], "front": cols[1]}
+        groups += [("conc_tras", cols[0]), ("conc_del", cols[1])]
     ax._pb_groups = groups
     update_order(ax)
     load_items = []

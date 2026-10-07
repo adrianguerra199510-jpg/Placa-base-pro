@@ -15,6 +15,12 @@ que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
 
 Los proyectos nuevos arrancan en **mm, kN, MPa, kN·m** (se cambia en la pestaña Proyecto; los archivos guardados conservan sus unidades).
 
+## Renderizado 3D (3.0)
+
+Todas las caras de acero (placa, pernos, tuercas, columna, rigidizadores, llave) van en **una sola coleccion** ordenada por profundidad (cara mas cercana,
+algoritmo del pintor por cara) en vez de una coleccion por pieza; el pedestal translucido se parte en caras traseras (se pintan antes del acero) y
+delanteras (despues) segun la camara, y se reordena al girar. Una rotacion completa tarda < 0.1 s.
+
 ## Soldadura en el FEM: pico y media
 
 Cada cara del cordon se evalua con un **D/C pico** (punto mas cargado, elastico) y un **D/C media** (fuerza de la cara / su longitud). El pico se admite
