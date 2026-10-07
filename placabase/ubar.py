@@ -48,12 +48,16 @@ def ubar(prj: Project):
     leg = float(c.u_leg) if c.u_leg > 0 else math.ceil(leg_req)
     below = depth + leg - z_cross                         # longitud desarrollada bajo el cono
     n_legs = 2 * int(c.u_n)
-    # las U se reparten en Y (perpendicular a su plano) dentro del grupo de pernos
+    # las U van FUERA del grupo de anclajes, a 5 cm (1.97 in) de la fila extrema, mitad a cada lado (si son impares, una mas en el
+    # lado -Y); asi el tramo horizontal no choca con los pernos.  Separacion entre barras del mismo lado: max(4·db, 2 in).
     ya, yb = min(ys), max(ys)
-    if c.u_n == 1:
-        yu = [0.5 * (ya + yb)]
-    else:
-        yu = [ya + (yb - ya) * k / (c.u_n - 1) for k in range(int(c.u_n))]
+    dist = 50.0 / 25.4
+    sep = max(4.0 * db, 2.0)
+    n = int(c.u_n)
+    n_lo, n_hi = (n + 1) // 2, n // 2
+    lim_y = max(c.N2 / 2.0 - 1.5, 1.0)
+    yu = [max(ya - dist - k * sep, -lim_y) for k in range(n_lo)] + [min(yb + dist + k * sep, lim_y) for k in range(n_hi)]
+    yu.sort()
     rb = 3.5 * db                                         # radio al eje del doblez (diametro interior 6·db)
     tail = max(12.0 * db, 4.0 * db) if omega else 0.0      # cola del gancho estandar de 90° (ACI 25.3.1)
     tail_end = min(abs(xl), abs(xr)) + tail               # distancia del extremo de la cola al eje del pedestal

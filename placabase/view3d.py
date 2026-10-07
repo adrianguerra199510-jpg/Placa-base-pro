@@ -495,6 +495,7 @@ def load_arrows(prj, kl, ztop=None):
     s = prj.section.shape()
     N, B = (prj.plate.Dp, prj.plate.Dp) if prj.plate.shape == "Circular" else (prj.plate.N, prj.plate.B)
     size = 1.25 * max(N, B)
+    pr = "'" if (prj.loads.tilted and ztop is None) else ""          # columna inclinada: notacion en ejes de la columna (x', y', z')
     H = max(3.0 * s.d, 12.0)
     from . import geometry as _G
     bw, bh = _G.profile_bbox(prj)
@@ -521,11 +522,11 @@ def load_arrows(prj, kl, ztop=None):
         l_ = ln(L.Pu)
         if L.Pu > 0:                              # compresion: la flecha empuja hacia abajo sobre la columna
             tail = T + ez * l_                    # la flecha sigue el eje de la columna
-            arrow(tail, T, C_PU, f"Pu = {u.q('F', L.Pu)} (compresion)", tail)
+            arrow(tail, T, C_PU, f"Pu{pr} = {u.q('F', L.Pu)} (compresion" + (", a lo largo de la columna)" if pr else ")"), tail)
         else:                                     # traccion: tira hacia arriba
             head = T + ez * l_
-            arrow(T, head, C_PU, f"Pu = {u.q('F', abs(L.Pu))} (traccion)", head)
-    for comp, name, vec, hw_ in ((L.Vux, "Vux", ex, 0.5 * bw), (L.Vuy, "Vuy", ey, 0.5 * bh)):
+            arrow(T, head, C_PU, f"Pu{pr} = {u.q('F', abs(L.Pu))} (traccion" + (", a lo largo de la columna)" if pr else ")"), head)
+    for comp, name, vec, hw_ in ((L.Vux, "Vux" + pr, ex, 0.5 * bw), (L.Vuy, "Vuy" + pr, ey, 0.5 * bh)):
         if abs(comp) > 1e-9:
             l_ = ln(comp)
             sg = np.sign(comp)
@@ -533,7 +534,7 @@ def load_arrows(prj, kl, ztop=None):
             tip = T - vec * sg * hw                   # la punta toca la cara de la columna sobre la que empuja
             tail = tip - vec * sg * l_
             arrow(tail, tip, C_V, f"{name} = {u.q('F', comp)}", tail)
-    for comp, name, axis in ((L.Mux, "Mux", 0), (L.Muy, "Muy", 1)):
+    for comp, name, axis in ((L.Mux, "Mux" + pr, 0), (L.Muy, "Muy" + pr, 1)):
         if abs(comp) > 1e-9:
             # arco de ~160° por ENCIMA de la columna (en el plano perpendicular al eje del momento) con la punta
             # al final; el sentido es el de la regla de la mano derecha respecto a +X (Mux) o +Y (Muy)
@@ -901,7 +902,7 @@ def geometry_faces(prj):
             else:
                 pts = [(xl, yy, zb_), (xl, yy, z0), (xr, yy, z0), (xr, yy, zb_)]
             path = _fillet_path(pts, ub["rb"], steps=7)
-            faces += _tube(path, r, np.array([0.0, 1.0, 0.0]), n=12)
+            faces += _tube(path, r, np.array([0.0, 1.0, 0.0]), n=16)
         parts.append(("below", faces, "#d43c3c", 1.0, None, "ubar"))
 
     # ---- pedestal de concreto (transparente)

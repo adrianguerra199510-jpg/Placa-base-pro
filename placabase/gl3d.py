@@ -490,10 +490,14 @@ def _build_dims(sc, prj, kl):
         y0 = -N / 2 - 0.01 * Lm
         dv0 = 0.09 * max(B, hef)
         nm = "ldh" if ub["kind"] == "OMEGA" else "ld"
-        sc.add_dim((xl, y0, z0), (xl, y0, zc), (-0.55 * dv0, 0, 0), "sobre el cono = " + q(ub["above"] / kl),
-                   ("front",), tshift=(-0.9 * dv0, 0, 0))
         sc.add_dim((xl, y0, zc), (xl, y0, zb2), (-0.55 * dv0, 0, 0),
                    f"{nm} bajo el cono = " + q(ub["below"] / kl), ("front",), tshift=(-0.9 * dv0, 0, 0))
+        # de la parte superior de la barra (tramo horizontal) a la punta inferior del anclaje
+        xr = ub["xr"] / kl
+        zb_anchor = zs - hef
+        sc.add_dim((xr, y0, z0), (xr, y0, zb_anchor), (1.1 * dv0, 0, 0),
+                   "U a punta del anclaje = " + q(abs(z0 - zb_anchor)), ("front", "iso", "free"),
+                   tshift=(0.9 * dv0, 0, -0.12 * hef))
     if not circ:
         y0 = -N / 2 - 0.01 * Lm
         elev("front", xs, B / 2, N / 2, lambda h, z: (h, y0, z))
