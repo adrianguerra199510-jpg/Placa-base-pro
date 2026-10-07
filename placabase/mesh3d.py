@@ -924,7 +924,7 @@ def build_inp(prj: Project, mesh_inp: str, out_inp: str, height: float = 0.0) ->
     rot = ref + 1
     L += [f"*RIGID BODY, NSET=NTOPE, REF NODE={ref}, ROT NODE={rot}",
           "*BOUNDARY", "NTIERRA, 1, 3",
-          "*STEP, NLGEOM, INC=300", "*STATIC", "0.5, 1.0, 1e-3, 1.0", "*CLOAD",
+          "*STEP, NLGEOM, INC=300", "*STATIC", "0.25, 1.0, 1e-3, 1.0", "*CLOAD",
           f"{ref}, 3, {-ld.Pu:.5f}"]
     if abs(ld.Vux) > 0:
         L.append(f"{ref}, 1, {ld.Vux:.5f}")

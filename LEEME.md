@@ -1,6 +1,6 @@
 <p align="center"><img src="placabase/data/logo.png" width="420" alt="PlacaBasePro"></p>
 
-# PlacaBasePro 3.2.7
+# PlacaBasePro 3.2.8
 
 Diseño y verificación de placas base para perfiles **W, HSS cuadrado/rectangular,
 HSS circular y Pipe**, con dibujo paramétrico, anclajes ACI 318-19, llave de corte,
@@ -14,6 +14,13 @@ tabla de resultados y a los reportes. El cálculo interno siempre corre en in-ki
 que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
 
 Los proyectos nuevos arrancan en **mm, kN, MPa, kN·m** (se cambia en la pestaña Proyecto; los archivos guardados conservan sus unidades).
+
+## Novedades de la 3.2.8
+
+- **Analisis mas rapido.** El primer incremento de CalculiX era de 0.5 de la carga; con acero plastico y cordones no lineales ese intento diverge,
+  CalculiX lo descarta y reinicia con 0.125 (8 incrementos y ~55 iteraciones). Ahora el incremento inicial es 0.25: 4 incrementos y ~31
+  iteraciones. En PB-01 la resolucion pasa de 157 s a 83 s (47 % menos) con los mismos resultados (desplazamiento y von Mises iguales hasta el
+  0.004 %).
 
 ## Novedades de la 3.2.7
 
