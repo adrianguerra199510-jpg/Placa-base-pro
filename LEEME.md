@@ -1,6 +1,6 @@
 <p align="center"><img src="placabase/data/logo.png" width="420" alt="PlacaBasePro"></p>
 
-# PlacaBasePro 3.2.0
+# PlacaBasePro 3.2.1
 
 Diseño y verificación de placas base para perfiles **W, HSS cuadrado/rectangular,
 HSS circular y Pipe**, con dibujo paramétrico, anclajes ACI 318-19, llave de corte,
@@ -14,6 +14,18 @@ tabla de resultados y a los reportes. El cálculo interno siempre corre en in-ki
 que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
 
 Los proyectos nuevos arrancan en **mm, kN, MPa, kN·m** (se cambia en la pestaña Proyecto; los archivos guardados conservan sus unidades).
+
+## Novedades de la 3.2.1
+
+- **Refuerzo del arrancamiento con dos opciones** (pestaña Concreto, "Tipo de barra"): **A, barra U** (patas rectas; bajo el cono se desarrolla ld y
+  sobre el cono el tramo horizontal actua como gancho, ldh) y **B, barra Omega** (patas con gancho estandar de 90° hacia afuera, cola de 12·db;
+  se desarrolla ldh bajo y sobre el cono). Se dibujan como barras redondas con doblez de radio interior 3·db (3D, con cotas, y elevacion) y se
+  revisan: resistencia a traccion (φ·n·Ab·fy), desarrollo bajo el cono, desarrollo sobre el cono, altura del pedestal y, en la Omega, el
+  recubrimiento lateral de la cola.
+- **Cordon plastico sin suavizar** (como IDEA StatiCa y el paper): la fuerza se lee por elemento (la fluencia redistribuye los picos) y el
+  elemento del cordon no pasa de ~28 mm. En el ejemplo PB-01_W14X90 (IDEA: 77.7 % en el ala −Y exterior) el programa da 0.72. El criterio
+  elastico conserva el suavizado de 4 veces el cateto.
+- El metal base solo se verifica con electrodo sobrecompatible (AISC J2.4).
 
 ## Novedades de la 3.2.0: un solo visor con cotas, y criterios del paper de soldaduras
 
