@@ -352,9 +352,9 @@ try:
         FAIL.append(f"visor GL: triangulacion de un poligono concavo incorrecta ({len(_tr)} tris, area {_ar})")
     _sc = _gl.scene_geometry(_u0, loads=True)
     _o, _t, _l = _sc.packed()
-    if len(_o) < 100 or len(_t) == 0 or len(_l) == 0 or not _np.isfinite(_o).all() or not _sc.labels:
+    if len(_o) < 100 or len(_t) == 0 or len(_l) == 0 or not _np.isfinite(_o).all() or not _sc.vlabels or len(_sc.dims) < 10:
         FAIL.append("visor GL: la escena de geometria quedo vacia o con valores no finitos")
-    print(f"{'visor OpenGL (escena)':34} {len(_o) // 3} tris opacos, {len(_t) // 3} translucidos, {len(_l) // 2} aristas, {len(_sc.labels)} etiquetas")
+    print(f"{'visor OpenGL (escena)':34} {len(_o) // 3} tris opacos, {len(_t) // 3} translucidos, {len(_l) // 2} aristas, {len(_sc.vlabels)} etiquetas, {len(_sc.dims)} cotas")
 except Exception as _e:
     FAIL.append(f"visor GL: {type(_e).__name__}: {_e}")
 

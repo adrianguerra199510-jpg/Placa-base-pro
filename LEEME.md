@@ -15,7 +15,16 @@ que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
 
 Los proyectos nuevos arrancan en **mm, kN, MPa, kN·m** (se cambia en la pestaña Proyecto; los archivos guardados conservan sus unidades).
 
-## Novedades de la 3.2.0: criterios del paper de soldaduras
+## Novedades de la 3.2.0: un solo visor con cotas, y criterios del paper de soldaduras
+
+- **Un solo visor en "Modelo y vistas"** (con OpenGL): reemplaza a los dibujos de planta y de elevacion. Botones: Iso, **Planta** (solo la
+  placa con sus agujeros, P1..Pn y cotas; la columna y los rigidizadores en gris tenue), **Frontal** y **Lateral** (ortograficas, con la
+  longitud de anclaje: hef, longitud total L, tp, mortero, stand-off, ancho de la placa, separacion de pernos y el gancho eh) y un
+  interruptor **Cotas**. Al girar a mano la vista deja de ser de plano. El concreto es translucido y ahora se dibuja el **mortero**
+  (grout) bajo la placa y la tuerca de nivelacion cuando hay stand-off; hef se mide desde la superficie del concreto. Sin OpenGL se usan
+  los dibujos de siempre.
+
+## Criterios del paper de soldaduras
 
 Basado en Ghimire, Wald, Vild y Kabelac, *Numerical design calculation of the fillet weld resistance*, Welding in the World (2023):
 

@@ -675,7 +675,9 @@ def postprocess_conn(prj, res, conn, WeldZone, spec_txt):
                 Z.eps = max(Z.eps, float(eps_s))
             Z.beta = min(Z.beta, beta_r)
             rb = _wall_ratio(prj, spec, key, t, tot[0], tot[1], tot[2])
-            rat = max(rw, rb)
+            # plastico: el pico se juzga por la deformacion plastica del cordon (la redistribucion ya esta en el modelo);
+            # la rotura del metal base se exige con la fuerza MEDIA de la pared (ver ra mas abajo)
+            rat = rw if (plas and cap > 0) else max(rw, rb)
             f = math.sqrt(max(fn, 0.0) ** 2 + fl * fl + ft * ft)
             Z.samples.append((r["x"], r["y"], f, rat))
             if rat >= Z.ratio and (f > 1e-9 or rat > 0):
@@ -684,7 +686,7 @@ def postprocess_conn(prj, res, conn, WeldZone, spec_txt):
                 Z.cap = cap if plas else ((f / rat) if rat > 1e-12 else cap)
                 Z.note = (f"{spec.wtype}: φ·0.60·FEXX·garganta" + (f"·kd, kd = {kd:.2f}" if kd > 1.0 else "")
                           + (f"·β, β = {beta_r:.2f} (cordon largo)" if beta_r < 0.999 else "")
-                          if rw >= rb else "gobierna la rotura del metal base de la pared")
+                          if (rw >= rb or (plas and cap > 0)) else "gobierna la rotura del metal base de la pared")
         # ---- resultantes y medias por zona dentro de la linea
         byz = {}
         for r in lst:

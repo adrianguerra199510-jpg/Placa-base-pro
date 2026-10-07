@@ -657,7 +657,7 @@ class MainWindow(QMainWindow):
         l3.setContentsMargins(0, 0, 0, 0)
         sph = QSplitter(Qt.Horizontal)
         self.use_gl = gl3d.available()
-        self.cv_3d = gl3d.GLCanvas3D() if self.use_gl else Canvas3D()
+        self.cv_3d = gl3d.GLCanvas3D(dims_button=True) if self.use_gl else Canvas3D()
         gw = QWidget(); gl = QVBoxLayout(gw); gl.setContentsMargins(0, 0, 0, 0)
         def header(widget_left, widget_right=None):
             """Fila de cabecera de altura fija: las barras de herramientas (linea naranja) quedan alineadas."""
@@ -674,24 +674,29 @@ class MainWindow(QMainWindow):
         self.chk_loads_geom.setToolTip("Flechas de la combinacion activa: Pu (rojo), cortantes (azul) y momentos (violeta).")
         self.chk_loads_geom.toggled.connect(self.draw_geom)
         gl.addWidget(header(self.lbl_geom, self.chk_loads_geom)); gl.addWidget(self.cv_3d)
-        sph.addWidget(gw)
-        spv = QSplitter(Qt.Vertical)
-        pw = QWidget(); pl = QVBoxLayout(pw); pl.setContentsMargins(0, 0, 0, 0)
-        pl.addWidget(header(QLabel("<b>Planta</b>"))); pl.addWidget(self.cv_plan)
-        ew = QWidget(); el = QVBoxLayout(ew); el.setContentsMargins(0, 0, 0, 0)
-        eh = QHBoxLayout()
-        eh.addWidget(QLabel("<b>Vista:</b>"))
-        self.cb_elev = QComboBox()
-        self.cb_elev.addItems(["Elevacion", "Detalle del rigidizador"])
-        self.cb_elev.currentIndexChanged.connect(self._draw_elev)
-        eh.addWidget(self.cb_elev)
-        eh.addStretch(1)
-        el.addLayout(eh); el.addWidget(self.cv_elev)
-        spv.addWidget(pw); spv.addWidget(ew)
-        spv.setSizes([400, 300])
-        sph.addWidget(spv)
-        sph.setSizes([620, 380])
-        l3.addWidget(sph, 1)
+        self.cb_elev = None
+        if self.use_gl:
+            # UN SOLO visor: iso, planta, frontal y lateral con sus cotas (reemplaza a los dibujos de planta y elevacion)
+            l3.addWidget(gw, 1)
+        else:
+            sph.addWidget(gw)
+            spv = QSplitter(Qt.Vertical)
+            pw = QWidget(); pl = QVBoxLayout(pw); pl.setContentsMargins(0, 0, 0, 0)
+            pl.addWidget(header(QLabel("<b>Planta</b>"))); pl.addWidget(self.cv_plan)
+            ew = QWidget(); el = QVBoxLayout(ew); el.setContentsMargins(0, 0, 0, 0)
+            eh = QHBoxLayout()
+            eh.addWidget(QLabel("<b>Vista:</b>"))
+            self.cb_elev = QComboBox()
+            self.cb_elev.addItems(["Elevacion", "Detalle del rigidizador"])
+            self.cb_elev.currentIndexChanged.connect(self._draw_elev)
+            eh.addWidget(self.cb_elev)
+            eh.addStretch(1)
+            el.addLayout(eh); el.addWidget(self.cv_elev)
+            spv.addWidget(pw); spv.addWidget(ew)
+            spv.setSizes([400, 300])
+            sph.addWidget(spv)
+            sph.setSizes([620, 380])
+            l3.addWidget(sph, 1)
         self.tabs_out.addTab(w3, "Modelo y vistas")
 
         # ---------------- resultados del 3D (campos, soldadura y pernos): solo tras calcular
@@ -1459,16 +1464,19 @@ class MainWindow(QMainWindow):
         return bool(pairs) and all(not R.pending for _, R in pairs)
 
     def draw_all(self):
-        try:
-            draw.plan_view(self.cv_plan.ax, self.prj)
-            self.cv_plan.cv.draw_idle()
-        except Exception as e:
-            self.statusBar().showMessage(f"Error de dibujo: {e}", 8000)
-        self._draw_elev()
+        if not self.use_gl:
+            try:
+                draw.plan_view(self.cv_plan.ax, self.prj)
+                self.cv_plan.cv.draw_idle()
+            except Exception as e:
+                self.statusBar().showMessage(f"Error de dibujo: {e}", 8000)
+            self._draw_elev()
         self.draw_geom()                        # la geometria 3D siempre esta al dia
         self.draw_3d()
 
     def _draw_elev(self):
+        if self.cb_elev is None:
+            return
         try:
             self.cv_elev.reset()
             (draw.stiffener_detail if self.cb_elev.currentIndex() == 1 else draw.elevation_view)(

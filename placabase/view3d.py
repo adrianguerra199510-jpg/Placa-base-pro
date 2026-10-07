@@ -746,6 +746,9 @@ def geometry_faces(prj):
     g = b.geom()
     parts = []
     bpos = G.bolt_positions(prj)
+    gr = max(0.0, float(p.grout))
+    so = max(0.0, float(getattr(b, "standoff", 0.0)))
+    zs = -(gr + so)                    # superficie del concreto (hef se mide desde aqui): placa, luz libre, mortero, concreto
 
     # ---- placa con agujeros
     holes = [(bx, by, g.dh / 2) for bx, by in bpos]
@@ -756,9 +759,12 @@ def geometry_faces(prj):
     for (cx, cy, r) in holes:
         ring = [(cx + r * math.cos(a), cy + r * math.sin(a)) for a in np.linspace(0, 2 * math.pi, 25)[:-1]]
         wall += _prism(ring, 0.0, p.tp, cap=False)
-    parts.append(("plate", top + bot, "#9aa5b1", 1.0, "flat"))
-    parts.append(("plate", side, "#9aa5b1", 1.0))
-    parts.append(("plate", wall, "#3b434b", 1.0))
+    parts.append(("plate", top + bot, "#9aa5b1", 1.0, "flat", "plate"))
+    parts.append(("plate", side, "#9aa5b1", 1.0, None, "plate"))
+    parts.append(("plate", wall, "#3b434b", 1.0, None, "plate"))
+    if gr > 1e-9:                      # mortero de nivelacion bajo la placa (sobre el concreto)
+        outl = G.plate_outline(prj)
+        parts.append(("plate", _prism(outl, zs, zs + gr, cap=True), "#d9d2c5", 1.0, None, "grout"))
 
     # ---- pernos (vastago inferior / parte sobre la placa) y tuercas
     from .params3d import washer_radius, washer_thickness
@@ -774,22 +780,22 @@ def geometry_faces(prj):
         c = [(bx + r * math.cos(a), by + r * math.sin(a)) for a in np.linspace(0, 2 * math.pi, 17)[:-1]]
         # extremo embebido segun el tipo de anclaje
         if kind == "cabeza":                       # cabeza hexagonal pesada
-            low += _prism(c, -hef, 0.0, cap=True)
+            low += _prism(c, zs - hef, 0.0, cap=True)
             F = max(g.Fhex, 1.5 * g.db)
             hr = F / math.sqrt(3.0)
             hx = [(bx + hr * math.cos(math.radians(60 * k)), by + hr * math.sin(math.radians(60 * k)))
                   for k in range(6)]
-            ends += _prism(hx, -hef - 0.7 * g.db, -hef)
+            ends += _prism(hx, zs - hef - 0.7 * g.db, zs - hef)
         elif kind in ("gancho_L", "gancho_J"):     # doblez circular (radio interior 1.5·db) hacia el exterior
             from .params3d import hook_profile
             n = math.hypot(bx, by)
             ux, uy = (bx / n, by / n) if n > 1e-6 else (1.0, 0.0)
             prof, rc = hook_profile(kind, g.db, eh)
-            low += _prism(c, -hef + rc, 0.0, cap=True)           # vastago recto hasta donde empieza el doblez
-            path = [(bx + ux * s_, by + uy * s_, -hef + z_) for s_, z_ in prof]
+            low += _prism(c, zs - hef + rc, 0.0, cap=True)           # vastago recto hasta donde empieza el doblez
+            path = [(bx + ux * s_, by + uy * s_, zs - hef + z_) for s_, z_ in prof]
             ends += _tube(path, r, np.array([-uy, ux, 0.0]), n=16)
         else:                                      # recto: sin anclaje mecanico
-            low += _prism(c, -hef, 0.0, cap=True)
+            low += _prism(c, zs - hef, 0.0, cap=True)
         up += _prism(c, 0.0, p.tp + tw + 1.25 * g.db, cap=True)
         if tw > 0:                                 # arandela sobre la placa, bajo la tuerca
             wr_ = [(bx + rw * math.cos(a), by + rw * math.sin(a)) for a in np.linspace(0, 2 * math.pi, 33)[:-1]]
@@ -798,12 +804,14 @@ def geometry_faces(prj):
         hx = [(bx + hexr * math.cos(math.radians(60 * k)), by + hexr * math.sin(math.radians(60 * k)))
               for k in range(6)]
         nuts += _prism(hx, p.tp + tw, p.tp + tw + 0.875 * g.db)
-    parts.append(("below", low, "#c9a227", 1.0))
-    parts.append(("below", ends, "#a8861c", 1.0))
-    parts.append(("above", up, "#c9a227", 1.0))
-    parts.append(("above", nuts, "#8d7514", 1.0))
+        if so > 1e-9:                              # tuerca de nivelacion bajo la placa
+            nuts += _prism(hx, -0.875 * g.db, 0.0)
+    parts.append(("below", low, "#c9a227", 1.0, None, "bolts"))
+    parts.append(("below", ends, "#a8861c", 1.0, None, "bolts"))
+    parts.append(("above", up, "#c9a227", 1.0, None, "bolts"))
+    parts.append(("above", nuts, "#8d7514", 1.0, None, "bolts"))
     if wash:
-        parts.append(("above", wash, "#aab2bb", 1.0))
+        parts.append(("above", wash, "#aab2bb", 1.0, None, "bolts"))
 
     # ---- columna (inclinada y con la base cortada a bisel sobre la placa)
     H = max(3.0 * s.d, 12.0)
@@ -824,7 +832,7 @@ def geometry_faces(prj):
                     q = [tuple(R @ np.array([x, y, H])) for x, y in (e[k], e[k2], i_[k2], i_[k])]
                     col.append(q)
     col = [[(x, y, z + p.tp) for x, y, z in f] for f in col]
-    parts.append(("above", col, "#4c78a8", 1.0))
+    parts.append(("above", col, "#4c78a8", 1.0, None, "column"))
 
     # ---- rigidizadores (solo columna vertical)
     if st.enabled and st.count > 0 and not prj.loads.tilted:
@@ -842,14 +850,14 @@ def geometry_faces(prj):
                 faces.append([T(u0, v0, -w), T(u1, v1, -w), T(u1, v1, w), T(u0, v0, w)])
             faces.append([T(u, v, w) for u, v in prof2d])
             faces.append([T(u, v, -w) for u, v in prof2d])
-        parts.append(("above", faces, "#59a14f", 1.0))
+        parts.append(("above", faces, "#59a14f", 1.0, None, "stiff"))
 
     # ---- llave de corte (bajo la placa)
     if lug.enabled:
         faces = []
         for poly in G.lug_outline(prj):
             faces += _prism(poly, -lug.H, 0.0)
-        parts.append(("below", faces, "#e15759", 1.0))
+        parts.append(("below", faces, "#e15759", 1.0, None, "lug"))
 
     # ---- barras U de refuerzo del arrancamiento
     from .ubar import ubar
@@ -858,21 +866,22 @@ def geometry_faces(prj):
         faces = []
         r = ub["db"] / 2.0
         for yy in ub["yu"]:
-            z0 = -ub["depth"]
+            z0 = zs - ub["depth"]
             pts = [(ub["xl"], yy, z0 - ub["leg"]), (ub["xl"], yy, z0), (ub["xr"], yy, z0), (ub["xr"], yy, z0 - ub["leg"])]
             for a_, b_ in zip(pts[:-1], pts[1:]):
                 faces += _bar_faces(a_, b_, r)
-        parts.append(("below", faces, "#1b7f3b", 1.0))
+        parts.append(("below", faces, "#1b7f3b", 1.0, None, "ubar"))
 
     # ---- pedestal de concreto (transparente)
     c = prj.conc
     ped = [(-c.B2 / 2, -c.N2 / 2), (c.B2 / 2, -c.N2 / 2), (c.B2 / 2, c.N2 / 2), (-c.B2 / 2, c.N2 / 2)]
-    zc = -min(c.ha, max(b.hef * 1.15, 12.0))
+    zc = zs - min(c.ha, max(b.hef * 1.15, 12.0))
     if ub is not None:
-        zc = min(zc, -(ub["depth"] + ub["leg"]) - 1.0)
-    conc = _prism(ped, zc, 0.0, cap=False)                 # caras laterales
-    conc.append([(x, y, zc) for x, y in ped])              # fondo (sin tapa: apoya la placa)
-    parts.append(("conc", conc, "#a9b4bd", 0.16))          # UNICO elemento translucido
+        zc = min(zc, zs - (ub["depth"] + ub["leg"]) - 1.0)
+    conc = _prism(ped, zc, zs, cap=False)                  # caras laterales
+    conc.append([(x, y, zc) for x, y in ped])              # fondo
+    conc.append([(x, y, zs) for x, y in ped])              # cara superior (bajo el mortero / la placa)
+    parts.append(("conc", conc, "#a9b4bd", 0.16, None, "conc"))        # UNICO elemento translucido
     return parts
 
 

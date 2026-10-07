@@ -168,6 +168,10 @@ class Scene:
         self.pts = []             # puntos para encuadrar
         self.title = ""
         self.message = None       # (texto, color) si no hay nada que dibujar
+        self.group = "other"      # grupo de pieza de lo que se agrega (ver MODE_RULES)
+        self.tagged = []          # (grupo, 'o' | 't' | 'l', arreglo)
+        self.dims = []            # cotas: dict(a, b, off, text, views)
+        self.vlabels = []         # etiquetas que solo aparecen en ciertas vistas: (pos, texto, fg, bg, borde, negrita, vistas)
 
     # ---------------------------------------------------------------- primitivas
     def add_faces(self, faces, rgb, alpha=1.0, edges=True):
@@ -190,7 +194,9 @@ class Scene:
                     key = tuple(sorted((tuple(np.round(a, 5)), tuple(np.round(b, 5)))))
                     edge_map.setdefault(key, []).append(nrm)
         if tri_rows:
-            (self.trans if alpha < 0.999 else self.opaque).append(np.array(tri_rows, np.float32))
+            arr_ = np.array(tri_rows, np.float32)
+            (self.trans if alpha < 0.999 else self.opaque).append(arr_)
+            self.tagged.append((self.group, "t" if alpha < 0.999 else "o", arr_))
         if edges and edge_map:
             ec = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
                            *(([0.3, 0.35, 0.4, 0.55] if alpha < 0.999 else [0.05, 0.07, 0.1, 0.75]))], float)
@@ -201,7 +207,9 @@ class Scene:
                     for q in (a, b):
                         seg.append(np.concatenate([q, ec[3:]]))
             if seg:
-                self.lines.append(np.array(seg, np.float32))
+                arr_ = np.array(seg, np.float32)
+                self.lines.append(arr_)
+                self.tagged.append((self.group, "l", arr_))
 
     def add_mesh(self, P, tris, vcol):
         """Malla suave: P (n,3), tris (m,3) indices, vcol (n,4) color por vertice (interpolado)."""
@@ -217,6 +225,7 @@ class Scene:
             arr[:, k, 3:6] = nrm
             arr[:, k, 6:10] = vcol[T[:, k]]
         self.opaque.append(arr.reshape(-1, FLOATS))
+        self.tagged.append((self.group, "o", self.opaque[-1]))
 
     def add_polyline(self, pts, rgb, alpha=1.0):
         seg = []
@@ -270,19 +279,87 @@ class Scene:
                 self.labels.append((tuple(pos), label, color, "#ffffffd9", color, True))
 
     # ---------------------------------------------------------------- empaquetado
-    def packed(self):
+    def packed(self, mode=None):
+        """Mallas opacas, translucidas y lineas segun la vista (MODE_RULES): grupos ocultos o en gris tenue."""
+        o, t, l = [], [], []
+        rules = MODE_RULES.get(mode, {})
+        for grp, kind, arr in self.tagged:
+            how = rules.get(grp, "show")
+            if how == "hide":
+                continue
+            if how == "ghost":
+                g = arr.copy()
+                if kind == "l":
+                    g[:, 6:9] = (0.55, 0.58, 0.62)
+                    g[:, 9] = 0.30
+                    l.append(g)
+                else:
+                    g[:, 6:9] = (0.55, 0.58, 0.62)
+                    g[:, 9] = 0.30
+                    t.append(g)
+                continue
+            {"o": o, "t": t, "l": l}[kind].append(arr)
+
         def cat(lst):
             return np.concatenate(lst).astype(np.float32) if lst else np.zeros((0, FLOATS), np.float32)
-        return cat(self.opaque), cat(self.trans), cat(self.lines)
+        return cat(o), cat(t), cat(l)
 
-    def bounds_points(self):
+    def bounds_points(self, mode=None, dims=False):
+        pts = []
         if len(self.pts) > 0:
-            return np.asarray(self.pts, float)
-        sub = []
-        for arr in self.opaque + self.trans:
-            step = max(1, len(arr) // 1500)
-            sub.append(arr[::step, :3])
-        return np.concatenate(sub).astype(float) if sub else np.zeros((1, 3))
+            pts.append(np.asarray(self.pts, float))
+        else:
+            rules = MODE_RULES.get(mode, {})
+            for grp, kind, arr in self.tagged:
+                if kind == "l" or rules.get(grp, "show") == "hide":
+                    continue
+                step = max(1, len(arr) // 1500)
+                pts.append(arr[::step, :3].astype(float))
+        if dims:
+            for d in self.dims:
+                if mode in d["views"]:
+                    q = np.array([d["a"], d["b"]], float)
+                    pts += [q + np.asarray(d["off"], float) * 1.7]
+        return np.concatenate(pts) if pts else np.zeros((1, 3))
+
+    # ---------------------------------------------------------------- cotas
+    def add_dim(self, a, b, off, text, views, tshift=(0.0, 0.0, 0.0)):
+        """Cota entre a y b, con su linea desplazada `off`; `tshift` mueve solo el texto (evita solapes en cotas cortas)."""
+        self.dims.append(dict(a=tuple(a), b=tuple(b), off=tuple(off), text=text, views=set(views), tshift=tuple(tshift)))
+
+    def dim_segments(self, mode, arrow):
+        """Lineas (pares de puntos) y textos de las cotas visibles en `mode`: lineas de extension, linea de cota y
+        puntas de flecha.  -> (arreglo de vertices (n, FLOATS), [(pos3d, texto)])"""
+        seg, texts = [], []
+        col = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.25, 0.28, 0.32, 1.0]
+
+        def add(p, q):
+            for r in (p, q):
+                row = list(r) + col[3:]
+                seg.append(row)
+        for d in self.dims:
+            if mode not in d["views"]:
+                continue
+            a, b, off = np.array(d["a"], float), np.array(d["b"], float), np.array(d["off"], float)
+            if np.linalg.norm(off) < 1e-9 or np.linalg.norm(b - a) < 1e-9:
+                continue
+            q1, q2 = a + off, b + off
+            o = off / np.linalg.norm(off)
+            t = (q2 - q1) / np.linalg.norm(q2 - q1)
+            add(a + off * 0.12, q1 + o * 0.5 * arrow * 2)
+            add(b + off * 0.12, q2 + o * 0.5 * arrow * 2)
+            add(q1, q2)
+            for tip, sg in ((q1, 1.0), (q2, -1.0)):
+                add(tip, tip + sg * t * arrow + o * 0.35 * arrow)
+                add(tip, tip + sg * t * arrow - o * 0.35 * arrow)
+            texts.append((tuple((q1 + q2) / 2 + np.array(d.get("tshift", (0, 0, 0)), float)), d["text"]))
+        return np.array(seg, np.float32).reshape(-1, FLOATS), texts
+
+
+# vistas: grupo -> 'show' | 'ghost' | 'hide'.  Planta: solo la placa y el mortero, la columna y los rigidizadores en gris tenue
+MODE_RULES = {
+    "plan": {"column": "ghost", "stiff": "ghost", "bolts": "hide", "lug": "hide", "ubar": "hide", "load": "hide"},
+}
 
 
 # ============================================================================ escenas del modelo
@@ -293,17 +370,128 @@ def scene_geometry(prj, loads=False, show_concrete=True):
     allp = []
     for part in V.geometry_faces(prj):
         grp, faces, color, alpha = part[:4]
+        tag = part[5] if len(part) > 5 else "other"
         if not faces or (grp == "conc" and not show_concrete):
             continue
         v_ = [[(x / kl, y / kl, z / kl) for x, y, z in f] for f in faces]
         allp += [pt for f in v_ for pt in f]
+        sc.group = tag
         sc.add_faces(v_, to_rgb(color), alpha, edges=True)
+    sc.group = "other"
     sc.pts = allp
     if loads:
         items, lpts = V.load_arrows(prj, kl)
+        sc.group = "load"
         sc.add_loads(items)
+        sc.group = "other"
+        for lab in sc.labels:                    # las flechas y sus etiquetas no se ven en planta
+            sc.vlabels.append((*lab, {"iso", "free", "front", "side"}))
+        sc.labels = []
         sc.pts = allp + [tuple(p) for p in lpts]
+    try:
+        _build_dims(sc, prj, kl)
+    except Exception:
+        sc.dims = []
     return sc
+
+
+def _build_dims(sc, prj, kl):
+    """Cotas por vista (planta, frontal, lateral, isometrica).  Coordenadas en la unidad mostrada; los valores se
+    escriben con el modulo de unidades del proyecto."""
+    from . import geometry as G
+    from .params3d import washer_thickness
+    u = prj.units()
+    p, b = prj.plate, prj.bolts
+    g = b.geom()
+    circ = p.shape == "Circular"
+    B = (p.Dp if circ else p.B) / kl
+    N = (p.Dp if circ else p.N) / kl
+    tp, gr = p.tp / kl, max(0.0, p.grout) / kl
+    so = max(0.0, float(getattr(b, "standoff", 0.0))) / kl
+    hef = max(float(b.hef), 1.0) / kl
+    zs = -(gr + so)
+    tw = max(washer_thickness(prj), 0.0) / kl
+    ztop = tp + tw + 1.25 * g.db / kl
+    bpos = G.bolt_positions(prj)
+    xs = sorted({round(x / kl, 4) for x, _ in bpos})
+    ys = sorted({round(y / kl, 4) for _, y in bpos})
+    q = lambda v: u.fmt("L", v * kl) + " " + u.L            # longitud en unidades del proyecto
+    Lm = max(B, N)
+    d = 0.085 * Lm                                           # separacion base de la linea de cota
+    R = ("plan",)
+
+    # ---------------- PLANTA: placa (o diametro), cadenas de pernos y numeracion
+    if circ:
+        sc.add_dim((-B / 2, -N / 2, tp), (B / 2, -N / 2, tp), (0, -1.6 * d, 0), "Ø " + q(B), R)
+    else:
+        sc.add_dim((-B / 2, -N / 2, tp), (B / 2, -N / 2, tp), (0, -1.6 * d, 0), "B = " + q(B), R)
+        sc.add_dim((B / 2, -N / 2, tp), (B / 2, N / 2, tp), (1.6 * d, 0, 0), "N = " + q(N), R)
+    if not circ and 0 < len(xs) <= 7 and 0 < len(ys) <= 7:
+        ch = [-B / 2] + xs + [B / 2]
+        for a_, b_ in zip(ch[:-1], ch[1:]):
+            if b_ - a_ > 1e-6:
+                sc.add_dim((a_, N / 2, tp), (b_, N / 2, tp), (0, 0.9 * d, 0), q(b_ - a_), R)
+        cv = [-N / 2] + ys + [N / 2]
+        for a_, b_ in zip(cv[:-1], cv[1:]):
+            if b_ - a_ > 1e-6:
+                sc.add_dim((-B / 2, a_, tp), (-B / 2, b_, tp), (-0.9 * d, 0, 0), q(b_ - a_), R)
+    for i, (x, y) in enumerate(bpos):
+        sc.vlabels.append(((x / kl, y / kl, tp), f"P{i + 1}", "#00407a", "#ffffffd9", None, True, {"plan"}))
+
+    # ---------------- FRONTAL (eje horizontal X) y LATERAL (eje horizontal Y)
+    def elev(view, hx, ext, plane, mk):
+        """hx: coordenadas de los pernos en el eje horizontal; ext: semiancho de la placa en ese eje;
+        mk(h, z) -> punto 3D; plane = otro semiancho (para colocar las cotas del lado visible)."""
+        V_ = (view,)
+        zb = zs - hef
+        dv = 0.09 * max(ext * 2, hef)
+        # hef: desde la superficie del concreto hasta el extremo del anclaje
+        sc.add_dim(mk(ext, zs), mk(ext, zb), (dv, 0, 0) if view == "front" else (0, dv, 0), "hef = " + q(hef), V_ + ("iso", "free"))
+        fx = (lambda v: (v, 0, 0)) if view == "front" else (lambda v: (0, v, 0))
+        up_, dn_ = 0.045 * hef, -0.045 * hef
+        sc.add_dim(mk(ext, 0.0), mk(ext, tp), fx(dv), "tp = " + q(tp), V_, tshift=(*fx(0.7 * dv)[:2], up_ + 0.5 * tp)
+                   if view == "front" else (0, 0.7 * dv, up_ + 0.5 * tp))
+        if gr > 1e-9:
+            sc.add_dim(mk(ext, zs), mk(ext, zs + gr), fx(dv), "mortero = " + q(gr), V_,
+                       tshift=(0.8 * dv, 0, dn_) if view == "front" else (0, 0.8 * dv, dn_))
+        if so > 1e-9:
+            sc.add_dim(mk(ext, zs + gr), mk(ext, 0.0), fx(dv), "stand-off = " + q(so), V_,
+                       tshift=(0.8 * dv, 0, dn_ * 0.2) if view == "front" else (0, 0.8 * dv, dn_ * 0.2))
+        # longitud total del anclaje (de la punta al extremo roscado)
+        sc.add_dim(mk(-ext, zb), mk(-ext, ztop), (-dv, 0, 0) if view == "front" else (0, -dv, 0),
+                   "L anclaje = " + q(ztop - zb), V_)
+        # ancho de la placa en esta vista
+        sc.add_dim(mk(-ext, tp), mk(ext, tp), (0, 0, 1.4 * dv), ("B = " if view == "front" else "N = ") + q(2 * ext), V_)
+        # cadena de pernos bajo el anclaje
+        if hx and len(hx) <= 7:
+            ch = [-ext] + hx + [ext]
+            for a_, b_ in zip(ch[:-1], ch[1:]):
+                if b_ - a_ > 1e-6:
+                    sc.add_dim(mk(a_, zb), mk(b_, zb), (0, 0, -1.2 * dv), q(b_ - a_), V_)
+        # gancho
+        if "Gancho" in b.atype and hx:
+            eh = (b.eh if b.eh > 0 else 3 * g.db) / kl
+            xr = max(hx)
+            if xr > 0:
+                sc.add_dim(mk(xr, zb), mk(xr + eh, zb), (0, 0, -2.2 * dv), "eh = " + q(eh), V_)
+    if not circ:
+        y0 = -N / 2 - 0.01 * Lm
+        elev("front", xs, B / 2, N / 2, lambda h, z: (h, y0, z))
+        x0 = B / 2 + 0.01 * Lm
+        elev("side", ys, N / 2, B / 2, lambda h, z: (x0, h, z))
+        # isometrica: hef y tp ya van en 'front' con las etiquetas iso/free; B y N sobre la placa
+        sc.add_dim((-B / 2, -N / 2, tp), (B / 2, -N / 2, tp), (0, -d, 0), "B = " + q(B), ("iso", "free"))
+        sc.add_dim((B / 2, -N / 2, tp), (B / 2, N / 2, tp), (d, 0, 0), "N = " + q(N), ("iso", "free"))
+    else:
+        for view in ("front", "side"):
+            y0 = -N / 2 - 0.01 * Lm
+            mk = (lambda h, z: (h, y0, z)) if view == "front" else (lambda h, z: (B / 2 + 0.01 * Lm, h, z))
+            zb = zs - hef
+            dv = 0.09 * max(B, hef)
+            sc.add_dim(mk(B / 2, zs), mk(B / 2, zb), (dv, 0, 0) if view == "front" else (0, dv, 0), "hef = " + q(hef), (view,))
+            sc.add_dim(mk(B / 2, 0.0), mk(B / 2, tp), (dv, 0, 0) if view == "front" else (0, dv, 0), "tp = " + q(tp), (view,))
+            sc.add_dim(mk(-B / 2, zb), mk(-B / 2, ztop), (-dv, 0, 0) if view == "front" else (0, -dv, 0),
+                       "L anclaje = " + q(ztop - zb), (view,))
 
 
 def scene_results(res, prj, field="vm", scale=0.0, part="all", bolts=None, loads=False):
@@ -412,6 +600,8 @@ class GLView(QOpenGLWidget):
         self.pan = np.zeros(3)
         self.center = np.zeros(3)
         self.persp = True
+        self.mode = "iso"          # iso | plan | front | side | free   (define que piezas y cotas se ven)
+        self.dims_on = True
         self.radius = 1.0
         self.fov = 28.0
         self._last = None
@@ -442,7 +632,7 @@ class GLView(QOpenGLWidget):
         V_[:3, 3] = -V_[:3, :3] @ eye
         R = max(self.radius, 1e-6)
         near, far = max(self.dist - 1.6 * R, 0.02 * self.dist), self.dist + 1.6 * R
-        if self.persp:
+        if self.persp and self.mode in ("iso", "free"):
             f = 1.0 / math.tan(math.radians(self.fov) / 2)
             P_ = np.zeros((4, 4))
             P_[0, 0], P_[1, 1] = f / asp, f
@@ -458,7 +648,7 @@ class GLView(QOpenGLWidget):
 
     def fit(self):
         """Encuadra el modelo: ocupa ~90 % del ancho o del alto disponibles."""
-        pts = self.scene.bounds_points()
+        pts = self.scene.bounds_points(self.mode, self.dims_on)
         lo, hi = pts.min(axis=0), pts.max(axis=0)
         self.center = (lo + hi) / 2
         self.radius = float(np.linalg.norm(hi - lo)) / 2 or 1.0
@@ -471,11 +661,26 @@ class GLView(QOpenGLWidget):
             ndc = q[:, :2] / np.maximum(q[:, 3:4], 1e-9)
             ext = float(np.abs(ndc).max()) or 1.0
             k = ext / 0.92
-            if self.persp:
+            if self.persp and self.mode in ("iso", "free"):
                 # al acercar la camara el escorzo cambia: iteracion sobre la distancia al centro
                 self.dist = max(self.dist * k, self.radius * 0.5)
             else:
                 self.dist *= k
+        self.update()
+
+    MODES = {"iso": (24.0, -58.0), "plan": (89.9, -90.0), "front": (0.0, -90.0), "side": (0.0, 0.0)}
+
+    def set_mode(self, mode):
+        """Vista estandar: define la camara, las piezas visibles y las cotas.  Planta, frontal y lateral son ortograficas."""
+        self.mode = mode
+        self.elev, self.azim = self.MODES.get(mode, self.MODES["iso"])
+        self._dirty = True
+        self._user = False
+        self.fit()
+
+    def set_dims(self, on):
+        self.dims_on = bool(on)
+        self._dirty = True
         self.update()
 
     def set_view(self, elev, azim):
@@ -490,7 +695,7 @@ class GLView(QOpenGLWidget):
         old_r, old_c = self.radius, self.center.copy()
         self.scene = scene
         self._dirty = True
-        pts = scene.bounds_points()
+        pts = scene.bounds_points(self.mode, self.dims_on)
         if first or len(pts) < 2 or not keep_view:
             self._has_scene = len(pts) >= 2
             self.radius = 1.0
@@ -516,13 +721,17 @@ class GLView(QOpenGLWidget):
         prog.bindAttributeLocation("aCol", 2)
         prog.link()
         self._prog = prog
-        self._bufs = [QOpenGLBuffer(QOpenGLBuffer.VertexBuffer) for _ in range(3)]
+        self._bufs = [QOpenGLBuffer(QOpenGLBuffer.VertexBuffer) for _ in range(4)]
         for b in self._bufs:
             b.create()
-        self._counts = [0, 0, 0]
+        self._counts = [0, 0, 0, 0]
 
     def _upload(self):
-        for b, arr, i in zip(self._bufs, self.scene.packed(), range(3)):
+        o, t, l = self.scene.packed(self.mode)
+        arrow = 0.022 * max(self.radius, 1e-6)
+        dl, self._dim_texts = (self.scene.dim_segments(self.mode, arrow) if self.dims_on
+                               else (np.zeros((0, FLOATS), np.float32), []))
+        for b, arr, i in zip(self._bufs, (o, t, l, dl), range(4)):
             b.bind()
             data = np.ascontiguousarray(arr, np.float32)
             b.allocate(data.tobytes(), data.nbytes)
@@ -546,7 +755,7 @@ class GLView(QOpenGLWidget):
         self._bufs[i].release()
 
     def resizeGL(self, w, h):
-        if not self._user and len(self.scene.bounds_points()) > 1:
+        if not self._user and len(self.scene.bounds_points(self.mode, self.dims_on)) > 1:
             self.fit()
 
     def paintGL(self):
@@ -581,8 +790,9 @@ class GLView(QOpenGLWidget):
             gl.glDepthMask(False)
             self._draw_buf(1, GL_TRIANGLES)                    # concreto translucido (sin escribir profundidad)
             gl.glDepthMask(True)
+            gl.glDisable(GL_DEPTH_TEST)                        # las cotas van siempre encima
+            self._draw_buf(3, GL_LINES)
             gl.glDisable(GL_BLEND)
-            gl.glDisable(GL_DEPTH_TEST)
             prog.release()
         self._overlay(M)
         self.frames += 1
@@ -625,6 +835,17 @@ class GLView(QOpenGLWidget):
             q = self._project(M, pos)
             if q is not None:
                 self._draw_box(p, q.x(), q.y() - 10, text, fg, bg, border, bold)
+        vm = "iso" if self.mode == "free" else self.mode
+        for pos, text, fg, bg, border, bold, views in sc.vlabels:
+            if self.mode in views:
+                q = self._project(M, pos)
+                if q is not None:
+                    self._draw_box(p, q.x(), q.y() + 12, text, fg, bg, border, bold)
+        if self.dims_on:
+            for pos, text in getattr(self, "_dim_texts", []):
+                q = self._project(M, pos)
+                if q is not None:
+                    self._draw_box(p, q.x(), q.y(), text, "#2b3138", "#ffffffee", None, False)
         for pos, color in sc.markers:
             q = self._project(M, pos)
             if q is not None:
@@ -714,6 +935,9 @@ class GLView(QOpenGLWidget):
         dx, dy = pos.x() - self._last.x(), pos.y() - self._last.y()
         self._last = pos
         if self._btn == Qt.LeftButton and not (ev.modifiers() & Qt.ShiftModifier):
+            if self.mode in ("plan", "front", "side"):          # al girar a mano deja de ser una vista de plano
+                self.mode = "free"
+                self._dirty = True
             self.azim -= dx * 0.45
             self.elev = float(np.clip(self.elev + dy * 0.45, -89.0, 89.0))
         else:
@@ -741,7 +965,7 @@ class GLView(QOpenGLWidget):
 class GLCanvas3D(QWidget):
     """Visor OpenGL con barra de vistas, equivalente a Canvas3D (matplotlib) para la aplicacion."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, dims_button=False):
         super().__init__(parent)
         self.view = GLView(self)
         lay = QVBoxLayout(self)
@@ -762,13 +986,17 @@ class GLCanvas3D(QWidget):
             bar.addWidget(b)
             return b
         btn("Encuadrar", "Encuadra el modelo (doble clic o tecla Inicio)", lambda: self.view.fit())
-        btn("Iso", "Vista isometrica", lambda: self._set(24, -58))
-        btn("Frontal", "Vista frontal (desde -Y)", lambda: self._set(0, -90))
-        btn("Lateral", "Vista lateral (desde +X)", lambda: self._set(0, 0))
-        btn("Planta", "Vista en planta", lambda: self._set(89, -90))
-        b = btn("Perspectiva", "Alterna perspectiva / ortografica", self._toggle_persp, True)
+        btn("Iso", "Vista isometrica (con perspectiva)", lambda: self.view.set_mode("iso"))
+        btn("Planta", "Vista en planta: solo la placa con sus agujeros y cotas, la columna en gris tenue", lambda: self.view.set_mode("plan"))
+        btn("Frontal", "Vista frontal (desde -Y): longitud de anclaje y cotas verticales", lambda: self.view.set_mode("front"))
+        btn("Lateral", "Vista lateral (desde +X): longitud de anclaje y cotas verticales", lambda: self.view.set_mode("side"))
+        b = btn("Perspectiva", "Alterna perspectiva / ortografica en la vista isometrica", self._toggle_persp, True)
         b.setChecked(True)
         self._bp = b
+        if dims_button:
+            bd = btn("Cotas", "Muestra u oculta las cotas de la vista", self._toggle_dims, True)
+            bd.setChecked(True)
+            self._bd = bd
         btn("Guardar imagen", "Guarda la vista actual como PNG", self.save_png)
         lay.addWidget(bar)
         lay.addWidget(self.view, 1)
@@ -781,6 +1009,9 @@ class GLCanvas3D(QWidget):
     def _set(self, e, a):
         self.view.set_view(e, a)
         self.view.fit()
+
+    def _toggle_dims(self):
+        self.view.set_dims(self._bd.isChecked())
 
     def _toggle_persp(self):
         self.view.persp = self._bp.isChecked()
