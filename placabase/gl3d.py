@@ -8,12 +8,12 @@ import math
 import os
 
 import numpy as np
-from PySide6.QtCore import Qt, QPointF, QRectF, Signal
+from PySide6.QtCore import Qt, QPointF, QRectF, QSize, Signal
 from PySide6.QtGui import (QColor, QFont, QPainter, QPen, QPolygonF, QSurfaceFormat, QMatrix4x4,
                            QOpenGLContext, QOffscreenSurface, QImage, QPainterPath)
 from PySide6.QtOpenGL import QOpenGLShaderProgram, QOpenGLShader, QOpenGLBuffer
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QToolButton, QSizePolicy, QFileDialog)
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QToolBar, QToolButton, QSizePolicy, QFileDialog)
 
 from . import view3d as V
 
@@ -747,11 +747,10 @@ class GLCanvas3D(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
-        bar = QWidget()
-        bar.setObjectName("glbar")
-        hl = QHBoxLayout(bar)
-        hl.setContentsMargins(2, 2, 2, 2)
-        hl.setSpacing(2)
+        bar = QToolBar()                       # mismo estilo (linea naranja de 2 px) que las barras de matplotlib
+        bar.setMovable(False)
+        bar.setIconSize(QSize(24, 24))
+        self.bar = bar
 
         def btn(text, tip, fn, checkable=False):
             b = QToolButton()
@@ -760,7 +759,7 @@ class GLCanvas3D(QWidget):
             b.setCheckable(checkable)
             b.setAutoRaise(True)
             b.clicked.connect(fn)
-            hl.addWidget(b)
+            bar.addWidget(b)
             return b
         btn("Encuadrar", "Encuadra el modelo (doble clic o tecla Inicio)", lambda: self.view.fit())
         btn("Iso", "Vista isometrica", lambda: self._set(24, -58))
@@ -771,12 +770,13 @@ class GLCanvas3D(QWidget):
         b.setChecked(True)
         self._bp = b
         btn("Guardar imagen", "Guarda la vista actual como PNG", self.save_png)
-        hl.addStretch(1)
-        bar.setFixedHeight(34)
-        bar.setStyleSheet("#glbar{border-bottom:2px solid #E85D0C;}")
         lay.addWidget(bar)
         lay.addWidget(self.view, 1)
         self.view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+    def match_height(self, h):
+        """Misma altura que la barra de los otros visores, para que las lineas naranjas queden alineadas."""
+        self.bar.setFixedHeight(int(h))
 
     def _set(self, e, a):
         self.view.set_view(e, a)

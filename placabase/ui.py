@@ -100,7 +100,8 @@ class Canvas(QWidget):
         self.cv = FigureCanvasQTAgg(self.fig)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.addWidget(NavigationToolbar2QT(self.cv, self))
+        self.nav = NavigationToolbar2QT(self.cv, self)
+        lay.addWidget(self.nav)
         lay.addWidget(self.cv)
         self.cbar = None
         _wheel_zoom(self.cv, lambda: self.ax)
@@ -735,6 +736,10 @@ class MainWindow(QMainWindow):
         lr3.addLayout(t3)
         sp3 = QSplitter(Qt.Vertical)
         self.cv_res3d = gl3d.GLCanvas3D() if self.use_gl else Canvas3D()
+        if self.use_gl:                              # la linea naranja del visor 3D, a la misma altura que la de Planta
+            hb = self.cv_plan.nav.sizeHint().height()
+            self.cv_3d.match_height(hb)
+            self.cv_res3d.match_height(hb)
         sp3.addWidget(self.cv_res3d)
         low = QWidget(); ll = QHBoxLayout(low); ll.setContentsMargins(0, 0, 0, 0)
         self.tbl_w3 = QTableWidget(0, 7)
