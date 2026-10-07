@@ -142,13 +142,20 @@ def fem_section(prj: Project, res: Results, us: UnitSet):
                 figs=figs, persp=persp, lines=_rep3d_lines(prj, us, rep) if rep else [])
 
 
-def render_3d_png(prj: Project, path: str, size=(6.4, 4.6), dpi=170) -> str | None:
-    """Vista 3D de la geometria (sin analisis) para la memoria de calculo."""
+def _combo_name(prj: Project) -> str:
+    try:
+        return prj.combo_list()[prj.combo_idx].name
+    except Exception:
+        return ""
+
+
+def render_3d_png(prj: Project, path: str, size=(6.8, 5.2), dpi=170) -> str | None:
+    """Vista 3D de la geometria con las flechas de las cargas de la combinacion para la memoria de calculo."""
     try:
         from . import view3d
         fig = plt.figure(figsize=size, dpi=dpi)
         ax = fig.add_axes([0.0, 0.0, 1.0, 0.94], projection="3d")
-        view3d.plot_geometry(ax, prj)
+        view3d.plot_geometry(ax, prj, loads=True, title=False)
         ax.view_init(elev=24, azim=-58)
         view3d.update_order(ax)
         view3d.fit_to_axes(ax)
@@ -483,7 +490,7 @@ def export_docx(prj: Project, res: Results, path: str,
     if _tmp3d:
         doc.add_picture(_tmp3d, width=Inches(4.6))
         doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
-        cap = doc.add_paragraph("Vista 3D de la conexion")
+        cap = doc.add_paragraph(f"Vista 3D de la conexion con las cargas de la combinacion {_combo_name(prj)}")
         cap.alignment = WD_ALIGN_PARAGRAPH.CENTER
         cap.runs[0].italic = True
     p, b, c, L = prj.plate, prj.bolts, prj.conc, prj.eloads
@@ -709,9 +716,9 @@ def export_pdf(prj: Project, res: Results, path: str,
     if _tmp3d:
         from PIL import Image as _PIL
         _iw, _ih = _PIL.open(_tmp3d).size
-        _w = 4.3 * inch
+        _w = 5.4 * inch
         story.append(RLImage(_tmp3d, width=_w, height=_w * _ih / _iw))
-        story.append(Paragraph("Vista 3D de la conexion", CEN))
+        story.append(Paragraph(f"Vista 3D de la conexion con las cargas de la combinacion {_combo_name(prj)}", CEN))
         story.append(Spacer(1, 4))
     p, b, c, L = prj.plate, prj.bolts, prj.conc, prj.eloads
     geo = (f"Ø{us.q('L', p.Dp)}" if p.shape == "Circular"
