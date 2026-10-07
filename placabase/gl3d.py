@@ -276,7 +276,7 @@ class Scene:
         return cat(self.opaque), cat(self.trans), cat(self.lines)
 
     def bounds_points(self):
-        if self.pts:
+        if len(self.pts) > 0:
             return np.asarray(self.pts, float)
         sub = []
         for arr in self.opaque + self.trans:
