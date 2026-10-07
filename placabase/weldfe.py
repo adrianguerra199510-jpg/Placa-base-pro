@@ -513,9 +513,18 @@ def _cap_line(prj, spec, fn, fl, ft, beta=1.0):
     return cap, f / cap, kd
 
 
+def matching_electrode(fexx, fu):
+    """Electrodo compatible ("matching") con el metal base segun AISC 360 Tabla 3-1: E70 para aceros con Fu <= 70 ksi
+    (A36, A500, A572 Gr.50, A992...), E80 hasta 80 ksi, etc.  Un electrodo menor tambien es compatible (rige el cordon).
+    Solo un electrodo SUPERIOR al compatible (sobrecompatible) obliga a verificar el metal base (J2.4, Ec. 26 del paper)."""
+    need = max(70.0, 10.0 * math.ceil(fu / 10.0 - 1e-9))
+    return fexx <= need + 1e-6
+
+
 def _wall_ratio(prj, spec, key, t, fn, fl, ft):
     """D/C del metal base de la pared con la fuerza TOTAL por unidad de longitud de todas sus lineas.
-    CJP: 0.90·Fy·t (normal) y 0.60·Fy·t (cortante).  Filete/PJP: rotura 0.75·0.60·Fu·t."""
+    CJP: 0.90·Fy·t (normal) y 0.60·Fy·t (cortante).  Filete/PJP: rotura 0.75·0.60·Fu·t, solo con electrodo
+    sobrecompatible (con electrodo compatible el cordon gobierna y no se verifica el metal base)."""
     if key == "stiff":
         base = prj.stiff.mat()
     else:
@@ -525,6 +534,8 @@ def _wall_ratio(prj, spec, key, t, fn, fl, ft):
     if spec.wtype.startswith("CJP"):
         return math.hypot(max(fn, 0.0) / (0.90 * base.Fy * t), fs / (0.60 * base.Fy * t))
     Fu = min(base.Fu, plate.Fu)
+    if matching_electrode(spec.FEXX(), Fu):
+        return 0.0                    # AISC J2.4: con electrodo compatible no se verifica el metal base (paper, Ec. 23)
     cap_b = 0.75 * 0.60 * Fu * t
     return math.sqrt(max(fn, 0.0) ** 2 + fs * fs) / cap_b
 
