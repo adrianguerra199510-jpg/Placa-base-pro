@@ -446,7 +446,7 @@ def _build_dims(sc, prj, kl):
         zb = zs - hef
         dv = 0.09 * max(ext * 2, hef)
         # hef: desde la superficie del concreto hasta el extremo del anclaje
-        sc.add_dim(mk(ext, zs), mk(ext, zb), (dv, 0, 0) if view == "front" else (0, dv, 0), "hef = " + q(hef), V_ + ("iso", "free"))
+        sc.add_dim(mk(ext, zs), mk(ext, zb), (dv, 0, 0) if view == "front" else (0, dv, 0), "hef = " + q(hef), V_ + (("iso", "free") if view == "front" else ()))
         fx = (lambda v: (v, 0, 0)) if view == "front" else (lambda v: (0, v, 0))
         up_, dn_ = 0.045 * hef, -0.045 * hef
         sc.add_dim(mk(ext, 0.0), mk(ext, tp), fx(dv), "tp = " + q(tp), V_, tshift=(*fx(0.7 * dv)[:2], up_ + 0.5 * tp)
@@ -474,6 +474,21 @@ def _build_dims(sc, prj, kl):
             xr = max(hx)
             if xr > 0:
                 sc.add_dim(mk(xr, zb), mk(xr + eh, zb), (0, 0, -2.2 * dv), "eh = " + q(eh), V_)
+    # refuerzo del arrancamiento (barras U u Omega): longitudes sobre y bajo el cono de falla
+    from .ubar import ubar
+    ub = ubar(prj)
+    if ub is not None:
+        z0 = zs - ub["depth"] / kl
+        zc = zs - ub["z_cross"] / kl
+        zb2 = z0 - ub["leg"] / kl
+        xl = ub["xl"] / kl
+        y0 = -N / 2 - 0.01 * Lm
+        dv0 = 0.09 * max(B, hef)
+        nm = "ldh" if ub["kind"] == "OMEGA" else "ld"
+        sc.add_dim((xl, y0, z0), (xl, y0, zc), (-0.55 * dv0, 0, 0), "sobre el cono = " + q(ub["above"] / kl),
+                   ("front",), tshift=(-0.9 * dv0, 0, 0))
+        sc.add_dim((xl, y0, zc), (xl, y0, zb2), (-0.55 * dv0, 0, 0),
+                   f"{nm} bajo el cono = " + q(ub["below"] / kl), ("front",), tshift=(-0.9 * dv0, 0, 0))
     if not circ:
         y0 = -N / 2 - 0.01 * Lm
         elev("front", xs, B / 2, N / 2, lambda h, z: (h, y0, z))

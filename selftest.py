@@ -311,6 +311,18 @@ _u2 = Project.from_json(_u1.to_json()); _u2.conc.u_leg = 5.0
 if _k1["aci_ubar_dev"].ratio > 1.0 or solve(_u2).checks[[c.key for c in solve(_u2).checks].index("aci_ubar_dev")].ratio <= 1.0:
     FAIL.append("barras U: una pata corta debe fallar el desarrollo")
 print(f"{'barras U (2 U #5, Ncb tracc.)':34} capacidad {_k0['aci_ncb'].capacity:.1f} -> {_k1['aci_ncb'].capacity:.1f} kip   ld = {_ub['ld']:.1f} in")
+_o2 = Project.from_json(_u1.to_json())
+_o2.conc.u_type = "Opcion B — barras Omega (patas con gancho, ldh)"
+_om = ubar(_o2)
+_k2 = {c.key: c for c in solve(_o2).checks}
+if _om["kind"] != "OMEGA" or _om["below"] < _om["ldh"] - 1e-6 or _om["tail"] < 12 * _om["db"] - 1e-9:
+    FAIL.append("barras Omega: desarrollo o cola del gancho incorrectos")
+for _k in ("aci_ubar_ten", "aci_ubar_dev", "aci_ubar_hook", "aci_ubar_fit", "aci_ubar_cover"):
+    if _k not in _k2:
+        FAIL.append(f"barras Omega: falta la revision {_k}")
+if "aci_ubar_ten" not in {c.key for c in solve(_u1).checks} or "aci_ubar_cover" in {c.key for c in solve(_u1).checks}:
+    FAIL.append("barras U: revisiones esperadas (tension, desarrollo, gancho, altura; sin recubrimiento de cola)")
+print(f"{'barras Omega (2 Ω #5)':34} ldh = {_om['ldh']:.1f} in   pata = {_om['leg']:.0f} in   cola = {_om['tail']:.1f} in")
 from placabase import view3d as _v3
 _its, _pts = _v3.load_arrows(_u0, 1.0)
 if len(_its) != 2 or not _pts:

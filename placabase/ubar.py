@@ -4,7 +4,13 @@
 Cada U es una barra en forma de "herradura invertida": un tramo horizontal cerca de la superficie del
 concreto, que abraza el grupo de pernos, y dos patas verticales que bajan a ambos lados.  Cada pata aporta
 As·fy; deben estar desarrolladas a los dos lados de la superficie de falla (el cono de arrancamiento).
-Geometria y comprobaciones comparten estos datos (dibujo, 3D, anclajes)."""
+Geometria y comprobaciones comparten estos datos (dibujo, 3D, anclajes).
+
+Dos opciones (Conc.u_type):
+  A  barra U       : patas rectas; bajo el cono se desarrolla ld (ACI 25.4.2.3) y sobre el cono el tramo horizontal actua
+                     como gancho (ldh).
+  B  barra OMEGA   : las patas terminan en un gancho estandar de 90° hacia AFUERA (cola de 12·db); bajo el cono se
+                     desarrolla ldh (ACI 25.4.3) y sobre el cono tambien ldh."""
 from __future__ import annotations
 import math
 
@@ -19,6 +25,7 @@ def ubar(prj: Project):
     c, b = prj.conc, prj.bolts
     if not getattr(c, "u_on", False) or c.u_n <= 0:
         return None
+    omega = str(getattr(c, "u_type", "")).startswith("Opcion B")
     db, Ab = REBAR.get(c.u_size, REBAR["#4"])
     fy = max(float(c.u_fy), 1.0)
     sq = math.sqrt(max(c.fc, 1e-6) * 1000.0)
@@ -36,7 +43,8 @@ def ubar(prj: Project):
     depth = max(float(c.u_depth), db)                     # profundidad del tramo horizontal bajo la superficie
     z_cross = max(depth, hef - off / 1.5)                 # profundidad a la que la pata cruza el cono (r = 1.5·(hef − z))
     above = z_cross - depth                               # longitud de pata sobre la superficie de falla (gancho)
-    leg_req = above + ld                                  # pata total para desarrollar ld bajo el cono
+    dev_req = ldh if omega else ld                        # longitud a desarrollar bajo el cono (A: ld recta, B: ldh con gancho)
+    leg_req = above + dev_req                             # pata total para desarrollarla bajo el cono
     leg = float(c.u_leg) if c.u_leg > 0 else math.ceil(leg_req)
     below = depth + leg - z_cross                         # longitud desarrollada bajo el cono
     n_legs = 2 * int(c.u_n)
@@ -46,7 +54,12 @@ def ubar(prj: Project):
         yu = [0.5 * (ya + yb)]
     else:
         yu = [ya + (yb - ya) * k / (c.u_n - 1) for k in range(int(c.u_n))]
+    rb = 3.5 * db                                         # radio al eje del doblez (diametro interior 6·db)
+    tail = max(12.0 * db, 4.0 * db) if omega else 0.0      # cola del gancho estandar de 90° (ACI 25.3.1)
+    tail_end = min(abs(xl), abs(xr)) + tail               # distancia del extremo de la cola al eje del pedestal
+    cover = c.B2 / 2.0 - (max(abs(xl), abs(xr)) + tail)   # recubrimiento lateral que queda tras la cola
     return dict(size=c.u_size, db=db, Ab=Ab, fy=fy, n=int(c.u_n), n_legs=n_legs, ld=ld, ldh=ldh, off=off,
+                kind="OMEGA" if omega else "U", dev=dev_req, rb=rb, tail=tail, cover=cover,
                 xl=xl, xr=xr, depth=depth, z_cross=z_cross, above=above, leg=leg, leg_req=leg_req,
                 below=below, yu=yu, Nrs=n_legs * Ab * fy, phi=PHI_REINF,
                 max_leg=c.ha - depth)

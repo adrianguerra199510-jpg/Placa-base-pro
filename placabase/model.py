@@ -9,6 +9,7 @@ from .shapes import CATALOG, Shape, W_SHAPE, GENERIC_KINDS, rect_props
 import dataclasses
 
 # --------------------------------------------------------------- catalogos
+U_TYPES = ["Opcion A — barras U (patas rectas, ld)", "Opcion B — barras Omega (patas con gancho, ldh)"]
 WELD_CRITERIA = ["Plastico 5 % (Ghimire et al. 2023, como IDEA StatiCa)",
                  "Elastico (pico limitado y media)"]
 WELD_MODELS = ["Conectores (cordon como resortes entre cuerpos separados)",
@@ -312,11 +313,12 @@ class Concrete:
     seismic: bool = False        # aplica 0.75 de ACI 17.10
     # barras U que refuerzan el arrancamiento (ACI 17.5.2): se usan en lugar del concreto si resisten mas
     u_on: bool = False
+    u_type: str = "Opcion A — barras U (patas rectas, ld)"      # ver U_TYPES
     u_size: str = "#4"
     u_n: int = 2                 # numero de barras U (cada una aporta 2 patas)
     u_fy: float = 60.0           # ksi
     u_depth: float = 2.0         # profundidad del tramo horizontal bajo la superficie, in
-    u_leg: float = 0.0           # longitud de la pata, in (0 = automatica: la que desarrolla ld bajo el cono)
+    u_leg: float = 0.0           # longitud de la pata, in (0 = automatica: la que desarrolla ld (U) o ldh (Omega) bajo el cono)
 
     @property
     def cond_A_eff(self) -> bool:

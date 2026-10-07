@@ -736,6 +736,33 @@ def _tube(path, r, axis_n, n=16):
     return faces
 
 
+def _fillet_path(pts, radius, steps=7):
+    """Poligonal con las esquinas redondeadas por arcos tangentes de radio `radius` (se reduce si el tramo es corto)."""
+    P = [np.array(q, float) for q in pts]
+    out = [P[0]]
+    for i in range(1, len(P) - 1):
+        d1, d2 = P[i] - P[i - 1], P[i + 1] - P[i]
+        l1, l2 = np.linalg.norm(d1), np.linalg.norm(d2)
+        if l1 < 1e-9 or l2 < 1e-9:
+            continue
+        d1, d2 = d1 / l1, d2 / l2
+        cos_t = float(np.clip(d1 @ d2, -1.0, 1.0))
+        th = math.acos(cos_t)
+        if th < 1e-6:
+            out.append(P[i])
+            continue
+        r_ = min(radius, 0.45 * l1 / math.tan(th / 2), 0.45 * l2 / math.tan(th / 2))
+        t = r_ * math.tan(th / 2)
+        A = P[i] - d1 * t
+        nn = d2 - d1 * cos_t
+        nn = nn / max(np.linalg.norm(nn), 1e-12)
+        C = A + nn * r_
+        for s_ in np.linspace(0.0, th, steps):
+            out.append(C - nn * r_ * math.cos(s_) + d1 * r_ * math.sin(s_))
+    out.append(P[-1])
+    return [tuple(q) for q in out]
+
+
 def geometry_faces(prj):
     """Piezas de la conexion como caras 3D (pulgadas).
     -> lista de (grupo, caras, color, alfa); grupo: 'conc' | 'below' | 'plate' | 'above'.
@@ -859,18 +886,23 @@ def geometry_faces(prj):
             faces += _prism(poly, -lug.H, 0.0)
         parts.append(("below", faces, "#e15759", 1.0, None, "lug"))
 
-    # ---- barras U de refuerzo del arrancamiento
+    # ---- barras de refuerzo del arrancamiento: U (patas rectas) u Omega (patas con gancho de 90° hacia afuera)
     from .ubar import ubar
     ub = ubar(prj)
     if ub is not None:
         faces = []
         r = ub["db"] / 2.0
+        z0 = zs - ub["depth"]
+        zb_ = z0 - ub["leg"]
         for yy in ub["yu"]:
-            z0 = zs - ub["depth"]
-            pts = [(ub["xl"], yy, z0 - ub["leg"]), (ub["xl"], yy, z0), (ub["xr"], yy, z0), (ub["xr"], yy, z0 - ub["leg"])]
-            for a_, b_ in zip(pts[:-1], pts[1:]):
-                faces += _bar_faces(a_, b_, r)
-        parts.append(("below", faces, "#1b7f3b", 1.0, None, "ubar"))
+            xl, xr, tl = ub["xl"], ub["xr"], ub["tail"]
+            if ub["kind"] == "OMEGA":
+                pts = [(xl - tl, yy, zb_), (xl, yy, zb_), (xl, yy, z0), (xr, yy, z0), (xr, yy, zb_), (xr + tl, yy, zb_)]
+            else:
+                pts = [(xl, yy, zb_), (xl, yy, z0), (xr, yy, z0), (xr, yy, zb_)]
+            path = _fillet_path(pts, ub["rb"], steps=7)
+            faces += _tube(path, r, np.array([0.0, 1.0, 0.0]), n=12)
+        parts.append(("below", faces, "#d43c3c", 1.0, None, "ubar"))
 
     # ---- pedestal de concreto (transparente)
     c = prj.conc

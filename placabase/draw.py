@@ -236,15 +236,31 @@ def elevation_view(ax, prj: Project):
         xl, xr = ub["xl"] / k, ub["xr"] / k
         zt = zc - ub["depth"] / k
         zb = zt - ub["leg"] / k
-        ax.plot([xl, xl, xr, xr], [zb, zt, zt, zb], color="#1b7f3b", lw=2.4, zorder=6,
-                solid_joinstyle="round")
-        ax.plot([xl, xr], [zb, zb], ls="none", marker="s", ms=3, color="#1b7f3b", zorder=6)
-        xd = xl - 1.2 * m
+        rb_ = min(ub["rb"] / k, 0.4 * (ub["leg"] / k), 0.4 * (xr - xl))
+        omega = ub["kind"] == "OMEGA"
+        tl = ub["tail"] / k
+        # recorrido con esquinas redondeadas (radio al eje del doblez)
+        def arc(cx, cz, a0, a1):
+            th = np.radians(np.linspace(a0, a1, 10))
+            return list(zip(cx + rb_ * np.cos(th), cz + rb_ * np.sin(th)))
+        up_l = arc(xl + rb_, zt - rb_, 180, 90)           # esquina superior izquierda
+        up_r = arc(xr - rb_, zt - rb_, 90, 0)             # esquina superior derecha
+        if omega:                                         # gancho estandar de 90° hacia afuera en cada pata
+            hk_l = arc(xl - rb_, zb + rb_, 0, -90)        # pata izquierda: baja y gira hacia la izquierda
+            hk_r = arc(xr + rb_, zb + rb_, 180, 270)      # pata derecha: baja y gira hacia la derecha
+            pts = [(xl - tl, zb)] + hk_l[::-1] + [(xl, zt - rb_)] + up_l + up_r + [(xr, zb + rb_)] + hk_r + [(xr + tl, zb)]
+        else:
+            pts = [(xl, zb), (xl, zt - rb_)] + up_l + up_r + [(xr, zb)]
+        ax.plot([q[0] for q in pts], [q[1] for q in pts], color="#d43c3c", lw=2.4, zorder=6, solid_joinstyle="round")
+        ax.plot([xl, xr] if not omega else [xl - tl, xr + tl], [zb, zb], ls="none", marker="s", ms=3, color="#d43c3c", zorder=6)
+        xd = xl - (tl if omega else 0.0) - 1.2 * m
         ax.annotate("", xy=(xd, zt), xytext=(xd, zb),
-                    arrowprops=dict(arrowstyle="<->", color="#1b7f3b", lw=0.9))
-        ax.text(xd - 0.6 * m, (zt + zb) / 2, f"Ld = {u.q('L', ub['leg'])}", fontsize=8, color="#1b7f3b",
-                rotation=90, va="center", ha="right")
-        ax.text(0.0, zt - 1.0 * m, f"{ub['n']} U {ub['size']}", fontsize=8, color="#1b7f3b",
+                    arrowprops=dict(arrowstyle="<->", color="#d43c3c", lw=0.9))
+        zcr = zc - ub["z_cross"] / k
+        ax.text(xd - 0.6 * m, (zt + zb) / 2, f"{'ldh' if omega else 'ld'} = {u.q('L', ub['below'])}",
+                fontsize=8, color="#d43c3c", rotation=90, va="center", ha="right")
+        ax.plot([xd - 0.5 * m, xd + 0.5 * m], [zcr, zcr], color="#d43c3c", lw=0.8)
+        ax.text(0.0, zt - 1.0 * m, f"{ub['n']} {'Omega' if omega else 'U'} {ub['size']}", fontsize=8, color="#d43c3c",
                 ha="center", va="top")
     ax.annotate("", xy=(Bx / 2 + 2 * m, zc), xytext=(Bx / 2 + 2 * m, zc - hef),
                 arrowprops=dict(arrowstyle="<->", color=C_DIM, lw=0.9))

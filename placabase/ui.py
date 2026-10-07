@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (QAbstractSpinBox, QApplication, QMainWindow, QWid
 from . import __version__
 from .model import (INSTALL_TYPES, ADH_ENV, ADH_CATEGORY)
 from .model import (Project, PATTERNS, ANCHOR_TYPES, WELD_TYPES, PLATE_SHAPES,
-                    LUG_DIRS, STIFF_POSITIONS, STIFF_SHAPES, STIFF_SPACING, WELD_CRITERIA)
+                    LUG_DIRS, STIFF_POSITIONS, STIFF_SHAPES, STIFF_SPACING, WELD_CRITERIA, U_TYPES)
 from . import materials as M
 from .shapes import CATALOG, W_SHAPE, HSS_RECT, HSS_ROUND, PIPE, KIND_LABELS
 from .model import LUG_TYPES, save_book, load_book, MESH3D_MODES, WELD_MODELS, FIXITY, LoadCombo, REBAR
@@ -611,12 +611,13 @@ class MainWindow(QMainWindow):
         f.check("Concreto fisurado en servicio", "conc.cracked", help="Marque si el concreto estara fisurado en la zona del anclaje bajo cargas de servicio, que es la hipotesis por defecto de ACI. Sin fisurar, las resistencias del concreto aumentan.")
         f.check("Diseno sismico (ACI 17.10, factor 0.75)", "conc.seismic", help="Aplica el factor 0.75 a la resistencia del concreto de los anclajes. No verifica por usted el requisito de que el anclaje sea gobernado por la fluencia ductil del acero.")
         f.group("Refuerzo del arrancamiento (barras U)")
-        f.check("Agregar barras U de refuerzo", "conc.u_on", help="Barras en forma de U invertida (herradura) que abrazan el grupo de pernos: un tramo horizontal cerca de la superficie y dos patas verticales a cada lado. Segun ACI 318-19 17.5.2 el refuerzo del anclaje puede sustituir la resistencia del concreto al arrancamiento en traccion y en cortante: la capacidad pasa a ser φ·(n° de patas)·Ab·fy con φ = 0.75, siempre que las patas esten desarrolladas a ambos lados del cono de falla. Se dibujan en la elevacion y en el 3D. El analisis 3D no las modela (solo el calculo cerrado).")
+        f.check("Agregar barras de refuerzo (U u Omega)", "conc.u_on", help="Barras en forma de U invertida (herradura) que abrazan el grupo de pernos: un tramo horizontal cerca de la superficie y dos patas verticales a cada lado. Segun ACI 318-19 17.5.2 el refuerzo del anclaje puede sustituir la resistencia del concreto al arrancamiento en traccion y en cortante: la capacidad pasa a ser φ·(n° de patas)·Ab·fy con φ = 0.75, siempre que las patas esten desarrolladas a ambos lados del cono de falla. Se dibujan en la elevacion y en el 3D. El analisis 3D no las modela (solo el calculo cerrado).")
+        f.combo("Tipo de barra", "conc.u_type", U_TYPES, help="Opcion A, barra U: patas rectas; bajo el cono de falla se desarrolla ld (ACI 25.4.2.3) y el tramo horizontal actua como gancho sobre el cono (ldh). Opcion B, barra Omega: las patas terminan en un gancho estandar de 90 grados hacia afuera (cola de 12 db) y bajo el cono se desarrolla ldh (ACI 25.4.3). Cada opcion se dibuja en 3D y en la elevacion y se revisa: resistencia a traccion, desarrollo bajo y sobre el cono, altura del pedestal y, en la Omega, el recubrimiento de la cola.")
         f.combo("Diametro de la barra", "conc.u_size", list(REBAR.keys()), help="Numero de barra (ASTM A615). #4 = 1/2 in, #5 = 5/8 in, #6 = 3/4 in...")
         f.int_("Cantidad de barras U", "conc.u_n", 1, 12, help="Cada barra U aporta 2 patas.  Se reparten a lo largo de Y, dentro del grupo de pernos, y las patas quedan a 0.3·hef de los pernos extremos (maximo 0.5·hef, como exige ACI).")
         f.num("fy de la barra", "conc.u_fy", 40, 100, uk="S", help="Esfuerzo de fluencia del refuerzo (Gr. 60 = 60 ksi).")
         f.num("Profundidad del tramo horizontal", "conc.u_depth", 0.5, 24, uk="L", help="Distancia desde la superficie del concreto hasta el tramo horizontal de la U (recubrimiento + barras).")
-        f.num("Longitud de la pata (0 = automatica)", "conc.u_leg", 0, 200, uk="L", help="Largo de cada pata medido desde el tramo horizontal. 0 = automatica: la que desarrolla ld bajo la superficie de falla (el cono se cruza a hef − d/1.5). Si pone un valor, se verifica el desarrollo.")
+        f.num("Longitud de la pata (0 = automatica)", "conc.u_leg", 0, 200, uk="L", help="Largo de cada pata medido desde el tramo horizontal. 0 = automatica: la que desarrolla ld (barra U) o ldh (barra Omega) bajo la superficie de falla (el cono se cruza a hef − d/1.5). Si pone un valor, se verifica el desarrollo.")
         f.note("Verifica: capacidad del refuerzo en traccion y cortante (ACI 17.5.2.1, φ = 0.75), desarrollo de la pata bajo el cono (ld, ACI 25.4.2.3) y gancho sobre el cono (ldh, ACI 25.4.3). El refuerzo sustituye al concreto solo si resiste mas que el.")
         f.finish()
 
@@ -1327,7 +1328,7 @@ class MainWindow(QMainWindow):
         fw.show_group("Perimetral (HSS / Pipe)", hollow)
         # ---- concreto: barras U
         fc, cn = F["Concreto"], prj.conc
-        for path in ("conc.u_size", "conc.u_n", "conc.u_fy", "conc.u_depth", "conc.u_leg"):
+        for path in ("conc.u_type", "conc.u_size", "conc.u_n", "conc.u_fy", "conc.u_depth", "conc.u_leg"):
             fc.show_field(path, bool(cn.u_on))
         # ---- elementos finitos
         ff, fe = F["Elementos finitos"], prj.fea

@@ -297,8 +297,9 @@ def anchor_checks(prj: Project, br: Bearing,
                   Nua <= phi_ct * k_seis * Ncbg, "ACI 17.6.2")
         _ub = ubar(prj)
         if _ub is not None:
-            rec.section("E2. REFUERZO DEL ARRANCAMIENTO CON BARRAS U  (ACI 318-19 17.5.2)")
-            rec.add("barras U", f"{_ub['n']} U de {_ub['size']} (db = {_ub['db']:.3f} in, Ab = {_ub['Ab']:.2f} in²)",
+            rec.section("E2. REFUERZO DEL ARRANCAMIENTO CON BARRAS "
+                        + ("OMEGA (PATAS CON GANCHO)" if _ub["kind"] == "OMEGA" else "U (PATAS RECTAS)") + "  (ACI 318-19 17.5.2)")
+            rec.add("barras " + _ub["kind"], f"{_ub['n']} {_ub['kind']} de {_ub['size']} (db = {_ub['db']:.3f} in, Ab = {_ub['Ab']:.2f} in²)",
                     f"{_ub['n_legs']} patas, fy = {rec.n('S', _ub['fy'])}", None, "-")
             rec.add("Nrs", "n_patas · Ab · fy", f"{_ub['n_legs']}·{_ub['Ab']:.2f}·{rec.n('S', _ub['fy'])}",
                     _ub["Nrs"], "F", "ACI 17.5.2.1")
@@ -310,6 +311,10 @@ def anchor_checks(prj: Project, br: Bearing,
             rec.add("pata", f"sobre el cono {rec.n('L', _ub['above'])} / bajo el cono {rec.n('L', _ub['below'])}",
                     f"long. total = {rec.n('L', _ub['leg'])}", _ub["leg"], "L", "",
                     "el cono de falla se cruza a z = hef − d/1.5 bajo la superficie")
+            if _ub["kind"] == "OMEGA":
+                rec.add("gancho", f"cola de 12·db hacia afuera, radio de doblez al eje {rec.n('L', _ub['rb'])}",
+                        f"cola = {rec.n('L', _ub['tail'])}", _ub["tail"], "L", "ACI 25.3.1 / 25.4.3",
+                        "bajo el cono se desarrolla ldh (gancho estandar de 90°)")
     ub = ubar(prj)
     cap_ncb = phi_ct * k_seis * Ncbg
     if ub is not None:
@@ -540,15 +545,33 @@ def anchor_checks(prj: Project, br: Bearing,
                   Vua <= phi_c * k_seis * Vcpg, "ACI 17.7.3")
 
     if ub is not None:
-        short = ub["below"] < ub["ld"] - 1e-6
-        out.append(Check("aci_ubar_dev", "Refuerzo U — desarrollo de las patas bajo el cono de falla",
-                         ub["ld"], max(ub["below"], 0.0), "in", "ACI 318-19 17.5.2.1 / 25.4.2",
-                         f"{ub['n']} U {ub['size']}; pata {u.q('L', ub['leg'])} (sobre el cono {u.q('L', ub['above'])}, "
-                         f"bajo el cono {u.q('L', ub['below'])}); ld = {u.q('L', ub['ld'])}"
+        nm = "Omega" if ub["kind"] == "OMEGA" else "U"
+        dev = "ldh (gancho 90°)" if ub["kind"] == "OMEGA" else "ld (recta)"
+        desc = (f"{ub['n']} {nm} {ub['size']} ({ub['n_legs']} patas, fy = {u.q('S', ub['fy'])}); pata {u.q('L', ub['leg'])} "
+                f"(sobre el cono {u.q('L', ub['above'])}, bajo el cono {u.q('L', ub['below'])})")
+        # 1) resistencia del refuerzo a traccion (ACI 17.5.2.1, condicion A, φ = 0.75)
+        out.append(Check("aci_ubar_ten", f"Refuerzo {nm} — resistencia a traccion (φ·n·Ab·fy)", Nua, ub["phi"] * ub["Nrs"], "kip",
+                         "ACI 318-19 17.5.2.1", desc + f"; Nrs = {u.q('F', ub['Nrs'])}, φ = {ub['phi']:g}"))
+        # 2) desarrollo bajo el cono de falla (A: ld de barra recta, B: ldh del gancho)
+        out.append(Check("aci_ubar_dev", f"Refuerzo {nm} — desarrollo bajo el cono de falla: {dev}",
+                         ub["dev"], max(ub["below"], 0.0), "in",
+                         "ACI 318-19 17.5.2.1 / " + ("25.4.3" if ub["kind"] == "OMEGA" else "25.4.2"),
+                         desc + f"; se requiere {u.q('L', ub['dev'])}"
                          + ("; la pata no cabe en el pedestal" if ub["depth"] + ub["leg"] > prj.conc.ha + 1e-6 else "")))
-        out.append(Check("aci_ubar_hook", "Refuerzo U — gancho sobre el cono de falla",
+        # 3) desarrollo sobre el cono (el doblez superior / gancho)
+        out.append(Check("aci_ubar_hook", f"Refuerzo {nm} — desarrollo sobre el cono de falla: ldh",
                          ub["ldh"], max(ub["above"], 0.0), "in", "ACI 318-19 25.4.3",
                          f"ldh = {u.q('L', ub['ldh'])}; tramo horizontal a {u.q('L', ub['depth'])} de la superficie"))
+        # 4) cabe en el pedestal (profundidad + doblez) y la cola con su recubrimiento
+        need_h = ub["depth"] + ub["leg"] + (ub["rb"] + ub["db"] if ub["kind"] == "OMEGA" else 0.0)
+        out.append(Check("aci_ubar_fit", f"Refuerzo {nm} — cabe en la altura del pedestal", need_h, prj.conc.ha, "in",
+                         "ACI 318-19 20.5.1 (recubrimiento)", f"profundidad {u.q('L', ub['depth'])} + pata {u.q('L', ub['leg'])}"
+                         + (f" + doblez {u.q('L', ub['rb'] + ub['db'])}" if ub["kind"] == "OMEGA" else "")
+                         + f"; altura disponible {u.q('L', prj.conc.ha)}"))
+        if ub["kind"] == "OMEGA":
+            out.append(Check("aci_ubar_cover", "Refuerzo Omega — recubrimiento lateral de la cola del gancho", 1.5,
+                             max(ub["cover"], 0.0), "in", "ACI 318-19 20.5.1",
+                             f"cola {u.q('L', ub['tail'])} hacia afuera; recubrimiento que queda {u.q('L', ub['cover'])}, minimo 1.5 in"))
 
     # ============================================= ACI 17.8 interaccion
     rN = max([ch.ratio for ch in out if ch.key in ("aci_nsa", "aci_ncb", "aci_np", "aci_nsb", "aci_na")] + [0.0])
