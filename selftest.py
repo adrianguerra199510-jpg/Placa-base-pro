@@ -312,6 +312,23 @@ if len(_its) != 2 or not _pts:
     FAIL.append("cargas 3D: se esperaban flechas de Pu y Vux")
 
 
+# ---------------------------------------------------- visor OpenGL: la escena se arma sin necesitar GPU
+try:
+    from placabase import gl3d as _gl
+    import numpy as _np
+    _conc = [(0, 0, 0), (4, 0, 0), (4, 1, 0), (1, 1, 0), (1, 4, 0), (0, 4, 0)]          # poligono concavo en L
+    _tr = _gl.tri_poly(_conc)
+    _ar = sum(abs(_np.cross(_np.subtract(_conc[b], _conc[a]), _np.subtract(_conc[c], _conc[a]))[2]) / 2 for a, b, c in _tr)
+    if len(_tr) != 4 or abs(_ar - 7.0) > 1e-9:
+        FAIL.append(f"visor GL: triangulacion de un poligono concavo incorrecta ({len(_tr)} tris, area {_ar})")
+    _sc = _gl.scene_geometry(_u0, loads=True)
+    _o, _t, _l = _sc.packed()
+    if len(_o) < 100 or len(_t) == 0 or len(_l) == 0 or not _np.isfinite(_o).all() or not _sc.labels:
+        FAIL.append("visor GL: la escena de geometria quedo vacia o con valores no finitos")
+    print(f"{'visor OpenGL (escena)':34} {len(_o) // 3} tris opacos, {len(_t) // 3} translucidos, {len(_l) // 2} aristas, {len(_sc.labels)} etiquetas")
+except Exception as _e:
+    FAIL.append(f"visor GL: {type(_e).__name__}: {_e}")
+
 # ---------------------------------------------------- interfaz (solo si hay Qt): que existan y corran los metodos clave
 try:
     os_ = __import__("os"); os_.environ.setdefault("QT_QPA_PLATFORM", "offscreen")

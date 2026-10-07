@@ -1,6 +1,6 @@
 <p align="center"><img src="placabase/data/logo.png" width="420" alt="PlacaBasePro"></p>
 
-# PlacaBasePro 3.0
+# PlacaBasePro 3.1
 
 Diseño y verificación de placas base para perfiles **W, HSS cuadrado/rectangular,
 HSS circular y Pipe**, con dibujo paramétrico, anclajes ACI 318-19, llave de corte,
@@ -15,7 +15,19 @@ que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
 
 Los proyectos nuevos arrancan en **mm, kN, MPa, kN·m** (se cambia en la pestaña Proyecto; los archivos guardados conservan sus unidades).
 
-## Renderizado 3D (3.0)
+## Novedades de la 3.1
+
+- **Visor 3D en tiempo real (OpenGL).** "Modelo y vistas" y "Analisis FEM" usan ahora un visor OpenGL con z-buffer por pixel: el orden de
+  las piezas es siempre correcto (columna, placa, tuercas, pernos y pedestal translucido) y la rotacion es fluida (>= 30 fps; con tarjeta
+  grafica, cientos). Izquierdo: girar. Derecho o central: desplazar. Rueda: zoom. Doble clic: encuadrar. Barra: Iso / Frontal / Lateral /
+  Planta, perspectiva u ortografica y guardar imagen. Si el equipo no ofrece OpenGL 2.1 (o se define `PB_NO_GL=1`) se usa el visor matplotlib
+  de siempre. La memoria de calculo sigue usando matplotlib.
+- **Tema claro por defecto** (no depende del perfil de Windows) y un interruptor sol/luna arriba a la derecha; la eleccion se recuerda y
+  los graficos siempre van sobre fondo blanco. El logo se adapta al tema oscuro.
+- **CALCULAR** sobre las pestañas del panel izquierdo.
+- La rueda del raton solo cambia un campo numerico o una lista si ya tiene el foco; si no, desplaza el panel.
+
+## Renderizado 3D (3.0, solo memoria y respaldo)
 
 Todas las caras de acero (placa, pernos, tuercas, columna, rigidizadores, llave) van en **una sola coleccion** ordenada por profundidad (cara mas cercana,
 algoritmo del pintor por cara) en vez de una coleccion por pieza; el pedestal translucido se parte en caras traseras (se pintan antes del acero) y

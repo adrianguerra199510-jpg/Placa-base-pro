@@ -16,7 +16,7 @@ from matplotlib.figure import Figure
 
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QObject, QEvent
 from PySide6.QtGui import QAction, QKeySequence, QColor, QFont, QIcon, QPixmap
-from PySide6.QtWidgets import (QAbstractSpinBox, QComboBox, QApplication, QMainWindow, QWidget, QTabWidget, QSplitter,
+from PySide6.QtWidgets import (QAbstractSpinBox, QApplication, QMainWindow, QWidget, QTabWidget, QSplitter,
                                QVBoxLayout, QHBoxLayout, QLabel, QTableWidget,
                                QTableWidgetItem, QHeaderView, QFileDialog, QMessageBox,
                                QComboBox, QPushButton, QTextEdit, QToolBar, QCheckBox,
@@ -35,7 +35,8 @@ from .solver import solve
 from .units import parse_xy_clipboard
 from . import draw, report, mesh3d, view3d, brand
 from .rep3d import make_fem
-from .ui_widgets import Form, scroll, PasteTable
+from .ui_widgets import Form, scroll, PasteTable, ThemeSwitch
+from . import gl3d
 from .units import (UnitSet, LEN_UNITS, FORCE_UNITS, STRESS_UNITS, MOMENT_UNITS,
                     DEFAULT_SETS, KIP_TO_KN, IN_TO_MM, KIPIN_TO_KNM)
 
@@ -207,9 +208,8 @@ class MainWindow(QMainWindow):
         left = QSplitter(Qt.Vertical)
         cw = QWidget(); cl = QVBoxLayout(cw); cl.setContentsMargins(4, 4, 4, 0)
         lg = QLabel()
-        pm = QPixmap(brand.LOGO())
-        if not pm.isNull():
-            lg.setPixmap(pm.scaledToWidth(250, Qt.SmoothTransformation))
+        self.lg = lg
+        lg.setPixmap(brand.logo_pixmap(_theme_dark(), 250))
         lg.setAlignment(Qt.AlignCenter)
         lg.setToolTip(f"PlacaBasePro {__version__}")
         cl.addWidget(lg)
@@ -255,6 +255,10 @@ class MainWindow(QMainWindow):
         m_exp = mb.addMenu("&Exportar")
         m_mat = mb.addMenu("&Materiales")
         m_help = mb.addMenu("A&yuda")
+        self.sw_theme = ThemeSwitch(_theme_dark())
+        self.sw_theme.toggled.connect(self._set_dark)
+        self._corner = cw_ = QWidget(); cl_ = QHBoxLayout(cw_); cl_.setContentsMargins(0, 2, 8, 2); cl_.addWidget(self.sw_theme)
+        mb.setCornerWidget(cw_, Qt.TopRightCorner)
 
         def act(menu, text, slot, key=None, toolbar=False):
             a = QAction(text, self)
@@ -298,13 +302,6 @@ class MainWindow(QMainWindow):
         self.btn3d.setToolTip("Corre el analisis 3D (Gmsh + CalculiX) de todas las combinaciones de carga y "
                               "entrega el veredicto. Mientras no se calcule no se muestra ningun resultado.")
         self.btn3d.clicked.connect(self.run_3d)
-        tb.addSeparator()
-        self.act_dark = QAction("Tema oscuro", self)
-        self.act_dark.setCheckable(True)
-        self.act_dark.setChecked(_theme_dark())
-        self.act_dark.setToolTip("Cambia entre tema claro y oscuro (los graficos siguen sobre fondo blanco)")
-        self.act_dark.toggled.connect(self._set_dark)
-        tb.addAction(self.act_dark)
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         tb.addWidget(spacer)                     # empuja el D/C a la esquina superior derecha
@@ -647,7 +644,8 @@ class MainWindow(QMainWindow):
         l3 = QVBoxLayout(w3)
         l3.setContentsMargins(0, 0, 0, 0)
         sph = QSplitter(Qt.Horizontal)
-        self.cv_3d = Canvas3D()
+        self.use_gl = gl3d.available()
+        self.cv_3d = gl3d.GLCanvas3D() if self.use_gl else Canvas3D()
         gw = QWidget(); gl = QVBoxLayout(gw); gl.setContentsMargins(0, 0, 0, 0)
         def header(widget_left, widget_right=None):
             """Fila de cabecera de altura fija: las barras de herramientas (linea naranja) quedan alineadas."""
@@ -725,7 +723,7 @@ class MainWindow(QMainWindow):
         t3.addStretch(1)
         lr3.addLayout(t3)
         sp3 = QSplitter(Qt.Vertical)
-        self.cv_res3d = Canvas3D()
+        self.cv_res3d = gl3d.GLCanvas3D() if self.use_gl else Canvas3D()
         sp3.addWidget(self.cv_res3d)
         low = QWidget(); ll = QHBoxLayout(low); ll.setContentsMargins(0, 0, 0, 0)
         self.tbl_w3 = QTableWidget(0, 7)
@@ -1404,6 +1402,19 @@ class MainWindow(QMainWindow):
         """Pestaña 'Modelo y vistas': solo la geometria, nunca resultados.  Si falla con las flechas de carga se
         reintenta sin ellas (el fallo queda en error.log); si falla la geometria se muestra el motivo en el lienzo."""
         import math as _m
+        if self.use_gl:
+            try:
+                sc = gl3d.scene_geometry(self.prj, loads=self.chk_loads_geom.isChecked())
+                self.cv_3d.view.set_scene(sc)
+                tl = self.prj.loads
+                self.lbl_geom.setText("<b>Geometria de la conexion</b>" + (
+                    f"   —   columna inclinada  X {tl.tilt_x:g}°, Y {tl.tilt_y:g}°" if tl.tilted else ""))
+            except Exception as e:
+                log = self._log_error("draw_geom (GL)", e)
+                sc = gl3d.Scene(); sc.message = (f"No se pudo dibujar la geometria 3D:\n{type(e).__name__}: "
+                                                 f"{str(e)[:160]}\n\nDetalle en: {log}", "#9c0006")
+                self.cv_3d.view.set_scene(sc)
+            return
         try:                                    # conserva la orientacion de la camara
             elev, azim = self.cv_3d.ax.elev, self.cv_3d.ax.azim
             if not (_m.isfinite(elev) and _m.isfinite(azim)):
@@ -1452,6 +1463,23 @@ class MainWindow(QMainWindow):
 
     def draw_3d(self):
         """Pestaña 'Analisis FEM': campo de resultados; vacia hasta que el calculo termina."""
+        if self.use_gl:
+            raw = self._raw_now() if self.calculated else None
+            if raw is None or not raw.ok:
+                sc = gl3d.Scene()
+                sc.message = ("Sin calcular.\nPresione CALCULAR (F8) para ver los resultados.", "#7f6000")
+                self.cv_res3d.view.set_scene(sc)
+                return
+            try:
+                sc = gl3d.scene_results(raw, self.prj, ["vm", "u", "uz"][self.cb_f3.currentIndex()],
+                                        float(self.sp_sc.value()), part=self.PARTS[self.cb_part.currentIndex()][0],
+                                        bolts=self._bolt_loads(), loads=self.chk_loads_fem.isChecked())
+            except Exception as e:
+                log = self._log_error("draw_3d (resultados GL)", e)
+                sc = gl3d.Scene(); sc.message = (f"No se pudo dibujar el campo de resultados:\n{type(e).__name__}: "
+                                                 f"{str(e)[:160]}\n\nDetalle en: {log}", "#9c0006")
+            self.cv_res3d.view.set_scene(sc)
+            return
         try:
             elev, azim = self.cv_res3d.ax.elev, self.cv_res3d.ax.azim
         except Exception:
@@ -1998,6 +2026,8 @@ class MainWindow(QMainWindow):
 
     def _set_dark(self, on):
         brand.apply_theme(QApplication.instance(), on)
+        if getattr(self, "lg", None) is not None:
+            self.lg.setPixmap(brand.logo_pixmap(on, 250))
         try:
             from PySide6.QtCore import QSettings
             QSettings("PlacaBasePro", "PlacaBasePro").setValue("dark", bool(on))
@@ -2047,8 +2077,10 @@ def main():
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("PlacaBasePro.App")
         except Exception:
             pass
+    gl3d.set_default_format()
     app = QApplication(sys.argv)
     app.setApplicationName("PlacaBasePro")
+    gl3d.available()                       # sondea OpenGL antes de crear la ventana (ajusta el suavizado si es por software)
     app.setStyle("Fusion")
     app.setWindowIcon(QIcon(brand.ICO()))
     brand.apply_theme(app, _theme_dark())

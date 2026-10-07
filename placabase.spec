@@ -20,7 +20,7 @@ hidden = []
 hidden += collect_submodules("scipy.sparse")
 hidden += ["mpl_toolkits.mplot3d", "scipy.sparse.linalg", "scipy.sparse.csgraph",
            "matplotlib.backends.backend_qtagg", "matplotlib.backends.backend_agg",
-           "openpyxl", "docx", "pandas", "reportlab", "reportlab.platypus",
+           "openpyxl", "docx", "pandas", "reportlab", "reportlab.platypus", "PySide6.QtOpenGL", "PySide6.QtOpenGLWidgets",
            "reportlab.lib.styles", "PIL", "gmsh"]
 
 a = Analysis(

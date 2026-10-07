@@ -75,3 +75,29 @@ def apply_theme(app, dark=False):
         pass
     app.setPalette(pal)
     app.setStyleSheet(STYLE_DARK if dark else STYLE)
+
+
+def logo_pixmap(dark=False, width=250):
+    """Logo para el fondo actual: en el tema oscuro, los tonos oscuros y neutros (texto y caja) pasan a claro y el
+    naranja de marca se conserva."""
+    import numpy as np
+    from PySide6.QtGui import QImage, QPixmap
+    from PySide6.QtCore import Qt
+    img = QImage(LOGO())
+    if img.isNull():
+        return QPixmap()
+    img = img.scaledToWidth(width, Qt.SmoothTransformation).convertToFormat(QImage.Format_RGBA8888)
+    if dark:
+        w, h = img.width(), img.height()
+        a = np.frombuffer(img.constBits(), np.uint8).reshape(h, img.bytesPerLine())[:, : w * 4].reshape(h, w, 4).astype(np.float32).copy()
+        rgb = a[:, :, :3] / 255.0
+        mx, mn = rgb.max(axis=2), rgb.min(axis=2)
+        lum = rgb @ np.array([0.299, 0.587, 0.114], np.float32)
+        chroma = mx - mn
+        wgt = np.clip((0.62 - lum) / 0.30, 0, 1) * np.clip((0.30 - chroma) / 0.15, 0, 1)
+        light = np.array([0.95, 0.96, 0.97], np.float32)
+        out = rgb * (1 - wgt[..., None]) + light * wgt[..., None]
+        a[:, :, :3] = out * 255.0
+        data = np.ascontiguousarray(a.astype(np.uint8))
+        img = QImage(data.data, w, h, w * 4, QImage.Format_RGBA8888).copy()
+    return QPixmap.fromImage(img)

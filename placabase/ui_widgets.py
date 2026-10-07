@@ -3,9 +3,9 @@
 from __future__ import annotations
 from PySide6.QtWidgets import (QWidget, QFormLayout, QDoubleSpinBox, QSpinBox,
                                QComboBox, QCheckBox, QLineEdit, QLabel, QGroupBox,
-                               QVBoxLayout, QScrollArea, QFrame, QTableWidget, QApplication)
-from PySide6.QtGui import QKeySequence
-from PySide6.QtCore import Qt, Signal, QEvent, QObject
+                               QVBoxLayout, QScrollArea, QFrame, QTableWidget, QApplication, QAbstractButton)
+from PySide6.QtGui import QKeySequence, QPainter, QPen, QColor, QPainterPath
+from PySide6.QtCore import Qt, Signal, QEvent, QObject, QPointF
 
 from .units import UnitSet, parse_xy_clipboard
 
@@ -226,3 +226,52 @@ class PasteTable(QTableWidget):
                 QApplication.clipboard().setText("\n".join(lines))
             return
         super().keyPressEvent(ev)
+
+
+class ThemeSwitch(QAbstractButton):
+    """Interruptor compacto claro/oscuro: solo un sol y una luna (sin texto); la mitad activa se resalta."""
+    def __init__(self, dark=False, parent=None):
+        super().__init__(parent)
+        self.setCheckable(True)
+        self.setChecked(bool(dark))
+        self.setFixedSize(54, 22)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip("Tema claro / oscuro (los graficos siempre van sobre fondo blanco)")
+
+    def paintEvent(self, ev):
+        import math
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        w, h = self.width(), self.height()
+        dark = self.isChecked()
+        p.setPen(QPen(QColor("#E85D0C" if self.underMouse() else "#8a929c"), 1.0))
+        p.setBrush(QColor("#2c3643" if dark else "#e4e7eb"))
+        p.drawRoundedRect(0.5, 0.5, w - 1, h - 1, 5, 5)
+        # perilla bajo la opcion activa
+        kx = w / 2 if dark else 1
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor("#E85D0C"))
+        p.drawRoundedRect(kx + 1, 2, w / 2 - 3, h - 4, 4, 4)
+        # sol (izquierda)
+        cx, cy = w * 0.25, h / 2
+        col = QColor("#ffffff" if not dark else "#f5b942")
+        p.setBrush(col)
+        p.drawEllipse(QPointF(cx, cy), 3.6, 3.6)
+        p.setPen(QPen(col, 1.3))
+        for i in range(8):
+            a = i * math.pi / 4
+            p.drawLine(QPointF(cx + 5.6 * math.cos(a), cy + 5.6 * math.sin(a)),
+                       QPointF(cx + 7.4 * math.cos(a), cy + 7.4 * math.sin(a)))
+        # luna (derecha): disco menos otro desplazado
+        mx, my = w * 0.75, h / 2
+        path = QPainterPath()
+        path.addEllipse(QPointF(mx, my), 6.0, 6.0)
+        cut = QPainterPath()
+        cut.addEllipse(QPointF(mx + 3.2, my - 2.2), 5.2, 5.2)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor("#ffffff" if dark else "#59626d"))
+        p.drawPath(path.subtracted(cut))
+        p.end()
+
+    def sizeHint(self):
+        return self.size()
