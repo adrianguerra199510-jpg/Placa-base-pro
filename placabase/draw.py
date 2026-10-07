@@ -24,6 +24,57 @@ warnings.filterwarnings(
     "ignore", message="Ignoring fixed .* limits to fulfill fixed data aspect")
 
 
+def _dim(ax, a, b, off, text, horizontal=True, fs=7.0):
+    """Cota entre los puntos a y b (x, y), desplazada `off` de la linea que los une, con flechas y texto."""
+    (x1, y1), (x2, y2) = a, b
+    if horizontal:
+        yy = y1 + off
+        ax.plot([x1, x1], [y1, yy + 0.25 * off], color=C_DIM, lw=0.5, zorder=2)
+        ax.plot([x2, x2], [y2, yy + 0.25 * off], color=C_DIM, lw=0.5, zorder=2)
+        ax.annotate("", xy=(x1, yy), xytext=(x2, yy),
+                    arrowprops=dict(arrowstyle="<->", color=C_DIM, lw=0.8, shrinkA=0, shrinkB=0), zorder=3)
+        ax.text((x1 + x2) / 2, yy + (0.012 if off > 0 else -0.012) * abs(off) * 8, text, ha="center",
+                va="bottom" if off > 0 else "top", fontsize=fs, color=C_DIM, zorder=4,
+                bbox=dict(boxstyle="square,pad=0.05", fc="white", ec="none", alpha=0.8))
+    else:
+        xx = x1 + off
+        ax.plot([x1, xx + 0.25 * off], [y1, y1], color=C_DIM, lw=0.5, zorder=2)
+        ax.plot([x2, xx + 0.25 * off], [y2, y2], color=C_DIM, lw=0.5, zorder=2)
+        ax.annotate("", xy=(xx, y1), xytext=(xx, y2),
+                    arrowprops=dict(arrowstyle="<->", color=C_DIM, lw=0.8, shrinkA=0, shrinkB=0), zorder=3)
+        ax.text(xx + (0.012 if off > 0 else -0.012) * abs(off) * 8, (y1 + y2) / 2, text, ha="left" if off > 0 else "right",
+                va="center", fontsize=fs, color=C_DIM, rotation=90, zorder=4,
+                bbox=dict(boxstyle="square,pad=0.05", fc="white", ec="none", alpha=0.8))
+
+
+def _plan_dims(ax, prj, pos, k, u):
+    """Cotas de la placa y de la disposicion de pernos (distancias al borde y entre pernos)."""
+    p = prj.plate
+    circ = p.shape == "Circular"
+    W = (p.Dp if circ else p.B) / k
+    H = (p.Dp if circ else p.N) / k
+    d = 0.07 * max(W, H)
+    f = lambda v: u.fmt("L", v * k)
+    # placa: ancho abajo, largo a la derecha (el modelo lleva Y arriba)
+    _dim(ax, (-W / 2, -H / 2), (W / 2, -H / 2), -2.6 * d, ("Ø " if circ else "B = ") + f(W))
+    if not circ:
+        _dim(ax, (W / 2, -H / 2), (W / 2, H / 2), 2.6 * d, "N = " + f(H), horizontal=False)
+    xs = sorted({round(x / k, 4) for x, _ in pos})
+    ys = sorted({round(y / k, 4) for _, y in pos})
+    if circ or not pos or len(xs) > 7 or len(ys) > 7:
+        return
+    # cadena de cotas en X (arriba): borde - pernos - borde
+    ch = [-W / 2] + xs + [W / 2]
+    for a_, b_ in zip(ch[:-1], ch[1:]):
+        if b_ - a_ > 1e-6:
+            _dim(ax, (a_, H / 2), (b_, H / 2), 1.2 * d, f(b_ - a_))
+    # cadena en Y (izquierda)
+    cv = [-H / 2] + ys + [H / 2]
+    for a_, b_ in zip(cv[:-1], cv[1:]):
+        if b_ - a_ > 1e-6:
+            _dim(ax, (-W / 2, a_), (-W / 2, b_), -1.2 * d, f(b_ - a_), horizontal=False)
+
+
 def plan_view(ax, prj: Project, show_dims=True, labels=True):
     ax.clear()
     p, b = prj.plate, prj.bolts
@@ -74,7 +125,9 @@ def plan_view(ax, prj: Project, show_dims=True, labels=True):
         Lm = p.Dp
     else:
         Lm = max(p.N, p.B)
-    Lm = 1.16 * max(Lm, 1.0) / k
+    if show_dims:
+        _plan_dims(ax, prj, pos, k, u)
+    Lm = (1.7 if show_dims else 1.16) * max(Lm, 1.0) / k
     ax.set_xlim(-Lm / 2, Lm / 2)
     ax.set_ylim(-Lm / 2, Lm / 2)
     ax.set_aspect("equal", adjustable="datalim")
@@ -97,7 +150,7 @@ def plan_view(ax, prj: Project, show_dims=True, labels=True):
             txt.append(f"Llave {u.fmt('L', prj.lug.W)}×{u.fmt('L', prj.lug.H)}×"
                        f"{u.q('L', prj.lug.t)}")
         ax.set_title("PLANTA — " + "   |   ".join(txt), fontsize=9, loc="left")
-    ax.legend(loc="upper right", fontsize=7, framealpha=0.9)
+    ax.legend(loc="lower center" if show_dims else "upper right", ncol=4 if show_dims else 1, fontsize=7, framealpha=0.9)
 
 
 def elevation_view(ax, prj: Project):

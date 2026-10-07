@@ -101,3 +101,30 @@ def logo_pixmap(dark=False, width=250):
         data = np.ascontiguousarray(a.astype(np.uint8))
         img = QImage(data.data, w, h, w * 4, QImage.Format_RGBA8888).copy()
     return QPixmap.fromImage(img)
+
+
+# colores de las hojas de estilo en linea (claro -> oscuro): textos azules/grises y el panel de ayuda
+DARK_MAP = {"#f4f7fb": "#1d252e", "#c8d6e8": "#3a4452", "#24405f": "#c3d4ea", "#1f3864": "#9fc3f0",
+            "#595959": "#aab2bb", "#9c0006": "#ff8a8a", "#08306b": "#9fc3f0", "#444444": "#aab2bb"}
+
+
+def retheme(root, dark):
+    """Reescribe los colores de las hojas de estilo en linea del arbol de widgets para el tema oscuro (y los
+    restituye en el claro)."""
+    from PySide6.QtWidgets import QWidget
+    for w in [root] + root.findChildren(QWidget):
+        ss = w.styleSheet()
+        if not ss and w.property("_ss0") is None:
+            continue
+        orig = w.property("_ss0")
+        if orig is None:
+            if not any(k in ss for k in DARK_MAP):
+                continue
+            orig = ss
+            w.setProperty("_ss0", orig)
+        new = orig
+        if dark:
+            for a, b in DARK_MAP.items():
+                new = new.replace(a, b)
+        if new != ss:
+            w.setStyleSheet(new)

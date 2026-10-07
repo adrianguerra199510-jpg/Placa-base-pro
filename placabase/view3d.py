@@ -514,8 +514,8 @@ def load_arrows(prj, kl, ztop=None):
     F = [abs(L.Pu), abs(L.Vux), abs(L.Vuy)]
     fmax = max(F) if max(F) > 1e-9 else 1.0
 
-    def ln(v):                                   # largo proporcional, con un minimo legible
-        return size * (0.45 + 0.55 * abs(v) / fmax)
+    def ln(v):                                   # largo creciente con la carga pero comprimido (raiz): el cortante no
+        return size * (0.55 + 0.45 * (abs(v) / fmax) ** 0.4)       # queda diminuto junto a una axial muy grande
 
     if abs(L.Pu) > 1e-9:
         l_ = ln(L.Pu)

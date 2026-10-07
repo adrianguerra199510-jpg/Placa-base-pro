@@ -243,6 +243,11 @@ class MainWindow(QMainWindow):
         self.load_ui()
         self._refresh_list()
         self.recalc()
+        self._dark = _theme_dark()
+        if self._dark:
+            brand.retheme(self, True)
+            self.recalc()
+        self._ready = True
 
     # =============================================================== acciones
     def _build_actions(self):
@@ -380,7 +385,7 @@ class MainWindow(QMainWindow):
         f.num("Coeficiente μ", "loads.mu_fric", 0.2, 0.9, 0.05, 2, help="Coeficiente de friccion entre la placa y el mortero. Valores habituales de 0.40 a 0.55.")
         self.lbl_si = QLabel("")
         self.lbl_si.setStyleSheet("color:#595959; font-size:8pt;")
-        f._lay.addRow("Combinacion activa (SI)", self.lbl_si)
+        f._lay.addRow("Combinacion activa", self.lbl_si)
         f.finish()
 
         # ---- perfil
@@ -891,6 +896,7 @@ class MainWindow(QMainWindow):
                              "m": "kN·m", "cm": "tonf·m"}.get(L, "kip·in")
         self.load_ui()
         self.fill_table()
+        self.recalc()                       # dibujos, etiquetas y tablas con las unidades nuevas
 
     def load_ui(self):
         for msg in self.prj.normalize():
@@ -1331,8 +1337,8 @@ class MainWindow(QMainWindow):
         self.lbl_shape.setText(
             f"{KIND_LABELS.get(s.kind, s.kind)} · {dims}<br>"
             f"{'Seccion doble: ' if self.prj.section.is_double else ''}"
-            f"A={uu.q('A', e.A)}  Ix={e.Ix:.4g}  Iy={e.Iy:.4g} in⁴  "
-            f"Sx={e.Sx:.4g}  Sy={e.Sy:.4g} in³   [{s.source}]"
+            f"A={uu.q('A', e.A)}  Ix={e.Ix / uu.fl ** 4:.4g}  Iy={e.Iy / uu.fl ** 4:.4g} {uu.L}⁴  "
+            f"Sx={e.Sx / uu.fl ** 3:.4g}  Sy={e.Sy / uu.fl ** 3:.4g} {uu.L}³   [{s.source}]"
             + ("<br><i>Rigidizadores no disponibles: la soldadura se verifica como "
                "grupo en todo el contorno.</i>" if self.prj.section.generic else ""))
         it = self.lst_con.item(self.cur) if hasattr(self, "lst_con") else None
@@ -1340,18 +1346,17 @@ class MainWindow(QMainWindow):
             it.setText(f"{self.prj.element or '(sin nombre)'}   —   {self.prj.section.describe()}")
         g = self.prj.bolts.geom()
         u = self.us
-        self.lbl_bolt.setText(f"db={g.db:.4g} in ({g.db*25.4:.1f} mm)  Ab={u.q('A', g.Ab)}  "
+        self.lbl_bolt.setText(f"db={u.q('L', g.db)}  Ab={u.q('A', g.Ab)}  "
                               f"Ase={u.q('A', g.Ase)}  agujero {u.q('L', g.dh)}  "
                               f"Abrg={u.q('A', g.Abrg)}")
         self.lbl_count.setText(f"{self.prj.bolts.n_total} pernos")
         L = self.prj.eloads
         self.lbl_tilt.setText(
-            (f"Pu={L.Pu:.1f}  Vux={L.Vux:.1f}  Vuy={L.Vuy:.1f} kip;  "
-             f"Mux={L.Mux:.0f}  Muy={L.Muy:.0f} kip·in") if self.prj.loads.tilted
+            (f"Pu={u.q('F', L.Pu)}  Vux={u.q('F', L.Vux)}  Vuy={u.q('F', L.Vuy)};  "
+             f"Mux={u.q('M', L.Mux)}  Muy={u.q('M', L.Muy)}") if self.prj.loads.tilted
             else "(columna perpendicular: sin cambios)")
-        self.lbl_si.setText(f"Pu={L.Pu*KIP_TO_KN:.1f} kN   Mux={L.Mux*KIPIN_TO_KNM:.1f} kN·m   "
-                            f"Muy={L.Muy*KIPIN_TO_KNM:.1f} kN·m   Vu={L.Vu*KIP_TO_KN:.1f} kN"
-                            f"      |      Pu={L.Pu:.1f} kip   Mux={L.Mux:.0f} kip·in")
+        self.lbl_si.setText(f"Pu={u.q('F', L.Pu)}   Mux={u.q('M', L.Mux)}   "
+                            f"Muy={u.q('M', L.Muy)}   Vu={u.q('F', L.Vu)}")
 
     # =================================================================== calculo
     def _fem_now(self, prj=None, idx=None):
@@ -1429,7 +1434,7 @@ class MainWindow(QMainWindow):
         if self.calculated and self.res.rec is not None:
             self.txt_mem.setHtml(self.res.rec.to_html())
         else:
-            self.txt_mem.setHtml("<p style='color:#7f6000'><b>Sin calcular.</b> Presione <b>CALCULAR (F8)</b> "
+            self.txt_mem.setHtml(f"<p style='color:{self.tc('#7f6000')}'><b>Sin calcular.</b> Presione <b>CALCULAR (F8)</b> "
                                  "para correr el analisis 3D de todas las combinaciones; la memoria de calculo "
                                  "aparece al terminar.</p>")
         self.statusBar().showMessage("Calculo completo" if self.calculated else
@@ -1779,7 +1784,7 @@ class MainWindow(QMainWindow):
             self.lbl_3d.setText("Analisis cancelado.")
             self.statusBar().showMessage("Analisis 3D cancelado", 5000)
         if failed:
-            self.lbl_3d.setText(f"<span style='color:#9c0006'>{failed[0]}: {failed[1][:600]}</span>")
+            self.lbl_3d.setText(f"<span style='color:{self.tc('#9c0006')}'>{failed[0]}: {failed[1][:600]}</span>")
             QMessageBox.warning(self, "Analisis 3D", f"Combinacion {failed[0]}:\n\n{failed[1][-2500:]}")
         raw, fem = self._raw_now(), self._fem_now()
         if raw is not None and fem is not None:
@@ -1803,7 +1808,7 @@ class MainWindow(QMainWindow):
                 f"<b>|U| max</b> = {u.q('L', raw.umax)}  ·  " + stress_txt
                 + (f"equilibrio: {fem.msg}<br>" if fem.msg else "<br>")
                 + f"Archivos en: {getattr(raw, 'folder', '')}<br>"
-                + (f"<span style='color:#595959'>Tamano de elemento: {u.q('L', fem.lc)}.</span><br>" if fem.lc else "")
+                + (f"<span style='color:{self.tc('#595959')}'>Tamano de elemento: {u.q('L', fem.lc)}.</span><br>" if fem.lc else "")
                 + tail)
             self.tabs_out.setCurrentIndex(1)        # muestra el analisis FEM al terminar
         if self.calculated and len(self.pairs) > 1:
@@ -1848,6 +1853,7 @@ class MainWindow(QMainWindow):
                         except ValueError:
                             ok = False
                         it.setBackground(green if ok else red)
+                        it.setForeground(QColor("#1b1b1b"))     # texto oscuro sobre verde/rojo/gris (tema oscuro)
                     tb.setItem(i, j, it)
         self.tbl_w3.setToolTip(
             "D/C pico: el punto mas cargado del cordon (concentracion elastica, por "
@@ -1879,7 +1885,7 @@ class MainWindow(QMainWindow):
                     "3D de " + (f"las {len(pairs)} combinaciones de carga" if len(pairs) > 1 else "la conexion")
                     + " y aparecen aqui las verificaciones, el D/C y la memoria de calculo."]
             for w in fatal:
-                html.append(f"<span style='color:#9c0006'>• {w}</span>")
+                html.append(f"<span style='color:{self.tc('#9c0006')}'>• {w}</span>")
             self.txt_info.setHtml("<br>".join(html))
             self.lbl_res_ck.setText("<b>Verificaciones</b> (aparecen al terminar el calculo)")
             return
@@ -1895,6 +1901,7 @@ class MainWindow(QMainWindow):
                 it = QTableWidgetItem(v)
                 if j == 3:
                     it.setBackground(green if R.ok else red)
+                    it.setForeground(QColor("#1b1b1b"))     # texto oscuro sobre verde/rojo/gris (tema oscuro)
                 if k == gk and j == 0:
                     f_ = it.font(); f_.setBold(True); it.setFont(f_)
                     it.setToolTip("Combinacion que gobierna")
@@ -1914,6 +1921,7 @@ class MainWindow(QMainWindow):
                     it.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
                 if j == 4:
                     it.setBackground(grey if ch.skip else (green if ch.ok else red))
+                    it.setForeground(QColor("#1b1b1b"))     # texto oscuro sobre verde/rojo/gris (tema oscuro)
                     f = it.font(); f.setBold(True); it.setFont(f)
                 it.setToolTip(v)
                 self.tbl.setItem(i, j, it)
@@ -1928,7 +1936,7 @@ class MainWindow(QMainWindow):
         if gov:
             html.append(f"Gobierna: <b>{gov.title}</b>  (D/C = {gov.ratio:.3f})")
         for w in r.warnings:
-            col = "#9c0006" if w.startswith("**") else "#7f6000"
+            col = self.tc("#9c0006" if w.startswith("**") else "#7f6000")
             html.append(f"<span style='color:{col}'>• {w}</span>")
         self.txt_info.setHtml("<br>".join(html))
 
@@ -2100,8 +2108,18 @@ class MainWindow(QMainWindow):
             "Los resultados deben ser revisados por un ingeniero responsable.")
         mb.exec()
 
+    def tc(self, c):
+        """Color de texto adecuado al tema (los rojos y ambares oscuros se aclaran sobre fondo oscuro)."""
+        if not getattr(self, "_dark", False):
+            return c
+        return {"#9c0006": "#ff8a8a", "#7f6000": "#e6c15a", "#595959": "#aab2bb"}.get(c, c)
+
     def _set_dark(self, on):
+        self._dark = bool(on)
         brand.apply_theme(QApplication.instance(), on)
+        brand.retheme(self, on)
+        if getattr(self, "_ready", False):
+            self.recalc()                  # regenera los textos con los colores del tema
         if getattr(self, "lg", None) is not None:
             self.lg.setPixmap(brand.logo_pixmap(on, 250))
         try:
