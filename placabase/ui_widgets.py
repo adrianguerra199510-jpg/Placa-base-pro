@@ -3,7 +3,8 @@
 from __future__ import annotations
 from PySide6.QtWidgets import (QWidget, QFormLayout, QDoubleSpinBox, QSpinBox,
                                QComboBox, QCheckBox, QLineEdit, QLabel, QGroupBox,
-                               QVBoxLayout, QScrollArea, QFrame, QTableWidget, QApplication, QAbstractButton)
+                               QVBoxLayout, QScrollArea, QFrame, QTableWidget, QApplication, QAbstractButton,
+                               QTextBrowser)
 from PySide6.QtGui import QKeySequence, QPainter, QPen, QColor, QPainterPath
 from PySide6.QtCore import Qt, Signal, QEvent, QObject, QPointF
 
@@ -54,7 +55,7 @@ class Form(QWidget):
         if ev.type() in (QEvent.FocusIn, QEvent.Enter, QEvent.HoverEnter):
             txt = self._help.get(obj)
             if txt and self.info is not None:
-                self.info.setText(txt)
+                self.info.setHtml(txt)
         return False
 
     def help_panel(self):
@@ -64,13 +65,13 @@ class Form(QWidget):
         fr.setStyleSheet("QFrame{background:#f4f7fb;border:1px solid #c8d6e8;}")
         lay = QVBoxLayout(fr)
         lay.setContentsMargins(8, 6, 8, 6)
-        self.info = QLabel("Pase el cursor sobre cualquier campo para ver su "
-                           "descripcion.")
-        self.info.setWordWrap(True)
-        self.info.setTextFormat(Qt.RichText)
-        self.info.setStyleSheet("color:#24405f; font-size:8.5pt;")
-        self.info.setMinimumHeight(52)
-        self.info.setAlignment(Qt.AlignTop)
+        # altura FIJA con su propio scroll: si el texto cambiara el alto del panel, aparecian/desaparecian las barras
+        # del formulario y todo se movia bajo el cursor (se notaba sobre todo en Pernos)
+        self.info = QTextBrowser()
+        self.info.setFrameShape(QFrame.NoFrame)
+        self.info.setStyleSheet("QTextBrowser{background:transparent;color:#24405f;font-size:8.5pt;border:0;}")
+        self.info.setFixedHeight(84)
+        self.info.setHtml("Pase el cursor sobre cualquier campo para ver su descripcion.")
         lay.addWidget(self.info)
         self.outer.addWidget(fr)
         return fr
@@ -201,6 +202,7 @@ def scroll(widget):
     sa.setWidget(widget)
     sa.setWidgetResizable(True)
     sa.setFrameShape(QScrollArea.NoFrame)
+    sa.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)      # el ancho no cambia al aparecer/desaparecer la barra
     return sa
 
 

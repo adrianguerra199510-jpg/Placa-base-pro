@@ -1,6 +1,6 @@
 <p align="center"><img src="placabase/data/logo.png" width="420" alt="PlacaBasePro"></p>
 
-# PlacaBasePro 3.1.1
+# PlacaBasePro 3.1.2
 
 Diseño y verificación de placas base para perfiles **W, HSS cuadrado/rectangular,
 HSS circular y Pipe**, con dibujo paramétrico, anclajes ACI 318-19, llave de corte,
@@ -14,6 +14,11 @@ tabla de resultados y a los reportes. El cálculo interno siempre corre en in-ki
 que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
 
 Los proyectos nuevos arrancan en **mm, kN, MPa, kN·m** (se cambia en la pestaña Proyecto; los archivos guardados conservan sus unidades).
+
+## Novedades de la 3.1.2
+
+- Los formularios ya no se mueven al pasar el cursor sobre los campos (sobre todo en Pernos): el panel de ayuda del pie tiene
+  altura fija con su propio scroll y la barra vertical del formulario siempre esta presente, asi el ancho no cambia.
 
 ## Novedades de la 3.1.1
 
