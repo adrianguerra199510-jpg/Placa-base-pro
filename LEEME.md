@@ -1,6 +1,6 @@
 <p align="center"><img src="placabase/data/logo.png" width="420" alt="PlacaBasePro"></p>
 
-# PlacaBasePro 3.2.1
+# PlacaBasePro 3.2.2
 
 Diseño y verificación de placas base para perfiles **W, HSS cuadrado/rectangular,
 HSS circular y Pipe**, con dibujo paramétrico, anclajes ACI 318-19, llave de corte,
@@ -14,6 +14,17 @@ tabla de resultados y a los reportes. El cálculo interno siempre corre en in-ki
 que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
 
 Los proyectos nuevos arrancan en **mm, kN, MPa, kN·m** (se cambia en la pestaña Proyecto; los archivos guardados conservan sus unidades).
+
+## Novedades de la 3.2.2: soldadura calibrada contra IDEA StatiCa
+
+Con el ejemplo PB-01_W14X90 (P = 400 kip, Mux = 1800 kip·in, Vux = 30 kip) el ala −Y exterior da **Ut = 0.778** (IDEA StatiCa 0.777; calculo
+independiente con elemento de cordon CBFEM 0.779). Cambios respecto de la 3.2.1:
+- Rigidez del cordon de filete **0.272·E** por unidad de longitud en las tres direcciones (rigidez a cortante del throat, 0.707·G); antes la
+  normal era 0.707·E. El paper no publica la rigidez del elemento; este valor reproduce IDEA y debe tratarse como parametro declarado (la
+  utilizacion del ala comprimida depende mucho de el).
+- El conector normal del cordon **transmite tambien compresion** (en paralelo con el contacto, que es unas 13 veces mas rigido) y su modulo
+  cuenta en la resultante y en el factor direccional kds, como en la Ec. 23 del paper.
+- El pico se lee por elemento (sin ventana de promedio) y la media de cada linea sigue informandose.
 
 ## Novedades de la 3.2.1
 
