@@ -1,6 +1,6 @@
 <p align="center"><img src="placabase/data/logo.png" width="420" alt="PlacaBasePro"></p>
 
-# PlacaBasePro 3.2.8
+# PlacaBasePro 3.2.9
 
 Diseño y verificación de placas base para perfiles **W, HSS cuadrado/rectangular,
 HSS circular y Pipe**, con dibujo paramétrico, anclajes ACI 318-19, llave de corte,
@@ -14,6 +14,13 @@ tabla de resultados y a los reportes. El cálculo interno siempre corre en in-ki
 que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
 
 Los proyectos nuevos arrancan en **mm, kN, MPa, kN·m** (se cambia en la pestaña Proyecto; los archivos guardados conservan sus unidades).
+
+## Novedades de la 3.2.9
+
+- **Malla automatica 1.33 veces mas gruesa con acero plastico** (la opcion por defecto). Estudio con PB-01 (elementos de 61, 81, 102 y 127 mm; la
+  malla del cordon se mantiene en ~28 mm): traccion en pernos, presion de contacto, desplazamiento y D/C de la soldadura cambian menos de 2 %;
+  el tiempo total baja de 99 s a 56 s (43 % menos). El von Mises promediado de la placa baja 8 % (con plasticidad es informativo; sin ella se
+  conserva la malla de antes). "Fina" y el tamaño manual no cambian.
 
 ## Novedades de la 3.2.8
 

@@ -497,11 +497,22 @@ def auto_mesh_size(prj: Project) -> float:
 
 
 def mesh_size_for(prj: Project) -> float:
-    """Tamano de malla 3D: el valor manual si se fijo; si no, el automatico (x 0.65 en el modo "Fina")."""
+    """Tamano de malla 3D: el valor manual si se fijo; si no, el automatico (x 0.65 en el modo "Fina").
+
+    Con acero elasto-plastico (por defecto) el automatico se agranda 1.33 veces: en el estudio de malla de PB-01 (61 / 81 / 102 / 127 mm) la
+    traccion en pernos, la presion de contacto, el desplazamiento y el D/C de la soldadura cambian < 2 % (la malla del cordon sigue en
+    ~28 mm) y el tiempo total baja de 99 s a 56 s; solo el von Mises promediado de la placa (informativo con plasticidad) baja 8 %.  Sin
+    plasticidad el von Mises promediado SI se verifica (≤ 0.9·Fy) y se conserva la malla de siempre."""
     if prj.fea.mesh3d and prj.fea.mesh3d > 0:
         return float(prj.fea.mesh3d)
-    k = 0.65 if str(getattr(prj.fea, "mesh3d_mode", "")).startswith("Fina") else 1.0
-    return k * auto_mesh_size(prj)
+    if str(getattr(prj.fea, "mesh3d_mode", "")).startswith("Fina"):
+        return 0.65 * auto_mesh_size(prj)
+    lc = auto_mesh_size(prj)
+    if getattr(prj.fea, "plastic", False):
+        p = prj.plate
+        side = p.Dp if p.shape == "Circular" else min(p.Nc, p.Bc)
+        lc = min(1.33 * lc, side / 4.0)
+    return lc
 
 
 def is_fast_mesh(prj: Project) -> bool:
