@@ -253,7 +253,7 @@ def write_geo(prj: Project, path: str, mesh_size: float = 0.0,
     # refinamiento local en el pie del perfil: ahi se leen las fuerzas de la
     # soldadura, asi que conviene tener al menos 2-3 elementos en el espesor
     tmin = min(x for x in (s.tf, s.tw) if x > 0) if (s.tf or s.tw) else p.tp
-    hmin = max(0.9 * tmin, min(lc / 2.2, 1.1))      # en el cordon el elemento no pasa de ~28 mm (como IDEA StatiCa)
+    hmin = max(0.9 * tmin, min(lc / 2.2, 1.1))      # en el cordon el elemento no pasa de ~28 mm (Ghimire et al. 2023)
     bw, bh = G.profile_bbox(prj)
     ext_r = 0.5 * max(bw, bh) + 0.5
     L.append("// refinamiento en la union perfil-placa (lectura de la soldadura)")
@@ -778,8 +778,8 @@ def build_inp(prj: Project, mesh_inp: str, out_inp: str, height: float = 0.0) ->
          ]
     plastic = bool(getattr(prj.fea, "plastic", False))
     if plastic:
-        # TODAS las piezas son de acero elasto-plastico perfecto con limite φ·Fy de su propio acero (como IDEA
-        # StatiCa).  Cada elemento se asigna a su pieza por su centroide (igual que classify_parts): asi funciona
+        # TODAS las piezas son de acero elasto-plastico perfecto con limite φ·Fy de su propio acero (acero perfectamente plastico).
+        # Cada elemento se asigna a su pieza por su centroide (igual que classify_parts): asi funciona
         # tambien con la union fusionada, donde placa, perfil y rigidizadores son un solo volumen.
         from .view3d import _covered_by_profile
         zl = max(z for (_x, _y, z) in nodes.values())

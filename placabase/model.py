@@ -10,7 +10,7 @@ import dataclasses
 
 # --------------------------------------------------------------- catalogos
 U_TYPES = ["Opcion A — barras U (patas rectas, ld)", "Opcion B — barras Omega (patas con gancho, ldh)"]
-WELD_CRITERIA = ["Plastico 5 % (Ghimire et al. 2023, como IDEA StatiCa)",
+WELD_CRITERIA = ["Plastico 5 % (Ghimire et al. 2023)",
                  "Elastico (pico limitado y media)"]
 WELD_MODELS = ["Conectores (cordon como resortes entre cuerpos separados)",
                "Fusionado (union monolitica, equivale a CJP)"]
@@ -392,10 +392,10 @@ class FEAOpts:
     shear_arm: float = -1.0      # brazo del cortante sobre la placa, in (-1 = automatico)
     vm_avg_factor: float = 1.0   # radio de promedio del von Mises 3D, en espesores de placa
     plastic: bool = True         # acero elasto-plastico en TODAS las piezas (limite φ·Fy): sin picos de esfuerzo; se verifica la deformacion plastica
-    plastic_limit: float = 5.0   # deformacion plastica equivalente maxima admitida, % (como IDEA StatiCa)
+    plastic_limit: float = 5.0   # deformacion plastica equivalente maxima admitida, % (EN 1993-1-5 C.8)
     weld_peak_factor: float = 1.5   # el D/C PICO local de la soldadura (FEM) se admite hasta este valor; la media, hasta 1.0
     weld_model: str = "Conectores (cordon como resortes entre cuerpos separados)"   # ver WELD_MODELS
-    weld_criterion: str = "Plastico 5 % (Ghimire et al. 2023, como IDEA StatiCa)"   # ver WELD_CRITERIA
+    weld_criterion: str = "Plastico 5 % (Ghimire et al. 2023)"   # ver WELD_CRITERIA
     weld_plastic_limit: float = 5.0     # deformacion plastica de la garganta a la que el D/C del cordon vale 1, %
     weld_long_reduction: bool = True    # reduccion por cordon largo, AISC J2.2b(d): L > 100·w (el FEM no la captura)
 
@@ -463,6 +463,8 @@ class Project:
         Columna inclinada: no se permiten rigidizadores (su geometria y las formulas
         de DG1 suponen columna perpendicular a la placa)."""
         changes = []
+        if str(self.fea.weld_criterion).startswith("Plastico"):      # archivos de versiones anteriores: texto antiguo del criterio
+            self.fea.weld_criterion = WELD_CRITERIA[0]
         if self.loads.tilted and self.stiff.enabled:
             self.stiff.enabled = False
             changes.append("Rigidizadores desactivados: no se permiten con la columna inclinada.")

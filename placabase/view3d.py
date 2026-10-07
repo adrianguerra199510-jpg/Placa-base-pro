@@ -142,8 +142,8 @@ def read_peeq(path: str) -> dict:
 
 def clip_vm_to_yield(res, prj) -> int:
     """Con acero elasto-plastico el esfuerzo en los puntos de integracion no pasa de φ·Fy, pero CalculiX lo extrapola
-    a los nodos y ahi puede quedar por encima (sobre todo en esquinas con singularidad).  Para mostrar lo mismo que
-    IDEA StatiCa se recorta el von Mises nodal en φ·Fy del acero de la pieza a la que pertenece cada nodo
+    a los nodos y ahi puede quedar por encima (sobre todo en esquinas con singularidad).  Para mostrar un campo acotado
+    se recorta el von Mises nodal en φ·Fy del acero de la pieza a la que pertenece cada nodo
     (nodos compartidos entre piezas: el mayor).  El original queda en res.vm_raw.  Devuelve cuantos nodos se recortaron."""
     tp = prj.plate.tp
     caps = {"plate": prj.plate.mat().Fy, "washer": prj.plate.mat().Fy, "column": prj.section.mat().Fy,

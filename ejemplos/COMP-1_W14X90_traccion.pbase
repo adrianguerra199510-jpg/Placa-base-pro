@@ -3,8 +3,8 @@
  "version": 2,
  "conexiones": [
   {
-   "name": "Comparativa IDEA",
-   "element": "IDEA-1",
+   "name": "Comparativa de referencia",
+   "element": "COMP-1",
    "author": "",
    "date": "",
    "metric": false,

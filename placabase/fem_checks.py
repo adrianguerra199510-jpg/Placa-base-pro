@@ -105,8 +105,8 @@ def fem_checks(prj: Project, br: Bearing, fem: Fem3D, rec=None) -> list:
         if z.ratio == float("inf"):
             cap = 0.0
         # El pico elastico local (esquinas, donde el perfil llega a la placa) se admite hasta `weld_peak_factor` veces
-        # la resistencia, por la redistribucion plastica de un filete ductil (AISC J2.4 lo permite; RAM e IDEA
-        # no lo penalizan); la MEDIA de la cara se exige completa.  D/C de la fila = max(pico/F, media).
+        # la resistencia, por la redistribucion plastica de un filete ductil (AISC J2.4 lo permite);
+        # la MEDIA de la cara se exige completa.  D/C de la fila = max(pico/F, media).
         F = max(1.0, float(getattr(prj.fea, "weld_peak_factor", 1.5)))
         if getattr(z, "plastic", False) and z.cap > 0:
             # criterio plastico (Ghimire et al. 2023): D/C = deformacion plastica de la garganta / limite; media <= 1.0
@@ -135,7 +135,7 @@ def fem_checks(prj: Project, br: Bearing, fem: Fem3D, rec=None) -> list:
                      "cuya fuerza se lee directo del resorte (F = k·Δ); un lado sin cordon no transmite. La "
                      "fuerza por unidad de longitud se suaviza en una ventana de 4 veces el cateto y se compara "
                      "con φ·0.60·FEXX·garganta·kd por linea (AISC J2.4) y con la rotura del metal base. "
-                     + ("Los conectores son ELASTO-PLASTICOS (Ghimire et al. 2023, como IDEA StatiCa): fluyen en esa "
+                     + ("Los conectores son ELASTO-PLASTICOS (Ghimire et al. 2023): fluyen en esa "
                         "resistencia de diseno con una rama plastica corta (pendiente k/1000), lo que redistribuye los "
                         "picos; el D/C del cordon vale 1 cuando la deformacion plastica de la garganta llega al limite "
                         f"({getattr(prj.fea, 'weld_plastic_limit', 5.0):g} %) y la MEDIA de cada cara se exige hasta 1.0."

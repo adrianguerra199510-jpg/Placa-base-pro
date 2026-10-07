@@ -176,7 +176,7 @@ def plastic_on(prj):
     return str(getattr(prj.fea, "weld_criterion", "")).startswith("Plastico")
 
 
-SLOPE = 1.0e-3                     # pendiente plastica relativa del conector (como CBFEM: E/1000)
+SLOPE = 1.0e-3                     # pendiente plastica relativa del conector (E/1000, como en Ghimire et al. 2023)
 
 
 def yield_levels(prj, spec, beta=1.0):
@@ -213,7 +213,7 @@ def _weld_stiff(spec):
         return 5.0 * ES_KSI, 5.0 * GS
     if spec.wtype.startswith("PJP"):
         return ES_KSI, GS
-    return 0.707 * GS, 0.707 * GS          # filete: rigidez del throat a cortante, 0.272·E, en las tres direcciones (Xara/PB-01)
+    return 0.707 * GS, 0.707 * GS          # filete: rigidez del throat a cortante, 0.272·E, en las tres direcciones 
 
 
 def free_faces(S: Split):
@@ -635,7 +635,7 @@ def postprocess_conn(prj, res, conn, WeldZone, spec_txt):
         mean_w = float(np.mean(w)) if w else 0.1
         win = max(4.0 * spec.size, 6.0 * mean_w, 0.5)
         if plas:
-            win = 1e-9      # cordon plastico (IDEA / Ghimire et al.): valor por elemento, sin suavizar; la fluencia redistribuye
+            win = 1e-9      # cordon plastico (Ghimire et al. 2023): valor por elemento, sin suavizar; la fluencia redistribuye
         S = _smooth(a, w, [[r["fn"] for r in lst], [r["fl"] for r in lst], [r["ft"] for r in lst],
                            [r["epl"] for r in lst]], win, period)
         smoothed[gk] = (lst, S, period, win)

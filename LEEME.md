@@ -1,6 +1,6 @@
 <p align="center"><img src="placabase/data/logo.png" width="420" alt="PlacaBasePro"></p>
 
-# PlacaBasePro 3.2.6
+# PlacaBasePro 3.2.7
 
 Diseño y verificación de placas base para perfiles **W, HSS cuadrado/rectangular,
 HSS circular y Pipe**, con dibujo paramétrico, anclajes ACI 318-19, llave de corte,
@@ -14,6 +14,11 @@ tabla de resultados y a los reportes. El cálculo interno siempre corre en in-ki
 que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
 
 Los proyectos nuevos arrancan en **mm, kN, MPa, kN·m** (se cambia en la pestaña Proyecto; los archivos guardados conservan sus unidades).
+
+## Novedades de la 3.2.7
+
+- Se retiraron del programa, la documentacion y los ejemplos las referencias a otros programas comerciales. El ejemplo de comparacion se
+  llama ahora `COMP-1_W14X90_traccion.pbase`. Los proyectos guardados con el nombre anterior del criterio del cordon se abren sin problema.
 
 ## Novedades de la 3.2.6
 
@@ -39,12 +44,12 @@ Los proyectos nuevos arrancan en **mm, kN, MPa, kN·m** (se cambia en la pestañ
 - En la vista de **Planta** la columna y los rigidizadores se ven con un relleno tenue de su color y un contorno nitido (antes eran un gris casi
   invisible): se lee la huella del perfil sobre la placa.
 
-## Novedades de la 3.2.2: soldadura calibrada contra IDEA StatiCa
+## Novedades de la 3.2.2: soldadura calibrada contra un calculo de referencia
 
-Con el ejemplo PB-01_W14X90 (P = 400 kip, Mux = 1800 kip·in, Vux = 30 kip) el ala −Y exterior da **Ut = 0.778** (IDEA StatiCa 0.777; calculo
-independiente con elemento de cordon CBFEM 0.779). Cambios respecto de la 3.2.1:
+Con el ejemplo PB-01_W14X90 (P = 400 kip, Mux = 1800 kip·in, Vux = 30 kip) el ala −Y exterior da **Ut = 0.778** (programa de referencia 0.777;
+calculo independiente con un elemento de cordon como el del paper, 0.779). Cambios respecto de la 3.2.1:
 - Rigidez del cordon de filete **0.272·E** por unidad de longitud en las tres direcciones (rigidez a cortante del throat, 0.707·G); antes la
-  normal era 0.707·E. El paper no publica la rigidez del elemento; este valor reproduce IDEA y debe tratarse como parametro declarado (la
+  normal era 0.707·E. El paper no publica la rigidez del elemento; este valor reproduce el calculo de referencia y debe tratarse como parametro declarado (la
   utilizacion del ala comprimida depende mucho de el).
 - El conector normal del cordon **transmite tambien compresion** (en paralelo con el contacto, que es unas 13 veces mas rigido) y su modulo
   cuenta en la resultante y en el factor direccional kds, como en la Ec. 23 del paper.
@@ -57,8 +62,8 @@ independiente con elemento de cordon CBFEM 0.779). Cambios respecto de la 3.2.1:
   se desarrolla ldh bajo y sobre el cono). Se dibujan como barras redondas con doblez de radio interior 3·db (3D, con cotas, y elevacion) y se
   revisan: resistencia a traccion (φ·n·Ab·fy), desarrollo bajo el cono, desarrollo sobre el cono, altura del pedestal y, en la Omega, el
   recubrimiento lateral de la cola.
-- **Cordon plastico sin suavizar** (como IDEA StatiCa y el paper): la fuerza se lee por elemento (la fluencia redistribuye los picos) y el
-  elemento del cordon no pasa de ~28 mm. En el ejemplo PB-01_W14X90 (IDEA: 77.7 % en el ala −Y exterior) el programa da 0.72. El criterio
+- **Cordon plastico sin suavizar** (como en el paper): la fuerza se lee por elemento (la fluencia redistribuye los picos) y el
+  elemento del cordon no pasa de ~28 mm. En el ejemplo PB-01_W14X90 (referencia externa: 77.7 % en el ala −Y exterior) el programa da 0.72. El criterio
   elastico conserva el suavizado de 4 veces el cateto.
 - El metal base solo se verifica con electrodo sobrecompatible (AISC J2.4).
 
@@ -75,7 +80,7 @@ independiente con elemento de cordon CBFEM 0.779). Cambios respecto de la 3.2.1:
 
 Basado en Ghimire, Wald, Vild y Kabelac, *Numerical design calculation of the fillet weld resistance*, Welding in the World (2023):
 
-- **Cordon plastico (5 %), como IDEA StatiCa.** Con el modelo de conectores, la soldadura es ahora elasto-plastica: cada conector
+- **Cordon plastico (5 %), segun el paper.** Con el modelo de conectores, la soldadura es ahora elasto-plastica: cada conector
   (normal solo-traccion y cortante x, y) fluye en la resistencia de diseno AISC J2.4, φ·0.60·FEXX·garganta (x1.5 si trabaja
   transversal, J2-5), con una rama plastica corta de pendiente k/1000. Eso redistribuye los picos locales de las esquinas en lugar de
   limitarlos con un factor. El D/C del cordon vale 1 cuando la deformacion plastica de la garganta llega al limite (5 %, editable) y la
@@ -90,7 +95,7 @@ Basado en Ghimire, Wald, Vild y Kabelac, *Numerical design calculation of the fi
 
 Basado en Ghimire, Wald, Vild y Kabelac, *Numerical design calculation of the fillet weld resistance*, Welding in the World (2023):
 
-- **Cordon plastico (5 %), como IDEA StatiCa.** Con el modelo de conectores, la soldadura es ahora elasto-plastica: cada conector
+- **Cordon plastico (5 %), segun el paper.** Con el modelo de conectores, la soldadura es ahora elasto-plastica: cada conector
   (normal solo-traccion y cortante x, y) fluye en la resistencia de diseno AISC J2.4, φ·0.60·FEXX·garganta (x1.5 si trabaja
   transversal, J2-5), con una rama plastica corta de pendiente k/1000. Eso redistribuye los picos locales de las esquinas en lugar de
   limitarlos con un factor. El D/C del cordon vale 1 cuando la deformacion plastica de la garganta llega al limite (5 %, editable) y la
@@ -138,8 +143,7 @@ delanteras (despues) segun la camara, y se reordena al girar. Una rotacion compl
 ## Soldadura en el FEM: pico y media
 
 Cada cara del cordon se evalua con un **D/C pico** (punto mas cargado, elastico) y un **D/C media** (fuerza de la cara / su longitud). El pico se admite
-hasta `Limite del D/C pico` (Elementos finitos; 1.5 por defecto, por la redistribucion plastica de un filete ductil, y porque RAM e IDEA no lo
-penalizan) y la media hasta 1.0; el D/C de la fila es max(pico / limite, media). El calculo cerrado equivale a la media.
+hasta `Limite del D/C pico` (Elementos finitos; 1.5 por defecto, por la redistribucion plastica de un filete ductil) y la media hasta 1.0; el D/C de la fila es max(pico / limite, media). El calculo cerrado equivale a la media.
 
 ## Version 3.0: acero elasto-plastico en todas las piezas y sin motor de placas
 
@@ -151,7 +155,7 @@ Por defecto el 3D usa acero elasto-plastico perfecto (limite φ·Fy del acero de
 arandelas): el esfuerzo queda acotado, desaparecen los picos puntuales y se verifica la deformacion plastica equivalente (PEEQ) ≤ 5 %. La
 placa se verifica con el maximo nodal; el perfil, los rigidizadores y la llave, con el promedio en un circulo de radio ≈ espesor, porque el
 borde del cordon es una singularidad de malla (en el tubo de comparacion: placa 0.016 %, perfil 0.2 % promedio y 1.3 % puntual). El von Mises
-promediado pasa a ser informativo. El von Mises que se dibuja se **recorta en φ·Fy** del acero de cada pieza (CalculiX extrapola a los nodos y puede pasarse del tope; en el tubo de comparacion 359 → 285 MPa, 154 nodos), como lo muestra IDEA StatiCa; la verificacion no cambia. Se desactiva en Elementos finitos (vuelve al criterio elastico ≤ 0.9·Fy); si CalculiX no converge con
+promediado pasa a ser informativo. El von Mises que se dibuja se **recorta en φ·Fy** del acero de cada pieza (CalculiX extrapola a los nodos y puede pasarse del tope; en el tubo de comparacion 359 → 285 MPa, 154 nodos); la verificacion no cambia. Se desactiva en Elementos finitos (vuelve al criterio elastico ≤ 0.9·Fy); si CalculiX no converge con
 plasticidad, el programa usa el criterio elastico y lo avisa.
 Con barras U la condicion A de ACI (φ = 0.75) se aplica sola; la casilla manual se elimino. En el visor, el analisis elasto-plastico reporta
 solo el punto maximo, bajo la escala de colores.
