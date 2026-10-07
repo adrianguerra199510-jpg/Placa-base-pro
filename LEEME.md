@@ -1,6 +1,6 @@
 <p align="center"><img src="placabase/data/logo.png" width="420" alt="PlacaBasePro"></p>
 
-# PlacaBasePro 3.2.5
+# PlacaBasePro 3.2.6
 
 Diseño y verificación de placas base para perfiles **W, HSS cuadrado/rectangular,
 HSS circular y Pipe**, con dibujo paramétrico, anclajes ACI 318-19, llave de corte,
@@ -14,6 +14,12 @@ tabla de resultados y a los reportes. El cálculo interno siempre corre en in-ki
 que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
 
 Los proyectos nuevos arrancan en **mm, kN, MPa, kN·m** (se cambia en la pestaña Proyecto; los archivos guardados conservan sus unidades).
+
+## Novedades de la 3.2.6
+
+- Barras U/Omega: **ld / ldh bajo la punta del anclaje.** La seccion critica es el extremo inferior del anclaje (z = hef) y la longitud
+  desarrollada se mide de ahi hacia abajo hasta el final de la pata (como en el esquema); sobre ese nivel se exige ldh. La pata automatica es la
+  que cumple ambas longitudes. Las cotas y las revisiones usan esa misma referencia.
 
 ## Novedades de la 3.2.5
 

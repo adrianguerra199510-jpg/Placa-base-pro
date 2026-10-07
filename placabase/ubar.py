@@ -7,10 +7,10 @@ As·fy; deben estar desarrolladas a los dos lados de la superficie de falla (el 
 Geometria y comprobaciones comparten estos datos (dibujo, 3D, anclajes).
 
 Dos opciones (Conc.u_type):
-  A  barra U       : patas rectas; bajo el cono se desarrolla ld (ACI 25.4.2.3) y sobre el cono el tramo horizontal actua
+  A  barra U       : patas rectas; bajo la punta del anclaje se desarrolla ld (ACI 25.4.2.3) y sobre la punta del anclaje el tramo horizontal actua
                      como gancho (ldh).
-  B  barra OMEGA   : las patas terminan en un gancho estandar de 90° hacia AFUERA (cola de 12·db); bajo el cono se
-                     desarrolla ldh (ACI 25.4.3) y sobre el cono tambien ldh."""
+  B  barra OMEGA   : las patas terminan en un gancho estandar de 90° hacia AFUERA (cola de 12·db); bajo la punta del anclaje se
+                     desarrolla ldh (ACI 25.4.3) y sobre la punta del anclaje tambien ldh."""
 from __future__ import annotations
 import math
 
@@ -41,12 +41,12 @@ def ubar(prj: Project):
     lim = max(c.B2 / 2.0 - 1.5, 1.0)                      # recubrimiento lateral de 1.5 in
     xl, xr = max(min(xs) - off, -lim), min(max(xs) + off, lim)
     depth = max(float(c.u_depth), db)                     # profundidad del tramo horizontal bajo la superficie
-    z_cross = max(depth, hef - off / 1.5)                 # profundidad a la que la pata cruza el cono (r = 1.5·(hef − z))
+    z_cross = max(depth, hef)                             # seccion critica: la punta del anclaje (como en el esquema: ldh/ld se miden de ahi hacia abajo)
     above = z_cross - depth                               # longitud de pata sobre la superficie de falla (gancho)
-    dev_req = ldh if omega else ld                        # longitud a desarrollar bajo el cono (A: ld recta, B: ldh con gancho)
-    leg_req = above + dev_req                             # pata total para desarrollarla bajo el cono
+    dev_req = ldh if omega else ld                        # longitud a desarrollar bajo la punta del anclaje (A: ld recta, B: ldh con gancho)
+    leg_req = above + dev_req                             # pata total para desarrollarla bajo la punta del anclaje
     leg = float(c.u_leg) if c.u_leg > 0 else math.ceil(leg_req)
-    below = depth + leg - z_cross                         # longitud desarrollada bajo el cono
+    below = depth + leg - z_cross                         # longitud desarrollada bajo la punta del anclaje
     n_legs = 2 * int(c.u_n)
     # las U van FUERA del grupo de anclajes, a 5 cm (1.97 in) de la fila extrema, mitad a cada lado (si son impares, una mas en el
     # lado -Y); asi el tramo horizontal no choca con los pernos.  Separacion entre barras del mismo lado: max(4·db, 2 in).

@@ -491,7 +491,7 @@ def _build_dims(sc, prj, kl):
         dv0 = 0.09 * max(B, hef)
         nm = "ldh" if ub["kind"] == "OMEGA" else "ld"
         sc.add_dim((xl, y0, zc), (xl, y0, zb2), (-0.55 * dv0, 0, 0),
-                   f"{nm} bajo el cono = " + q(ub["below"] / kl), ("front",), tshift=(-0.9 * dv0, 0, 0))
+                   f"{nm} bajo la punta = " + q(ub["below"] / kl), ("front",), tshift=(-0.9 * dv0, 0, 0))
         # de la parte superior de la barra (tramo horizontal) a la punta inferior del anclaje
         xr = ub["xr"] / kl
         zb_anchor = zs - hef
