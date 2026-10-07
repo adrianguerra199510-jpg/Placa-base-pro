@@ -1866,9 +1866,11 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Guardado: {self.path}", 4000)
 
     def save_as(self):
-        fn, _ = QFileDialog.getSaveFileName(self, "Guardar proyecto",
-                                            f"{self.prj.element or 'placa'}.pbase",
-                                            "Placa base (*.pbase)")
+        self.store_ui()
+        # el archivo guarda TODO el proyecto (todas las conexiones): se sugiere el nombre del proyecto
+        safe = "".join(ch if (ch.isalnum() or ch in "-_ .") else "_" for ch in (self.prj.name or "").strip()) \
+            .strip(" .") or "Proyecto"
+        fn, _ = QFileDialog.getSaveFileName(self, "Guardar proyecto", f"{safe}.pbase", "Placa base (*.pbase)")
         if fn:
             self.path = fn
             self.save()
