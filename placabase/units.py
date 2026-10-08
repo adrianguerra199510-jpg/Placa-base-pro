@@ -257,3 +257,40 @@ class UnitSet:
         if kind == "S":
             return {"ksi": 2, "psi": 0, "MPa": 1, "kgf/cm2": 0, "kgf/mm2": 2}[self.stress]
         return 3
+
+
+# ------------------------------------------------- pegado desde Excel / texto
+def parse_number(txt: str):
+    """Numero de una celda de Excel. Acepta coma o punto decimal y separador de
+    miles ('1,234.5', '1.234,5', '12,5', '12.5', '-3', '1 234,5'). None si no es numero."""
+    t = txt.strip().replace(" ", "").replace(" ", "")
+    if not t:
+        return None
+    if "," in t and "." in t:
+        if t.rfind(",") > t.rfind("."):          # 1.234,5
+            t = t.replace(".", "").replace(",", ".")
+        else:                                    # 1,234.5
+            t = t.replace(",", "")
+    elif "," in t:
+        t = t.replace(",", ".") if t.count(",") == 1 else t.replace(",", "")
+    try:
+        return float(t)
+    except ValueError:
+        return None
+
+
+def parse_xy_clipboard(text: str) -> list:
+    """Filas (x, y) a partir de texto copiado de Excel (columnas por tabulacion, filas por
+    salto de linea; tambien acepta ';' o espacios). De cada fila toma los dos primeros numeros;
+    las filas sin dos numeros (encabezados, rotulos) se ignoran."""
+    import re
+    out = []
+    for line in text.replace("\r", "").split("\n"):
+        if not line.strip():
+            continue
+        cells = line.split("\t") if "\t" in line else (
+            line.split(";") if ";" in line else re.split(r"\s+", line.strip()))
+        nums = [n for n in (parse_number(c) for c in cells) if n is not None]
+        if len(nums) >= 2:
+            out.append((nums[0], nums[1]))
+    return out
