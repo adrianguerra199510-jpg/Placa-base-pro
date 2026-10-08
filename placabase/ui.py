@@ -410,6 +410,8 @@ class MainWindow(QMainWindow):
         f.num("Separacion entre piezas", "section.gap", 0, 12, uk="L", help="Distancia libre entre las espaldas de las dos piezas (espesor de la cartela o del separador). En dobles angulos AISC tabula 0, 3/8 y 3/4 in.")
         f.group("Orientacion respecto a la placa")
         f.num("Rotacion", "section.rotation", -180, 180, 15.0, 1, "°", help="Giro del perfil respecto a la placa. 0° = eje fuerte paralelo a N, de modo que Mux flexiona el perfil en su eje fuerte. 90° = eje debil. Con angulos intermedios las formulas cerradas de DG1 usan el rectangulo envolvente; el modelo 3D usa la geometria real.")
+        f.num("Desplazamiento de la columna en X", "section.cx", -1000, 1000, uk="L", help="Posicion del centro de la columna respecto al centro de la placa, en la direccion X (positivo hacia +X). Los pernos y la placa no se mueven. Las cargas se ingresan en el eje de la columna: el programa las traslada al centro de la placa (Mux' = Mux − Pu·cy, Muy' = Muy + Pu·cx) y el modelo 3D las aplica en el eje real de la columna. Los voladizos de la placa se toman del lado mas largo.")
+        f.num("Desplazamiento de la columna en Y", "section.cy", -1000, 1000, uk="L", help="Posicion del centro de la columna respecto al centro de la placa, en la direccion Y (positivo hacia +Y, el lado traccionado con Mux > 0). 0 = columna centrada.")
         f.note("0° = eje fuerte paralelo a N (Y).  90° = eje debil paralelo a N.  "
                "Con angulos distintos de 0/90 las formulas de DG1 usan el rectangulo "
                "envolvente; el modelo 3D usa la geometria real.")

@@ -327,8 +327,8 @@ def match_lines(prj, S: Split, edges):
     rmid = {}
     for r in out:
         if r["periodic"]:
-            rr = math.hypot(r["x"], r["y"])
-            r["a"] = rr * math.atan2(r["y"], r["x"])
+            rr = math.hypot(r["x"] - G.col_shift(prj)[0], r["y"] - G.col_shift(prj)[1])
+            r["a"] = rr * math.atan2(r["y"] - G.col_shift(prj)[1], r["x"] - G.col_shift(prj)[0])
             rmid[r["group"]] = rr
         else:
             (ax, ay), (bx, by) = walls[r["wall"]]["p1"], walls[r["wall"]]["p2"]

@@ -1,6 +1,6 @@
 <p align="center"><img src="placabase/data/logo.png" width="420" alt="PlacaBasePro"></p>
 
-# PlacaBasePro 3.2.10
+# PlacaBasePro 3.2.11
 
 Diseño y verificación de placas base para perfiles **W, HSS cuadrado/rectangular,
 HSS circular y Pipe**, con dibujo paramétrico, anclajes ACI 318-19, llave de corte,
@@ -14,6 +14,12 @@ tabla de resultados y a los reportes. El cálculo interno siempre corre en in-ki
 que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
 
 Los proyectos nuevos arrancan en **mm, kN, MPa, kN·m** (se cambia en la pestaña Proyecto; los archivos guardados conservan sus unidades).
+
+## Novedades de la 3.2.11
+
+- **Columna descentrada**: en la pestaña Perfil, "Desplazamiento de la columna en X / Y" (cx, cy, respecto al centro de la placa). Pernos, placa y concreto no se mueven; se desplazan el perfil, la soldadura, los rigidizadores, el dibujo (con cotas cx / cy), el visor 3D y el modelo de elementos finitos.
+- Las cargas se ingresan en el eje de la columna. El calculo cerrado las traslada al centro de la placa (Mux' = Mux − Pu·cy, Muy' = Muy + Pu·cx; la torsion Tz' = cx·Vuy − cy·Vux es solo informativa); el FEM 3D las aplica en el eje real de la columna, y la soldadura y el perfil se verifican con las cargas de la columna.
+- Los voladizos m y n de la placa se toman del lado mas largo ((N + 2|cy| − 0.95d)/2) y el brazo de traccion se mide desde la cara real de la columna.
 
 ## Novedades de la 3.2.10
 

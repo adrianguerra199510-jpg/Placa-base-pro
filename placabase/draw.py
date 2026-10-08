@@ -59,6 +59,11 @@ def _plan_dims(ax, prj, pos, k, u):
     _dim(ax, (-W / 2, -H / 2), (W / 2, -H / 2), -2.6 * d, ("Ø " if circ else "B = ") + f(W))
     if not circ:
         _dim(ax, (W / 2, -H / 2), (W / 2, H / 2), 2.6 * d, "N = " + f(H), horizontal=False)
+    cdx, cdy = G.col_shift(prj)                        # columna descentrada: cotas desde el centro de la placa
+    if not circ and abs(cdx) > 1e-9:
+        _dim(ax, (0.0, -H / 2), (cdx / k, -H / 2), -1.2 * d, "cx = " + f(cdx / k))
+    if not circ and abs(cdy) > 1e-9:
+        _dim(ax, (W / 2, 0.0), (W / 2, cdy / k), 1.2 * d, "cy = " + f(cdy / k), horizontal=False)
     xs = sorted({round(x / k, 4) for x, _ in pos})
     ys = sorted({round(y / k, 4) for _, y in pos})
     if circ or not pos or len(xs) > 7 or len(ys) > 7:

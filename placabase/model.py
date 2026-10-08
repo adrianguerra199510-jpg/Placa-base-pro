@@ -43,6 +43,8 @@ class Section:
     steel: str = "ASTM A992"
     rotation: float = 0.0        # grados; 0 = eje fuerte paralelo a N(Y)
     double: bool = False         # seccion doble espalda con espalda
+    cx: float = 0.0              # desplazamiento del centro de la columna respecto al centro de la placa, direccion X
+    cy: float = 0.0              # idem, direccion Y
     gap: float = 0.375           # separacion entre las dos piezas, in
 
     def shape(self) -> Shape:
@@ -455,9 +457,25 @@ class Project:
         self.loads.Vux, self.loads.Vuy = c.Vux, c.Vuy
 
     @property
-    def eloads(self) -> Loads:
-        """Cargas en ejes de la placa (proyectadas si la columna esta inclinada)."""
+    def cloads(self) -> Loads:
+        """Cargas en ejes de la placa (proyectadas si la columna esta inclinada), aplicadas EN EL EJE DE LA COLUMNA."""
         return self.loads.eff()
+
+    @property
+    def eloads(self) -> Loads:
+        """Cargas en ejes de la placa, trasladadas al CENTRO de la placa (referencia del calculo cerrado y de los pernos).
+
+        Si la columna esta descentrada (cx, cy) la fuerza axial y el cortante generan momento respecto al centro:
+            Mux' = Mux − Pu·cy        (la compresion del lado +Y descarga la traccion de ese lado)
+            Muy' = Muy + Pu·cx        (Muy > 0 comprime el lado +X)
+            Tz'  = Tz + cx·Vuy − cy·Vux   (torsion, informativa)
+        """
+        L = self.loads.eff()
+        cx, cy = float(self.section.cx), float(self.section.cy)
+        if abs(cx) < 1e-12 and abs(cy) < 1e-12:
+            return L
+        return dataclasses.replace(L, Mux=L.Mux - L.Pu * cy, Muy=L.Muy + L.Pu * cx,
+                                   Tz=L.Tz + cx * L.Vuy - cy * L.Vux)
 
     def normalize(self) -> list:
         """Aplica las restricciones entre datos. Devuelve la lista de cambios hechos.

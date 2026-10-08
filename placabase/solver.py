@@ -74,6 +74,11 @@ def solve(prj: Project, detail: bool = True, fem=None) -> Results:
                           if prj.plate.shape == "Circular"
                           else f"{rec.n('L', prj.plate.N)} × {rec.n('L', prj.plate.B)}")
                 + f" × {rec.n('L', prj.plate.tp)} {u.L}", prj.plate.steel, None)
+        if abs(prj.section.cx) > 1e-9 or abs(prj.section.cy) > 1e-9:
+            rec.add("Columna descentrada",
+                    f"cx = {rec.n('L', prj.section.cx)} , cy = {rec.n('L', prj.section.cy)} {u.L} respecto al centro de la placa",
+                    "las cargas se ingresan en el eje de la columna; los momentos que siguen estan "
+                    "trasladados al centro de la placa:  Mux' = Mux − Pu·cy ,  Muy' = Muy + Pu·cx", None)
         if prj.loads.tilted:
             l0 = prj.loads
             rec.add("Columna inclinada",
@@ -134,8 +139,13 @@ def solve(prj: Project, detail: bool = True, fem=None) -> Results:
         R.warnings.append(f"** {len(cl)} perno(s) interfieren con el perfil o no dejan holgura "
                           f"para tuerca/llave: {lst}. Cambie la rotacion, ex/ey o la disposicion. **")
     bw, bh = G.profile_bbox(prj)
-    if bw > p.Bc + 1e-6 or bh > p.Nc + 1e-6:
+    cdx, cdy = G.col_shift(prj)
+    if bw / 2 + abs(cdx) > p.Bc / 2 + 1e-6 or bh / 2 + abs(cdy) > p.Nc / 2 + 1e-6:
         R.warnings.append("** El perfil no cabe dentro de la placa. **")
+    if abs(cdx) > 1e-9 or abs(cdy) > 1e-9:
+        R.warnings.append("Columna descentrada respecto a la placa: el momento por la excentricidad de Pu se suma a "
+                          "los momentos aplicados; los voladizos de la placa se toman del lado mas largo y la torsion "
+                          f"(Tz = {prj.eloads.Tz:.1f} kip·in) no se verifica en pernos ni soldadura.")
     if c.seismic:
         R.warnings.append("Diseno sismico activo: se aplica el factor 0.75 a la resistencia del "
                           "concreto de los anclajes (ACI 17.10.5.2). Verifique ademas el requisito "

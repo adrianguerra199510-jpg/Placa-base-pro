@@ -91,7 +91,7 @@ def _walls(prj: Project):
     out = []
 
     def R(pts):
-        return G._rot(pts, rot)
+        return G._mv(G._rot(pts, rot), prj)
 
     if prj.section.generic:
         # cada rectangulo de la seccion es una pared: linea media a lo largo del
@@ -144,8 +144,8 @@ def _walls(prj: Project):
         a0 = 2 * math.pi * i / n - math.pi / 4
         a1 = 2 * math.pi * (i + 1) / n - math.pi / 4
         q = int(((a0 + a1) / 2 + math.pi / 4) // (math.pi / 2)) % 4
-        out.append((names[q], (r * math.cos(a0), r * math.sin(a0)),
-                    (r * math.cos(a1), r * math.sin(a1)), s.tw, W.perimeter))
+        pa, pb = G._mv([(r * math.cos(a0), r * math.sin(a0)), (r * math.cos(a1), r * math.sin(a1))], prj)
+        out.append((names[q], pa, pb, s.tw, W.perimeter))
     return out
 
 
@@ -292,7 +292,7 @@ def postprocess(prj: Project, res, meta_path: str) -> Post3D:
         _zones_fused(prj, res, meta, out, z_wall, u)
         out.weld_model = "fusionado"
 
-    L = prj.eloads
+    L = prj.cloads
     out.msg = (f"Concreto {u.q('F', out.R_conc)}  −  pernos {u.q('F', out.T_bolts)}  =  "
                f"{u.q('F', out.R_conc - out.T_bolts)}  (Pu = {u.q('F', L.Pu)})")
     return out

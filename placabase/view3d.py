@@ -488,7 +488,7 @@ C_PU, C_V, C_M = "#c0392b", "#1d4ed8", "#7c3aed"
 def load_arrows(prj, kl, ztop=None):
     """Flechas de las cargas de la combinacion activa, en el sistema de la placa (ejes de la columna si no esta inclinada).
     -> (lista de elementos a dibujar, puntos para el encuadre).  Coordenadas ya divididas por kl."""
-    L = prj.loads if (prj.loads.tilted and ztop is None) else prj.eloads      # inclinada: las cargas se dan en ejes de la columna y asi se dibujan
+    L = prj.loads if (prj.loads.tilted and ztop is None) else prj.cloads      # inclinada: las cargas se dan en ejes de la columna y asi se dibujan
     if not all(np.isfinite(x) for x in (L.Pu, L.Mux, L.Muy, L.Vux, L.Vuy)):
         return [], []                           # cargas invalidas: no se dibujan flechas
     u = prj.units()
@@ -500,9 +500,10 @@ def load_arrows(prj, kl, ztop=None):
     from . import geometry as _G
     bw, bh = _G.profile_bbox(prj)
     R = _rot_matrix(prj.loads.tilt_x, prj.loads.tilt_y)
-    T = np.array(R @ np.array([0.0, 0.0, H])) + np.array([0.0, 0.0, prj.plate.tp])
+    cx_, cy_ = _G.col_shift(prj)                  # la columna puede estar descentrada respecto a la placa
+    T = np.array(R @ np.array([0.0, 0.0, H])) + np.array([cx_, cy_, prj.plate.tp])
     if ztop is not None:                          # en los resultados el perfil tiene la altura del modelo (vertical)
-        T = np.array([0.0, 0.0, float(ztop)])
+        T = np.array([cx_, cy_, float(ztop)])
         R = np.eye(3)
     ex, ey, ez = R[:, 0], R[:, 1], R[:, 2]        # ejes de la columna (inclinada o no) en el sistema de la placa
     items, pts = [], []
@@ -648,18 +649,20 @@ def _rot_matrix(tilt_x, tilt_y):
     return np.array([[cy, sy * sx, sy * cx], [0.0, cx, -sx], [-sy, cy * sx, cy * cx]])
 
 
-def _tilted_prism(poly, H, R, cap=True):
+def _tilted_prism(poly, H, R, cap=True, o=(0.0, 0.0)):
     """Prisma de altura axial H sobre `poly` (en el plano de la seccion), inclinado
     con la matriz R y CORTADO al ras de la placa (z = 0): la base de la columna es
     un corte a bisel que apoya plano sobre la placa."""
     pts = _clean_poly(poly)
     n = len(pts)
     bot, top = [], []
+    sh = np.array([o[0], o[1], 0.0])                # la columna gira (se inclina) alrededor de su propio eje, no del centro de la placa
     for (x, y) in pts:
+        x, y = x - o[0], y - o[1]
         v0 = R @ np.array([x, y, 0.0])
         t0 = -v0[2] / R[2, 2]                      # eje de la columna donde z = 0
-        bot.append(tuple(R @ np.array([x, y, t0])))
-        top.append(tuple(R @ np.array([x, y, H])))
+        bot.append(tuple(R @ np.array([x, y, t0]) + sh))
+        top.append(tuple(R @ np.array([x, y, H]) + sh))
     faces = [[bot[i], bot[(i + 1) % n], top[(i + 1) % n], top[i]] for i in range(n)]
     if cap and n >= 3:
         faces.append(list(top))
@@ -845,19 +848,20 @@ def geometry_faces(prj):
     H = max(3.0 * s.d, 12.0)
     R = _rot_matrix(prj.loads.tilt_x, prj.loads.tilt_y)
     col = []
+    co = G.col_shift(prj)
     if prj.section.generic:
         for poly in G.section_rects(prj):
-            col += _tilted_prism(poly, H, R)
+            col += _tilted_prism(poly, H, R, o=co)
     else:
         ext, inn = G.profile_outline(prj)
-        col += _tilted_prism(ext, H, R, cap=not inn)
+        col += _tilted_prism(ext, H, R, cap=not inn, o=co)
         if inn:
-            col += _tilted_prism(inn, H, R, cap=False)
+            col += _tilted_prism(inn, H, R, cap=False, o=co)
             e, i_ = _clean_poly(ext), _clean_poly(inn)
             if len(e) == len(i_):                    # corona superior del tubo
                 for k in range(len(e)):
                     k2 = (k + 1) % len(e)
-                    q = [tuple(R @ np.array([x, y, H])) for x, y in (e[k], e[k2], i_[k2], i_[k])]
+                    q = [tuple(R @ np.array([x - co[0], y - co[1], H]) + np.array([co[0], co[1], 0.0])) for x, y in (e[k], e[k2], i_[k2], i_[k])]
                     col.append(q)
     col = [[(x, y, z + p.tp) for x, y, z in f] for f in col]
     parts.append(("above", col, "#4c78a8", 1.0, None, "column"))

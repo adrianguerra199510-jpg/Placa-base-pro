@@ -389,6 +389,37 @@ except Exception as _e:
     FAIL.append(f"interfaz: {type(_e).__name__}: {_e}")
 
 
+# ---------------------------------------------------------------- columna descentrada (cx, cy)
+try:
+    from placabase import geometry as _G
+    _pc = Project()
+    _pc.loads.Pu, _pc.loads.Mux, _pc.loads.Muy, _pc.loads.Vux, _pc.loads.Vuy = 400.0, 1800.0, 0.0, 30.0, 10.0
+    _pc.section.cx, _pc.section.cy = 2.0, -3.0
+    _xs = [q[0] for q in _G.profile_outline(_pc)[0]]; _ys = [q[1] for q in _G.profile_outline(_pc)[0]]
+    _ok_geo = abs((max(_xs) + min(_xs)) / 2 - 2.0) < 1e-9 and abs((max(_ys) + min(_ys)) / 2 + 3.0) < 1e-9
+    _e = _pc.eloads
+    _ok_ld = (abs(_e.Mux - (1800.0 + 400.0 * 3.0)) < 1e-9 and abs(_e.Muy - 400.0 * 2.0) < 1e-9
+              and abs(_e.Tz - (2.0 * 10.0 + 3.0 * 30.0)) < 1e-9 and abs(_pc.cloads.Mux - 1800.0) < 1e-9)
+    _Rc = solve(_pc)
+    _ok_run = _Rc is not None and len(_Rc.checks) > 5
+    _mx0 = _D.plate_thickness(Project(), _D.bearing(Project()))[1]["m_y"]
+    _mx1 = _D.plate_thickness(_pc, _D.bearing(_pc))[1]["m_y"]
+    _ok_m = abs(_mx1 - (_mx0 + 3.0)) < 1e-9          # voladizo del lado mas largo: +|cy|
+    print(f"{'columna descentrada':34} geometria {'OK' if _ok_geo else 'ERROR'}  cargas {'OK' if _ok_ld else 'ERROR'}  "
+          f"voladizo {'OK' if _ok_m else 'ERROR'}  calculo {'OK' if _ok_run else 'ERROR'}")
+    for _n, _o in (("geometria", _ok_geo), ("traslado de cargas", _ok_ld), ("voladizo", _ok_m), ("calculo", _ok_run)):
+        if not _o:
+            FAIL.append(f"columna descentrada: {_n}")
+    from placabase import view3d as _V3
+    _gf = _V3.geometry_faces(_pc)
+    _cf = [q for g in _gf if g[5] == "column" for q in g[1]]
+    _cxs = [p[0] for q in _cf for p in q]
+    if abs((max(_cxs) + min(_cxs)) / 2 - 2.0) > 0.2:
+        FAIL.append("columna descentrada: la columna 3D no esta en la posicion indicada")
+except Exception as _e_:
+    FAIL.append(f"columna descentrada: {type(_e_).__name__}: {_e_}")
+
+
 if "--3d" in sys.argv:
     # prueba de extremo a extremo con Gmsh + CalculiX (~30 s con la malla rapida)
     import tempfile

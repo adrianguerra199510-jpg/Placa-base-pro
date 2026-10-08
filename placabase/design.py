@@ -200,18 +200,20 @@ def plate_thickness(prj: Project, br: Bearing, rec: Recorder | None = None):
     Fy = p.mat().Fy
     Nc, Bc = p.Nc, p.Bc
     bw, bh = G.profile_bbox(prj)
+    cdx, cdy = G.col_shift(prj)
+    Nm, Bm = Nc + 2 * abs(cdy), Bc + 2 * abs(cdx)     # columna descentrada: el voladizo del lado mas largo es (N/2 + |cy|) − media columna
 
     if s.is_round:
-        my = (Nc - 0.80 * bh) / 2.0
-        mx = (Bc - 0.80 * bw) / 2.0
+        my = (Nm - 0.80 * bh) / 2.0
+        mx = (Bm - 0.80 * bw) / 2.0
         n_prime = bh / 4.0
     elif s.kind == W_SHAPE:
-        my = (Nc - 0.95 * bh) / 2.0
-        mx = (Bc - 0.80 * bw) / 2.0
+        my = (Nm - 0.95 * bh) / 2.0
+        mx = (Bm - 0.80 * bw) / 2.0
         n_prime = math.sqrt(bw * bh) / 4.0
     else:
-        my = (Nc - 0.95 * bh) / 2.0
-        mx = (Bc - 0.95 * bw) / 2.0
+        my = (Nm - 0.95 * bh) / 2.0
+        mx = (Bm - 0.95 * bw) / 2.0
         n_prime = math.sqrt(bw * bh) / 4.0
 
     # reduccion por rigidizadores
@@ -237,7 +239,7 @@ def plate_thickness(prj: Project, br: Bearing, rec: Recorder | None = None):
         t_ln = 1.49 * ln * math.sqrt(fp / Fy)
 
     crit = (0.80 if s.is_round else 0.95) * bh / 2.0
-    x_arm = max(0.0, br.f_arm - crit)
+    x_arm = max(0.0, br.f_arm - cdy - crit)       # la cara de la columna del lado traccionado esta en cy + media columna
     if prj.stiff.enabled and (prj.stiff.position.startswith("Alas") or
                               prj.stiff.position in ("Ambos",) or
                               prj.stiff.position.startswith("Perimetro")):
@@ -252,12 +254,12 @@ def plate_thickness(prj: Project, br: Bearing, rec: Recorder | None = None):
         cb = ("0.80·D" if s.is_round else
               ("0.80·bf" if s.kind == W_SHAPE else "0.95·B"))
         rec.add("m", f"(N − {cd}) / 2",
-                f"({rec.n('L', Nc)} − {0.80 if s.is_round else 0.95}·"
+                f"({rec.n('L', Nm)} − {0.80 if s.is_round else 0.95}·"
                 f"{rec.n('L', bh)}) / 2", my, "L", "DG1 §3.1",
                 "voladizo de la placa en direccion N"
                 + (", reducido por los rigidizadores" if prj.stiff.enabled else ""))
         rec.add("n", f"(B − {cb}) / 2",
-                f"({rec.n('L', Bc)} − "
+                f"({rec.n('L', Bm)} − "
                 f"{0.80 if (s.is_round or s.kind == W_SHAPE) else 0.95}·"
                 f"{rec.n('L', bw)}) / 2", mx, "L", "DG1 §3.1",
                 "voladizo en direccion B")
@@ -374,7 +376,7 @@ def weld_group(prj: Project, polys, spec, P=0.0, Mx=0.0, My=0.0, Vx=0.0, Vy=0.0,
 def _welds_generic(prj: Project, rec: Recorder | None):
     """Soldadura perfil-placa para angulos, canales, tes, pletinas y secciones
     dobles: grupo de soldadura en todo el contorno (especificacion 'perimetral')."""
-    L = prj.eloads
+    L = prj.cloads      # carga en el eje de la columna (sin trasladar al centro de la placa)
     u = prj.units()
     W = prj.welds.perimeter
     out: list[Check] = []
@@ -433,7 +435,7 @@ def _welds_partial_W(prj: Project, rec: Recorder | None):
     if not zones:
         return []
     s = prj.section.shape()
-    L = prj.eloads
+    L = prj.cloads      # carga en el eje de la columna (sin trasladar al centro de la placa)
     u = prj.units()
     d, bf, tf, tw = s.d, s.bf, s.tf, s.tw
     rot = math.radians(prj.section.rotation)
@@ -501,7 +503,7 @@ def welds(prj: Project, br: Bearing, rec: Recorder | None = None) -> list[Check]
         return _welds_generic(prj, rec)
     s = prj.section.shape()
     W = prj.welds
-    L = prj.eloads
+    L = prj.cloads      # carga en el eje de la columna (sin trasladar al centro de la placa)
     u = prj.units()
     out: list[Check] = []
     if rec:
@@ -982,7 +984,7 @@ def stiffeners(prj: Project, br: Bearing, rec: Recorder | None = None) -> list[C
 def column_base(prj: Project) -> list[Check]:
     """Esfuerzos en la seccion del perfil inmediatamente sobre la placa."""
     s = prj.section.eff()
-    L = prj.eloads
+    L = prj.cloads      # carga en el eje de la columna (sin trasladar al centro de la placa)
     Fy = prj.section.mat().Fy
     out = []
     sig = L.Pu / s.A + abs(L.Mux) / max(s.Sx, 1e-9) + abs(L.Muy) / max(s.Sy, 1e-9)

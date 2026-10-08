@@ -257,10 +257,11 @@ def write_geo(prj: Project, path: str, mesh_size: float = 0.0,
     hmin = max(0.9 * tmin, hw if hw > 0 else min(lc / 2.2, 1.1))   # automatico: ~28 mm, sin importar lc      # en el cordon el elemento no pasa de ~28 mm (Ghimire et al. 2023)
     bw, bh = G.profile_bbox(prj)
     ext_r = 0.5 * max(bw, bh) + 0.5
+    ccx_, ccy_ = G.col_shift(prj)
     L.append("// refinamiento en la union perfil-placa (lectura de la soldadura)")
     L.append("wc[] = Curve In BoundingBox{"
-             f"{-ext_r:.3f},{-ext_r:.3f},{p.tp-0.001:.4f},"
-             f"{ext_r:.3f},{ext_r:.3f},{p.tp+0.001:.4f}}};")
+             f"{ccx_ - ext_r:.3f},{ccy_ - ext_r:.3f},{p.tp-0.001:.4f},"
+             f"{ccx_ + ext_r:.3f},{ccy_ + ext_r:.3f},{p.tp+0.001:.4f}}};")
     L.append("Field[1] = Distance; Field[1].CurvesList = {wc[]}; Field[1].Sampling = 60;")
     L.append("Field[2] = Threshold; Field[2].InField = 1;")
     L.append(f"Field[2].SizeMin = {hmin:.4f}; Field[2].SizeMax = lc;")
@@ -335,6 +336,7 @@ KB     = {kb:.4f}          # rigidez axial de un perno, kip/in
 PU, MUX, MUY = {Pu:.5f}, {Mux:.5f}, {Muy:.5f}
 VUX, VUY     = {Vux:.5f}, {Vuy:.5f}
 ZTOP   = {ztop:.6f}
+CX, CY = {colx:.6f}, {coly:.6f}      # centro de la columna respecto al centro de la placa
 TP     = {tp:.6f}
 RHOLE  = {rhole:.6f}
 RWASH  = {rwash:.6f}
@@ -402,7 +404,7 @@ def escribir_inp():
     out = []
     out.append("** PlacaBasePro - modelo solido 3D")
     out.append("*INCLUDE, INPUT=" + os.path.basename(MSH))
-    out.append(f"*NODE\\n{{ref}}, 0.0, 0.0, {{ZTOP}}")
+    out.append(f"*NODE\\n{{ref}}, {{CX}}, {{CY}}, {{ZTOP}}")
     out.append("*NSET, NSET=NREF\\n" + str(ref))
     out.append("*NSET, NSET=NTOPE\\n" + wrap(tope))
     out.append("*MATERIAL, NAME=ACERO\\n*ELASTIC\\n%.1f, %.3f" % (E, NU))
@@ -469,9 +471,9 @@ def write_driver(prj: Project, folder: str, stem: str) -> str:
     txt = DRIVER.format(
         stem=stem, gmsh=prj.fea.gmsh_path or "gmsh", ccx=prj.fea.ccx_path or "ccx",
         E=ES_KSI, NU=NU_STEEL, ks=ks, kb=kb,
-        Pu=prj.eloads.Pu, Mux=prj.eloads.Mux, Muy=prj.eloads.Muy,
-        Vux=prj.eloads.Vux, Vuy=prj.eloads.Vuy,
-        ztop=p.tp + H, A1=p.Nc * p.Bc, tp=p.tp,
+        Pu=prj.cloads.Pu, Mux=prj.cloads.Mux, Muy=prj.cloads.Muy,
+        Vux=prj.cloads.Vux, Vuy=prj.cloads.Vuy,
+        ztop=p.tp + H, A1=p.Nc * p.Bc, tp=p.tp, colx=G.col_shift(prj)[0], coly=G.col_shift(prj)[1],
         rhole=g.dh / 2.0, rwash=max(g.Fhex, 2.2 * g.db) / 2.0,
         bolts=repr([(round(x, 6), round(y, 6)) for x, y in G.bolt_positions(prj)]))
     out = Path(folder) / "correr_3d.py"
@@ -781,8 +783,8 @@ def build_inp(prj: Project, mesh_inp: str, out_inp: str, height: float = 0.0) ->
          # nodo de referencia: el cortante actua a la altura e (el mismo brazo del 2D y del calculo
          # lineal, fea.shear_arm) sobre el plano donde los pernos lo devuelven (cara inferior de
          # la placa): el par V·e llega a la placa igual que en el 2D.  e = 0 -> en la cara inferior.
-         "*NODE", f"{ref}, 0.0, 0.0, {z_arm:.6f}",
-         f"{ref + 1}, 0.0, 0.0, {z_arm:.6f}",
+         "*NODE", f"{ref}, {G.col_shift(prj)[0]:.6f}, {G.col_shift(prj)[1]:.6f}, {z_arm:.6f}",
+         f"{ref + 1}, {G.col_shift(prj)[0]:.6f}, {G.col_shift(prj)[1]:.6f}, {z_arm:.6f}",
          "*NSET, NSET=NREF", str(ref),
          "*NSET, NSET=NTOPE", wrap(tope),
          "*MATERIAL, NAME=ACERO", "*ELASTIC",
@@ -930,7 +932,7 @@ def build_inp(prj: Project, mesh_inp: str, out_inp: str, height: float = 0.0) ->
         wcards, eid, wmeta = weldfe.write_cards(prj, split, recs, eid)
         L += wcards
 
-    ld = prj.eloads
+    ld = prj.cloads        # las cargas actuan en el eje de la columna (el FEM ya incluye la excentricidad)
     # En CalculiX los giros de un cuerpo rigido viven en un nodo aparte
     # (ROT NODE): sus grados 1, 2, 3 son las rotaciones y ahi van los momentos.
     rot = ref + 1
