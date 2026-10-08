@@ -1,6 +1,6 @@
 <p align="center"><img src="placabase/data/logo.png" width="420" alt="PlacaBasePro"></p>
 
-# PlacaBasePro 3.2.9
+# PlacaBasePro 3.2.10
 
 Diseño y verificación de placas base para perfiles **W, HSS cuadrado/rectangular,
 HSS circular y Pipe**, con dibujo paramétrico, anclajes ACI 318-19, llave de corte,
@@ -14,6 +14,11 @@ tabla de resultados y a los reportes. El cálculo interno siempre corre en in-ki
 que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
 
 Los proyectos nuevos arrancan en **mm, kN, MPa, kN·m** (se cambia en la pestaña Proyecto; los archivos guardados conservan sus unidades).
+
+## Novedades de la 3.2.10
+
+- Estudio de malla de la soldadura (PB-01, malla global 61 / 152 / 300 mm, elemento sobre el cordon 14 / 28 mm): el D/C del ala -Y varia 0.74-0.78 con el tamano del elemento del cordon (el pico es local y baja ~5 % al afinar) y casi no depende de la malla global mientras el cordon conserve ~28 mm (que es lo que hace el modo automatico). Con malla de 300 mm el calculo tarda ~19 s.
+- Nuevo campo "Malla sobre la soldadura" (Elementos finitos): fija el tamano del elemento junto al cordon (0 = automatico).
 
 ## Novedades de la 3.2.9
 

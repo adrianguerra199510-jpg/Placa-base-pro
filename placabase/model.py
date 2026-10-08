@@ -397,6 +397,7 @@ class FEAOpts:
     weld_model: str = "Conectores (cordon como resortes entre cuerpos separados)"   # ver WELD_MODELS
     weld_criterion: str = "Plastico 5 % (Ghimire et al. 2023)"   # ver WELD_CRITERIA
     weld_plastic_limit: float = 5.0     # deformacion plastica de la garganta a la que el D/C del cordon vale 1, %
+    weld_mesh: float = 0.0              # tamano del elemento sobre el cordon, in (0 = automatico, ~28 mm)
     weld_long_reduction: bool = True    # reduccion por cordon largo, AISC J2.2b(d): L > 100·w (el FEM no la captura)
 
 

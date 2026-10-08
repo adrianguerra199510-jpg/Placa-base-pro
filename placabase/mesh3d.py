@@ -253,7 +253,8 @@ def write_geo(prj: Project, path: str, mesh_size: float = 0.0,
     # refinamiento local en el pie del perfil: ahi se leen las fuerzas de la
     # soldadura, asi que conviene tener al menos 2-3 elementos en el espesor
     tmin = min(x for x in (s.tf, s.tw) if x > 0) if (s.tf or s.tw) else p.tp
-    hmin = max(0.9 * tmin, min(lc / 2.2, 1.1))      # en el cordon el elemento no pasa de ~28 mm (Ghimire et al. 2023)
+    hw = float(getattr(prj.fea, "weld_mesh", 0.0) or 0.0)       # tamano manual del elemento sobre el cordon (0 = automatico)
+    hmin = max(0.9 * tmin, hw if hw > 0 else min(lc / 2.2, 1.1))   # automatico: ~28 mm, sin importar lc      # en el cordon el elemento no pasa de ~28 mm (Ghimire et al. 2023)
     bw, bh = G.profile_bbox(prj)
     ext_r = 0.5 * max(bw, bh) + 0.5
     L.append("// refinamiento en la union perfil-placa (lectura de la soldadura)")
