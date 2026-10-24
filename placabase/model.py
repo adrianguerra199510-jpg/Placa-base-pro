@@ -9,6 +9,16 @@ from .shapes import CATALOG, Shape, W_SHAPE, GENERIC_KINDS, rect_props
 import dataclasses
 
 # --------------------------------------------------------------- catalogos
+U_TYPES = ["Opcion A — barras U (patas rectas, ld)", "Opcion B — barras Omega (patas con gancho, ldh)"]
+WELD_CRITERIA = ["Plastico 5 % (Ghimire et al. 2023)",
+                 "Elastico (pico limitado y media)"]
+WELD_MODELS = ["Conectores (cordon como resortes entre cuerpos separados)",
+               "Fusionado (union monolitica, equivale a CJP)"]
+FIXITY = ["Doble empotramiento (placa restringida)", "Voladizo (placa libre de girar)"]
+# barras de refuerzo ASTM A615 (diametro in, area in2)
+REBAR = {"#3": (0.375, 0.11), "#4": (0.500, 0.20), "#5": (0.625, 0.31), "#6": (0.750, 0.44),
+         "#7": (0.875, 0.60), "#8": (1.000, 0.79), "#9": (1.128, 1.00), "#10": (1.270, 1.27)}
+MESH3D_MODES = ["Automatica (recomendada)", "Fina (mas lenta)"]
 PATTERNS = ["Perimetral (4 lados)", "2 lados (eje mayor)",
             "2 lados (eje menor)", "Circular", "Coordenadas manuales"]
 INSTALL_TYPES = ["Preinstalado (vaciado en sitio)", "Postinstalado adhesivo (epoxico)"]
@@ -33,6 +43,8 @@ class Section:
     steel: str = "ASTM A992"
     rotation: float = 0.0        # grados; 0 = eje fuerte paralelo a N(Y)
     double: bool = False         # seccion doble espalda con espalda
+    cx: float = 0.0              # desplazamiento del centro de la columna respecto al centro de la placa, direccion X
+    cy: float = 0.0              # idem, direccion Y
     gap: float = 0.375           # separacion entre las dos piezas, in
 
     def shape(self) -> Shape:
@@ -128,7 +140,11 @@ class BoltGroup:
     hef: float = 24.0            # embebido efectivo
     eh: float = 0.0              # longitud del gancho (L/J); 0 = 3*db
     Abrg_user: float = 0.0       # 0 = calculado de la cabeza hex
+    washer_d: float = 0.0        # diametro de la arandela / zona de apoyo de la tuerca, in (0 = automatico)
+    washer_t: float = -1.0       # espesor de la arandela, in (-1 = automatico 0.25·db; 0 = sin arandela)
     hole_rule: str = "AISC Tabla 14-2 (maximo recomendado)"
+    standoff: float = 0.0        # separacion libre placa-concreto (tuercas de nivelacion), in; 0 = sin flexion
+    fixity: str = "Doble empotramiento (placa restringida)"   # ver FIXITY
     # --- instalacion (solo varilla recta)
     install: str = "Preinstalado (vaciado en sitio)"
     adh_env: str = "Interior, concreto seco (Tabla 17.6.5.2.5)"
@@ -212,6 +228,7 @@ class Stiffener:
     spacing_mode: str = "Automatico (repartido)"
     spacing: float = 6.0         # separacion centro a centro (modo fijo)
     offset: float = 0.0          # corrimiento del grupo a lo largo de la cara
+    offset_angle: float = 0.0    # columna circular: angulo de la primera pletina radial, grados
     # --- forma
     shape: str = "Rectangular"
     clip_h: float = 1.5          # recorte horizontal de la esquina exterior
@@ -296,6 +313,19 @@ class Concrete:
     lam: float = 1.0             # lambda_a
     cond_A: bool = False         # refuerzo suplementario (ACI T.17.5.3)
     seismic: bool = False        # aplica 0.75 de ACI 17.10
+    # barras U que refuerzan el arrancamiento (ACI 17.5.2): se usan en lugar del concreto si resisten mas
+    u_on: bool = False
+    u_type: str = "Opcion A — barras U (patas rectas, ld)"      # ver U_TYPES
+    u_size: str = "#4"
+    u_n: int = 2                 # numero de barras U (cada una aporta 2 patas)
+    u_fy: float = 60.0           # ksi
+    u_depth: float = 2.0         # profundidad del tramo horizontal bajo la superficie, in
+    u_leg: float = 0.0           # longitud de la pata, in (0 = automatica: la que desarrolla ld (U) o ldh (Omega) bajo el cono)
+
+    @property
+    def cond_A_eff(self) -> bool:
+        """Condicion A (ACI T.17.5.3): se activa sola cuando hay barras U de refuerzo del anclaje."""
+        return bool(self.u_on)
 
 
 @dataclass
@@ -307,6 +337,33 @@ class Loads:
     Vuy: float = 0.0             # kip
     friction: bool = False       # considerar friccion placa-mortero (mu=0.4/0.55)
     mu_fric: float = 0.40
+    # Inclinacion de la columna respecto a la normal de la placa (0 = perpendicular).
+    # Las cargas de arriba se ingresan en el eje de la columna (axial / transversal).
+    tilt_x: float = 0.0          # grados, giro alrededor de X (inclina la columna hacia Y)
+    tilt_y: float = 0.0          # grados, giro alrededor de Y (inclina la columna hacia X)
+    Tz: float = 0.0              # kip*in, torsion resultante en ejes de la placa (informativo)
+
+    @property
+    def tilted(self) -> bool:
+        return abs(self.tilt_x) > 1e-9 or abs(self.tilt_y) > 1e-9
+
+    def eff(self) -> "Loads":
+        """Cargas proyectadas a los ejes de la placa (X, Y en el plano; Z normal).
+        Fuerza y momento se rotan como vectores: R = Ry(tilt_y)·Rx(tilt_x)."""
+        if not self.tilted:
+            return self
+        import math
+        cx, sx = math.cos(math.radians(self.tilt_x)), math.sin(math.radians(self.tilt_x))
+        cy, sy = math.cos(math.radians(self.tilt_y)), math.sin(math.radians(self.tilt_y))
+        R = [[cy, sy * sx, sy * cx],
+             [0.0, cx, -sx],
+             [-sy, cy * sx, cy * cx]]
+        rot = lambda v: [sum(R[i][j] * v[j] for j in range(3)) for i in range(3)]
+        F = rot([self.Vux, self.Vuy, -self.Pu])
+        M = rot([self.Mux, self.Muy, 0.0])
+        return dataclasses.replace(self, Pu=-F[2], Vux=F[0], Vuy=F[1],
+                                   Mux=M[0], Muy=M[1], Tz=M[2],
+                                   tilt_x=0.0, tilt_y=0.0)
 
     @property
     def Vu(self) -> float:
@@ -314,18 +371,36 @@ class Loads:
 
 
 @dataclass
+class LoadCombo:
+    """Una combinacion de cargas factorizadas (en ejes de la columna si esta inclinada)."""
+    name: str = "Comb 1"
+    Pu: float = 400.0            # kip, compresion positiva
+    Mux: float = 1800.0          # kip*in
+    Muy: float = 0.0             # kip*in
+    Vux: float = 30.0            # kip
+    Vuy: float = 0.0             # kip
+
+
+@dataclass
 class FEAOpts:
-    enabled: bool = True
-    nx: int = 26                 # divisiones de malla en X
-    ny: int = 26
+    """Opciones del analisis de elementos finitos SOLIDO 3D (Gmsh + CalculiX) y de sus datos comunes
+    con el calculo lineal (modulo de balasto, brazo del cortante)."""
     ks_mode: str = "Ec/hped"     # o "manual"
     ks_manual: float = 1000.0    # kip/in^3
-    max_iter: int = 40
-    export_ccx: bool = False
     ccx_path: str = "ccx"
-    holes: bool = True           # modelar los agujeros de perno en la malla
     gmsh_path: str = "gmsh"
     mesh3d: float = 0.0          # tamano de malla 3D (0 = automatico)
+    mesh3d_mode: str = "Automatica (recomendada)"   # ver MESH3D_MODES
+    shear_arm: float = -1.0      # brazo del cortante sobre la placa, in (-1 = automatico)
+    vm_avg_factor: float = 1.0   # radio de promedio del von Mises 3D, en espesores de placa
+    plastic: bool = True         # acero elasto-plastico en TODAS las piezas (limite φ·Fy): sin picos de esfuerzo; se verifica la deformacion plastica
+    plastic_limit: float = 5.0   # deformacion plastica equivalente maxima admitida, % (EN 1993-1-5 C.8)
+    weld_peak_factor: float = 1.5   # el D/C PICO local de la soldadura (FEM) se admite hasta este valor; la media, hasta 1.0
+    weld_model: str = "Conectores (cordon como resortes entre cuerpos separados)"   # ver WELD_MODELS
+    weld_criterion: str = "Plastico 5 % (Ghimire et al. 2023)"   # ver WELD_CRITERIA
+    weld_plastic_limit: float = 5.0     # deformacion plastica de la garganta a la que el D/C del cordon vale 1, %
+    weld_mesh: float = 0.0              # tamano del elemento sobre el cordon, in (0 = automatico, ~28 mm)
+    weld_long_reduction: bool = True    # reduccion por cordon largo, AISC J2.2b(d): L > 100·w (el FEM no la captura)
 
 
 @dataclass
@@ -335,10 +410,10 @@ class Project:
     author: str = ""
     date: str = ""
     metric: bool = False
-    u_len: str = "in"
-    u_force: str = "kip"
-    u_stress: str = "ksi"
-    u_moment: str = "kip·in"
+    u_len: str = "mm"
+    u_force: str = "kN"
+    u_stress: str = "MPa"
+    u_moment: str = "kN·m"
 
     section: Section = field(default_factory=Section)
     plate: Plate = field(default_factory=Plate)
@@ -349,6 +424,70 @@ class Project:
     conc: Concrete = field(default_factory=Concrete)
     loads: Loads = field(default_factory=Loads)
     fea: FEAOpts = field(default_factory=FEAOpts)
+    # combinaciones de carga: `loads` guarda la combinacion ACTIVA (la que se dibuja) mas los datos comunes
+    # (inclinacion, friccion); el calculo corre todas las combinaciones
+    combos: list = field(default_factory=lambda: [LoadCombo()])
+    combo_idx: int = 0
+
+    def combo_list(self) -> list:
+        """Lista de combinaciones (nunca vacia)."""
+        if not self.combos:
+            L = self.loads
+            self.combos = [LoadCombo("Comb 1", L.Pu, L.Mux, L.Muy, L.Vux, L.Vuy)]
+        self.combo_idx = max(0, min(self.combo_idx, len(self.combos) - 1))
+        return self.combos
+
+    def with_combo(self, i: int) -> "Project":
+        """Copia del proyecto con las cargas de la combinacion i como combinacion activa."""
+        import copy
+        q = copy.deepcopy(self)
+        cs = q.combo_list()
+        i = max(0, min(i, len(cs) - 1))
+        c = cs[i]
+        q.combo_idx = i
+        q.loads.Pu, q.loads.Mux, q.loads.Muy, q.loads.Vux, q.loads.Vuy = c.Pu, c.Mux, c.Muy, c.Vux, c.Vuy
+        return q
+
+    def apply_combo(self, i: int):
+        """Hace activa la combinacion i (copia sus cargas a `loads`)."""
+        cs = self.combo_list()
+        self.combo_idx = max(0, min(i, len(cs) - 1))
+        c = cs[self.combo_idx]
+        self.loads.Pu, self.loads.Mux, self.loads.Muy = c.Pu, c.Mux, c.Muy
+        self.loads.Vux, self.loads.Vuy = c.Vux, c.Vuy
+
+    @property
+    def cloads(self) -> Loads:
+        """Cargas en ejes de la placa (proyectadas si la columna esta inclinada), aplicadas EN EL EJE DE LA COLUMNA."""
+        return self.loads.eff()
+
+    @property
+    def eloads(self) -> Loads:
+        """Cargas en ejes de la placa, trasladadas al CENTRO de la placa (referencia del calculo cerrado y de los pernos).
+
+        Si la columna esta descentrada (cx, cy) la fuerza axial y el cortante generan momento respecto al centro:
+            Mux' = Mux − Pu·cy        (la compresion del lado +Y descarga la traccion de ese lado)
+            Muy' = Muy + Pu·cx        (Muy > 0 comprime el lado +X)
+            Tz'  = Tz + cx·Vuy − cy·Vux   (torsion, informativa)
+        """
+        L = self.loads.eff()
+        cx, cy = float(self.section.cx), float(self.section.cy)
+        if abs(cx) < 1e-12 and abs(cy) < 1e-12:
+            return L
+        return dataclasses.replace(L, Mux=L.Mux - L.Pu * cy, Muy=L.Muy + L.Pu * cx,
+                                   Tz=L.Tz + cx * L.Vuy - cy * L.Vux)
+
+    def normalize(self) -> list:
+        """Aplica las restricciones entre datos. Devuelve la lista de cambios hechos.
+        Columna inclinada: no se permiten rigidizadores (su geometria y las formulas
+        de DG1 suponen columna perpendicular a la placa)."""
+        changes = []
+        if str(self.fea.weld_criterion).startswith("Plastico"):      # archivos de versiones anteriores: texto antiguo del criterio
+            self.fea.weld_criterion = WELD_CRITERIA[0]
+        if self.loads.tilted and self.stiff.enabled:
+            self.stiff.enabled = False
+            changes.append("Rigidizadores desactivados: no se permiten con la columna inclinada.")
+        return changes
 
     # --------------------------------------------------------- unidades
     def units(self):
@@ -359,8 +498,24 @@ class Project:
     def to_json(self) -> str:
         return json.dumps(asdict(self), indent=1, ensure_ascii=False)
 
+    def sig3d(self) -> str:
+        """Firma de lo que define el modelo solido 3D: cambia si cambia la geometria, las cargas, los
+        materiales, las soldaduras o las opciones de malla; NO si solo cambian el nombre, el autor,
+        las unidades de presentacion o el metodo de reparto de fuerzas."""
+        d = asdict(self)
+        for k in ("name", "element", "author", "date", "metric", "u_len", "u_force", "u_stress", "u_moment",
+                  "combos", "combo_idx"):
+            d.pop(k, None)
+        d.get("fea", {}).pop("ccx_path", None)
+        d.get("fea", {}).pop("gmsh_path", None)
+        return json.dumps(d, sort_keys=True, ensure_ascii=False)
+
     @staticmethod
     def from_json(txt: str) -> "Project":
+        def mk(cls, dd):
+            """Crea el dataclass ignorando claves que ya no existen (archivos de otras versiones)."""
+            ok = getattr(cls, "__dataclass_fields__", {})
+            return cls(**{k: v for k, v in dd.items() if k in ok})
         d = json.loads(txt)
         p = Project()
         for k, v in d.items():
@@ -372,13 +527,20 @@ class Project:
                     w = Welds()
                     for wk in ("flange", "web", "perimeter"):
                         if wk in v and isinstance(v[wk], dict):
-                            setattr(w, wk, WeldSpec(**v[wk]))
+                            setattr(w, wk, mk(WeldSpec, v[wk]))
                     w.directional = v.get("directional", True)
                     setattr(p, k, w)
                 else:
-                    setattr(p, k, type(cur)(**v))
+                    setattr(p, k, mk(type(cur), v))
+            elif k == "combos" and isinstance(v, list):
+                p.combos = [mk(LoadCombo, c) for c in v if isinstance(c, dict)]
             else:
                 setattr(p, k, v)
+        if "combos" not in d:                    # archivo de una version anterior: una sola combinacion
+            p.combos = []
+        p.combo_list()
+        if "combos" in d:
+            p.apply_combo(p.combo_idx)
         return p
 
     def save(self, path: str):

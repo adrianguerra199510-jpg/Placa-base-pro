@@ -26,9 +26,28 @@ def circle(r, n=72, cx=0.0, cy=0.0):
              cy + r * math.sin(2 * math.pi * i / n)) for i in range(n + 1)]
 
 
+def col_shift(prj: Project):
+    """Desplazamiento (dx, dy) del centro de la columna respecto al centro de la placa."""
+    return float(prj.section.cx), float(prj.section.cy)
+
+
+def _mv(pts, prj: Project):
+    """Traslada una lista de puntos a la posicion real de la columna sobre la placa."""
+    dx, dy = col_shift(prj)
+    if dx == 0.0 and dy == 0.0:
+        return pts
+    return [(x + dx, y + dy) for x, y in pts]
+
+
 # ============================================================ contorno perfil
 def profile_outline(prj: Project):
-    """Devuelve (exterior, interior|None) ya rotados, en coordenadas de placa."""
+    """Devuelve (exterior, interior|None) ya rotados, en coordenadas de placa
+    (con el desplazamiento de la columna respecto al centro de la placa)."""
+    ext, inn = _profile_outline0(prj)
+    return _mv(ext, prj), (_mv(inn, prj) if inn else None)
+
+
+def _profile_outline0(prj: Project):
     s = prj.section.shape()
     rot = prj.section.rotation
     if s.kind == W_SHAPE:
@@ -61,7 +80,7 @@ def section_rects(prj: Project):
     r = prj.section.local_rects()
     if r is None:
         return None
-    return [_rot(rect_poly(q), prj.section.rotation) for q in r]
+    return [_mv(_rot(rect_poly(q), prj.section.rotation), prj) for q in r]
 
 
 def section_polys(prj: Project):
@@ -149,7 +168,7 @@ def profile_footprint(prj: Project):
             else:
                 xm = (a + c) / 2
                 pts += [(xm, b + (e - b) * i / 8) for i in range(9)]
-    return _rot(pts, rot)
+    return _mv(_rot(pts, rot), prj)
 
 
 def plate_outline(prj: Project):
@@ -259,7 +278,7 @@ def _face_offsets(prj: Project, span: float, along_bolts_axis: str):
 
     if mode.startswith("Alineado"):
         idx = 0 if along_bolts_axis == "x" else 1
-        vals = sorted({round(q[idx], 4) for q in bolt_positions(prj)})
+        vals = sorted({round(q[idx] - col_shift(prj)[idx], 4) for q in bolt_positions(prj)})
         vals = [v for v in vals if abs(v) <= span / 2.0 + 1e-9]
         if vals:
             if len(vals) > n:            # se queda con las n mas repartidas
@@ -292,6 +311,16 @@ def stiffener_lines(prj: Project):
     if not st.enabled or st.count <= 0:
         return []
     s = prj.section.shape()
+    if s.is_round:                       # columna circular: disposicion RADIAL
+        n = max(1, st.count)
+        r0 = s.d / 2.0
+        res = []
+        for k in range(n):
+            a = 2 * math.pi * k / n + math.radians(st.offset_angle)
+            c, sn = math.cos(a), math.sin(a)
+            (a, b), (c2, d2) = _mv([(r0 * c, r0 * sn), ((r0 + st.L) * c, (r0 + st.L) * sn)], prj)
+            res.append(_clip_to_plate(prj, a, b, c2, d2))
+        return [r for r in res if r is not None]
     bw, bh = (s.d, s.d) if s.is_round else (s.bf, s.d)     # dimensiones locales
     out = []
     pos = st.position
@@ -321,7 +350,7 @@ def stiffener_lines(prj: Project):
     rot = prj.section.rotation
     res = []
     for (x1, y1, x2, y2) in out:
-        (a, b), (c, d) = _rot([(x1, y1), (x2, y2)], rot)
+        (a, b), (c, d) = _mv(_rot([(x1, y1), (x2, y2)], rot), prj)
         res.append(_clip_to_plate(prj, a, b, c, d))
     return [r for r in res if r is not None]
 
@@ -362,13 +391,18 @@ def cantilever_reduction(prj: Project):
     st = prj.stiff
     s = prj.section.shape()
     bw, bh = profile_bbox(prj)
-    Nc, Bc = prj.plate.Nc, prj.plate.Bc
+    cdx, cdy = col_shift(prj)
+    Nc, Bc = prj.plate.Nc + 2 * abs(cdy), prj.plate.Bc + 2 * abs(cdx)    # columna descentrada: manda el voladizo del lado mas largo
     if prj.section.generic:
         return (Bc - 0.95 * bw) / 2.0, (Nc - 0.95 * bh) / 2.0      # (mx, my)
     my = (Nc - 0.95 * bh) / 2.0
     mx = (Bc - 0.95 * bw) / 2.0
     if not st.enabled or st.count <= 0:
         return mx, my
+    if s.is_round:                       # radiales: separacion en arco a media proyeccion
+        sp = 2 * math.pi * (s.d / 2.0 + st.L / 2.0) / max(1, st.count)
+        m_ef = lambda m: max(m - st.L, min(m, sp / 2.0), 0.0)
+        return m_ef(mx), m_ef(my)
 
     def eff(m, span, axis):
         offs = sorted(_face_offsets(prj, span, axis))

@@ -5,8 +5,9 @@
     PlacaBasePro.exe --selftest            -> autopruebas del motor (sin interfaz)
     PlacaBasePro.exe --mesh a.geo b.inp    -> (interno) malla con la API de Gmsh
     PlacaBasePro.exe proyecto.pbase --pdf mem.pdf --docx s.docx
-                                     --inp modelo.inp --geo modelo3d.geo
+                                     --3d carpeta --geo modelo3d.geo
                                            -> calculo por lotes sin interfaz
+                                              (--3d corre Gmsh + CalculiX y verifica con sus resultados)
 """
 import os
 import sys
@@ -31,10 +32,16 @@ def batch(argv):
     import tempfile
     from placabase.model import Project
     from placabase.solver import solve
-    from placabase import report, ccx, mesh3d
+    from placabase import report, mesh3d
 
     prj = Project.load(resolve(argv[0]))
-    res = solve(prj)
+    fem = None
+    if "--3d" in argv:
+        from placabase.rep3d import make_fem
+        r3, msg = mesh3d.full_3d(prj, argv[argv.index("--3d") + 1])
+        print("  3D:", msg)
+        fem = make_fem(prj, r3) if r3 is not None else None
+    res = solve(prj, fem=fem)
     gov = res.governing
     print(f"{prj.element}: {'CUMPLE' if res.ok else 'NO CUMPLE'}   "
           f"D/C max = {res.max_ratio:.3f}" + (f"   gobierna: {gov.title}" if gov else ""))
@@ -48,8 +55,6 @@ def batch(argv):
         print("  ->", report.export_pdf(prj, res, argv[argv.index("--pdf") + 1], figs))
     if "--docx" in argv:
         print("  ->", report.export_docx(prj, res, argv[argv.index("--docx") + 1], figs))
-    if "--inp" in argv:
-        print("  ->", ccx.export_inp(prj, argv[argv.index("--inp") + 1]))
     if "--geo" in argv:
         g, d = mesh3d.export_3d(prj, argv[argv.index("--geo") + 1], prj.fea.mesh3d)
         print("  ->", g)

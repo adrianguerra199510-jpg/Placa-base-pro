@@ -69,7 +69,7 @@ class Bearing:
 
 # ============================================================ A. APLASTAMIENTO
 def bearing(prj: Project, rec: Recorder | None = None) -> Bearing:
-    p, c, L = prj.plate, prj.conc, prj.loads
+    p, c, L = prj.plate, prj.conc, prj.eloads
     u = prj.units()
     r = Bearing()
     Nc, Bc = p.Nc, p.Bc
@@ -200,18 +200,20 @@ def plate_thickness(prj: Project, br: Bearing, rec: Recorder | None = None):
     Fy = p.mat().Fy
     Nc, Bc = p.Nc, p.Bc
     bw, bh = G.profile_bbox(prj)
+    cdx, cdy = G.col_shift(prj)
+    Nm, Bm = Nc + 2 * abs(cdy), Bc + 2 * abs(cdx)     # columna descentrada: el voladizo del lado mas largo es (N/2 + |cy|) − media columna
 
     if s.is_round:
-        my = (Nc - 0.80 * bh) / 2.0
-        mx = (Bc - 0.80 * bw) / 2.0
+        my = (Nm - 0.80 * bh) / 2.0
+        mx = (Bm - 0.80 * bw) / 2.0
         n_prime = bh / 4.0
     elif s.kind == W_SHAPE:
-        my = (Nc - 0.95 * bh) / 2.0
-        mx = (Bc - 0.80 * bw) / 2.0
+        my = (Nm - 0.95 * bh) / 2.0
+        mx = (Bm - 0.80 * bw) / 2.0
         n_prime = math.sqrt(bw * bh) / 4.0
     else:
-        my = (Nc - 0.95 * bh) / 2.0
-        mx = (Bc - 0.95 * bw) / 2.0
+        my = (Nm - 0.95 * bh) / 2.0
+        mx = (Bm - 0.95 * bw) / 2.0
         n_prime = math.sqrt(bw * bh) / 4.0
 
     # reduccion por rigidizadores
@@ -221,8 +223,8 @@ def plate_thickness(prj: Project, br: Bearing, rec: Recorder | None = None):
         mx = min(mx, max(0.0, mx_r))
 
     X = 0.0
-    if br.phiPp > 0 and prj.loads.Pu > 0:
-        X = min(1.0, (4 * bh * bw / (bh + bw) ** 2) * (prj.loads.Pu / br.phiPp))
+    if br.phiPp > 0 and prj.eloads.Pu > 0:
+        X = min(1.0, (4 * bh * bw / (bh + bw) ** 2) * (prj.eloads.Pu / br.phiPp))
     lam = 1.0 if X <= 0 else min(1.0, 2 * math.sqrt(X) / (1 + math.sqrt(max(0.0, 1 - X))))
     ln = lam * n_prime
 
@@ -237,7 +239,7 @@ def plate_thickness(prj: Project, br: Bearing, rec: Recorder | None = None):
         t_ln = 1.49 * ln * math.sqrt(fp / Fy)
 
     crit = (0.80 if s.is_round else 0.95) * bh / 2.0
-    x_arm = max(0.0, br.f_arm - crit)
+    x_arm = max(0.0, br.f_arm - cdy - crit)       # la cara de la columna del lado traccionado esta en cy + media columna
     if prj.stiff.enabled and (prj.stiff.position.startswith("Alas") or
                               prj.stiff.position in ("Ambos",) or
                               prj.stiff.position.startswith("Perimetro")):
@@ -252,19 +254,19 @@ def plate_thickness(prj: Project, br: Bearing, rec: Recorder | None = None):
         cb = ("0.80·D" if s.is_round else
               ("0.80·bf" if s.kind == W_SHAPE else "0.95·B"))
         rec.add("m", f"(N − {cd}) / 2",
-                f"({rec.n('L', Nc)} − {0.80 if s.is_round else 0.95}·"
+                f"({rec.n('L', Nm)} − {0.80 if s.is_round else 0.95}·"
                 f"{rec.n('L', bh)}) / 2", my, "L", "DG1 §3.1",
                 "voladizo de la placa en direccion N"
                 + (", reducido por los rigidizadores" if prj.stiff.enabled else ""))
         rec.add("n", f"(B − {cb}) / 2",
-                f"({rec.n('L', Bc)} − "
+                f"({rec.n('L', Bm)} − "
                 f"{0.80 if (s.is_round or s.kind == W_SHAPE) else 0.95}·"
                 f"{rec.n('L', bw)}) / 2", mx, "L", "DG1 §3.1",
                 "voladizo en direccion B")
         rec.add("X", "[4·d·bf/(d+bf)²] · (Pu/φcPp)",
                 f"[4·{rec.n('L', bh)}·{rec.n('L', bw)}/"
                 f"({rec.n('L', bh)}+{rec.n('L', bw)})²] · "
-                f"({rec.n('F', prj.loads.Pu)}/{rec.n('F', br.phiPp)})",
+                f"({rec.n('F', prj.eloads.Pu)}/{rec.n('F', br.phiPp)})",
                 X, "-", "DG1 Ec. 3.3.2")
         rec.add("λ", "min( 1 ; 2·√X / (1+√(1−X)) )",
                 f"min( 1 ; 2·√{X:.3f} / (1+√(1−{X:.3f})) )", lam, "-",
@@ -374,7 +376,7 @@ def weld_group(prj: Project, polys, spec, P=0.0, Mx=0.0, My=0.0, Vx=0.0, Vy=0.0,
 def _welds_generic(prj: Project, rec: Recorder | None):
     """Soldadura perfil-placa para angulos, canales, tes, pletinas y secciones
     dobles: grupo de soldadura en todo el contorno (especificacion 'perimetral')."""
-    L = prj.loads
+    L = prj.cloads      # carga en el eje de la columna (sin trasladar al centro de la placa)
     u = prj.units()
     W = prj.welds.perimeter
     out: list[Check] = []
@@ -413,6 +415,87 @@ def _welds_generic(prj: Project, rec: Recorder | None):
     return out
 
 
+def unwelded_zones(prj: Project) -> list:
+    """Zonas del perfil declaradas 'Sin soldadura' (contorno no soldado por completo)."""
+    W = prj.welds
+    if prj.section.generic:
+        return ["contorno"] if W.perimeter.wtype == "Sin soldadura" else []
+    s = prj.section.shape()
+    if s.kind == W_SHAPE:
+        return (["alas"] if W.flange.wtype == "Sin soldadura" else []) + \
+               (["alma"] if W.web.wtype == "Sin soldadura" else [])
+    return ["contorno"] if W.perimeter.wtype == "Sin soldadura" else []
+
+
+def _welds_partial_W(prj: Project, rec: Recorder | None):
+    """Perfil W con alas y/o alma sin soldar: metodo elastico sobre las lineas
+    realmente soldadas.  La compresion se transmite por contacto."""
+    W = prj.welds
+    zones = unwelded_zones(prj)
+    if not zones:
+        return []
+    s = prj.section.shape()
+    L = prj.cloads      # carga en el eje de la columna (sin trasladar al centro de la placa)
+    u = prj.units()
+    d, bf, tf, tw = s.d, s.bf, s.tf, s.tw
+    rot = math.radians(prj.section.rotation)
+    cr, sr = math.cos(rot), math.sin(rot)
+    Fu_base = min(prj.section.mat().Fu, prj.plate.mat().Fu)
+    Fy = prj.section.mat().Fy
+
+    def cap_of(spec, t):
+        if spec.wtype.startswith("CJP"):
+            return 0.90 * Fy * t
+        thr = 0.707 * spec.size if spec.wtype == "Filete" else spec.size
+        return min(0.75 * 0.60 * spec.FEXX() * thr, 0.75 * 0.60 * Fu_base * min(t, prj.plate.tp))
+
+    pts = []
+    for (x, y, dL, tx, ty) in G.boundary_points(G.section_rects(prj), ds=0.2):
+        xl, yl = x * cr + y * sr, -x * sr + y * cr           # coordenadas locales
+        if abs(yl) < d / 2 - tf - 1e-4:                        # alma
+            if W.web.wtype == "Sin soldadura" or (not W.web.both_sides and xl < 0):
+                continue
+            pts.append((x, y, dL, cap_of(W.web, tw), "alma"))
+        elif abs(abs(yl) - d / 2) < 1e-3 or abs(abs(yl) - (d / 2 - tf)) < 1e-3:
+            if W.flange.wtype == "Sin soldadura":
+                continue
+            if abs(abs(yl) - (d / 2 - tf)) < 1e-3 and not W.flange.both_sides:
+                continue
+            pts.append((x, y, dL, cap_of(W.flange, tf), "ala"))
+    Lw = sum(p[2] for p in pts)
+    if Lw <= 1e-6:
+        return [Check("weld_part", "Soldadura perfil-placa — no hay zonas soldadas",
+                      1.0, 0.0, "-", "AISC J2", "Declare al menos una zona soldada.")]
+    xc = sum(p[0] * p[2] for p in pts) / Lw
+    yc = sum(p[1] * p[2] for p in pts) / Lw
+    Ixw = sum(p[2] * (p[1] - yc) ** 2 for p in pts)
+    Iyw = sum(p[2] * (p[0] - xc) ** 2 for p in pts)
+    Vx = 0.0 if prj.lug.enabled else abs(L.Vux)
+    Vy = 0.0 if prj.lug.enabled else abs(L.Vuy)
+    fx, fy = Vx / Lw, Vy / Lw
+    best = (-1.0, 0.0, 0.0, 0.0, 0.0, "")
+    for sgn in (1.0, -1.0):          # el momento puede traccionar cualquiera de los dos lados
+        for (x, y, dL, cap, zn) in pts:
+            fz = -L.Pu / Lw + sgn * (abs(L.Mux) * (y - yc) / Ixw if Ixw > 1e-9 else 0.0) \
+                + sgn * (abs(L.Muy) * (x - xc) / Iyw if Iyw > 1e-9 else 0.0)
+            f = math.sqrt(max(fz, 0.0) ** 2 + fx ** 2 + fy ** 2)
+            if f / cap > best[0]:
+                best = (f / cap, f, cap, x, y, zn)
+    ratio, f, cap, bx, by, zn = best
+    out = [Check("weld_part",
+                 "Soldadura perfil-placa — contorno PARCIAL (sin soldar: " + ", ".join(zones) + ")",
+                 f, cap, "kip/in", "AISC J2.4 (metodo elastico, solo lineas soldadas)",
+                 f"Lw = {u.q('L', Lw)} soldado; maximo en zona {zn} ({u.fmt('L', bx)}, "
+                 f"{u.fmt('L', by)}). La compresion se transmite por contacto; traccion, "
+                 f"cortante y momento solo por las zonas soldadas.")]
+    if rec:
+        rec.add("Zonas sin soldar", ", ".join(zones), "", None, "-", "AISC J2",
+                "contorno NO soldado por completo")
+        rec.add("Lw (soldado)", "longitud de las lineas soldadas", "", Lw, "L")
+        rec.check("Soldadura — contorno parcial", f, cap, "LF", ratio, ratio <= 1.0, "AISC J2.4")
+    return out
+
+
 def welds(prj: Project, br: Bearing, rec: Recorder | None = None) -> list[Check]:
     if prj.section.generic:
         if rec:
@@ -420,7 +503,7 @@ def welds(prj: Project, br: Bearing, rec: Recorder | None = None) -> list[Check]
         return _welds_generic(prj, rec)
     s = prj.section.shape()
     W = prj.welds
-    L = prj.loads
+    L = prj.cloads      # carga en el eje de la columna (sin trasladar al centro de la placa)
     u = prj.units()
     out: list[Check] = []
     if rec:
@@ -451,8 +534,9 @@ def welds(prj: Project, br: Bearing, rec: Recorder | None = None) -> list[Check]
                              Rf, cap, "kip", "AISC J2.4",
                              "CJP con metal de aporte compatible: no requiere calculo del deposito."))
         elif W.flange.wtype == "Sin soldadura":
-            out.append(Check("weld_fl", "Soldadura de ALA", Rf, 0.0, "kip", "",
-                             "No definida", skip=(Rf <= 1e-9)))
+            out.append(Check("weld_fl", "Soldadura de ALA — sin soldar", Rf, 0.0, "kip", "",
+                             "Alas sin soldar: la traccion y el cortante se redistribuyen "
+                             "en las zonas soldadas (ver grupo parcial).", skip=True))
         else:
             thr = 0.707 * W.flange.size if W.flange.wtype == "Filete" else W.flange.size
             kd = (1 + 0.5 * math.sin(math.radians(th_f)) ** 1.5) if W.directional else 1.0
@@ -499,8 +583,9 @@ def welds(prj: Project, br: Bearing, rec: Recorder | None = None) -> list[Check]
                              0.90 * prj.section.mat().Fy * (d - 2 * tf) * tw, "kip",
                              "AISC J2.4", "Resistencia = metal base."))
         elif W.web.wtype == "Sin soldadura":
-            out.append(Check("weld_web", "Soldadura de ALMA", Rw, 0.0, "kip", "",
-                             "No definida", skip=(Rw <= 1e-9)))
+            out.append(Check("weld_web", "Soldadura de ALMA — sin soldar", Rw, 0.0, "kip", "",
+                             "Alma sin soldar: la demanda se redistribuye en las zonas "
+                             "soldadas (ver grupo parcial).", skip=True))
         else:
             thr = 0.707 * W.web.size if W.web.wtype == "Filete" else W.web.size
             cap = 0.75 * 0.60 * W.web.FEXX() * thr * Lw
@@ -517,6 +602,7 @@ def welds(prj: Project, br: Bearing, rec: Recorder | None = None) -> list[Check]
             if W.web.wtype == "Filete":
                 out.append(Check("weld_web_min", "Tamano minimo de filete en ALMA",
                                  wmin, W.web.size, "in", "AISC Tabla J2.4"))
+        out += _welds_partial_W(prj, rec)
     else:
         # HSS / Pipe: soldadura perimetral
         Lp = s.perimeter_weld_len()
@@ -566,7 +652,7 @@ def _lug_section(prj: Project, rec: Recorder | None) -> list[Check]:
     Se verifica en cada direccion de cortante con la proyeccion del perfil."""
     from .model import WeldSpec
     from .shapes import rect_props
-    L, c, p, ld = prj.lug, prj.conc, prj.plate, prj.loads
+    L, c, p, ld = prj.lug, prj.conc, prj.plate, prj.eloads
     u = prj.units()
     out: list[Check] = []
     sh = L.shape()
@@ -598,7 +684,7 @@ def _lug_section(prj: Project, rec: Recorder | None) -> list[Check]:
         tmin = min(min(c_ - a, e - b) for a, b, c_, e in rl)
     spec = WeldSpec(wtype="Filete", size=L.weld_size, electrode=L.electrode)
     FEXX = spec.FEXX()
-    phi_c = 0.75 if c.cond_A else 0.70
+    phi_c = 0.75 if c.cond_A_eff else 0.70
     psi_c = 1.0 if c.cracked else 1.4
     if rec:
         rec.add("Llave", f"perfil {sh.label}" + (" girado 90°" if rot90 else ""),
@@ -685,7 +771,7 @@ def shear_lug(prj: Project, rec: Recorder | None = None) -> list[Check]:
         return _lug_section(prj, rec)
     if rec:
         rec.section("G.  LLAVE DE CORTE  (ACI 318-19 §17.11 / AISC DG1 §3.5)")
-    V = prj.loads.Vu
+    V = prj.eloads.Vu
     n_lug = 2 if L.direction.startswith("Ambos") else 1
     Vlug = V / n_lug
 
@@ -750,7 +836,7 @@ def shear_lug(prj: Project, rec: Recorder | None = None) -> list[Check]:
     Vb_lb = 9.0 * c.lam * math.sqrt(fc_psi) * ca1 ** 1.5
     psi_c = 1.0 if c.cracked else 1.4
     Vcb = (Avc / Avco) * psi_c * Vb_lb / 1000.0
-    phi_c = 0.75 if c.cond_A else 0.70
+    phi_c = 0.75 if c.cond_A_eff else 0.70
     out.append(Check("lug_brkout", "Llave — desprendimiento del concreto en cortante",
                      Vlug, phi_c * Vcb, "kip", "ACI 318-19 17.11.2.2 / 17.7.2",
                      f"ca1 = {u.q('L', ca1)}.  Se descuenta el area de la llave "
@@ -788,7 +874,12 @@ def stiffeners(prj: Project, br: Bearing, rec: Recorder | None = None) -> list[C
     E = 29000.0
     bw, bh = G.profile_bbox(prj)
 
-    if st.position.startswith("Alma"):
+    s_ = prj.section.shape()
+    if s_.is_round:                      # radiales: proyeccion medida desde el cilindro
+        avail = max(0.0, min(prj.plate.Nc, prj.plate.Bc) / 2.0 - s_.d / 2.0)
+        width = math.pi * (s_.d + 2 * min(st.L, avail))   # perimetro exterior
+        axis = "x"
+    elif st.position.startswith("Alma"):
         avail = max(0.0, (prj.plate.Bc - bw) / 2.0)
         width = prj.plate.Nc
         axis = "y"
@@ -810,7 +901,10 @@ def stiffeners(prj: Project, br: Bearing, rec: Recorder | None = None) -> list[C
 
     # ------- ubicacion real de las pletinas -> ancho tributario verdadero
     offs = sorted(G._face_offsets(prj, bw if axis == "x" else bh, axis))
-    if len(offs) > 1:
+    if s_.is_round:
+        trib = 2 * math.pi * (s_.d / 2.0 + Le / 2.0) / max(1, st.count)
+        offs = []
+    elif len(offs) > 1:
         gaps = [offs[i + 1] - offs[i] for i in range(len(offs) - 1)]
         trib = max(gaps)
     else:
@@ -890,7 +984,7 @@ def stiffeners(prj: Project, br: Bearing, rec: Recorder | None = None) -> list[C
 def column_base(prj: Project) -> list[Check]:
     """Esfuerzos en la seccion del perfil inmediatamente sobre la placa."""
     s = prj.section.eff()
-    L = prj.loads
+    L = prj.cloads      # carga en el eje de la columna (sin trasladar al centro de la placa)
     Fy = prj.section.mat().Fy
     out = []
     sig = L.Pu / s.A + abs(L.Mux) / max(s.Sx, 1e-9) + abs(L.Muy) / max(s.Sy, 1e-9)

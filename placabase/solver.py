@@ -11,7 +11,7 @@ from . import geometry as G
 from . import materials as M
 from .design import Check, Bearing
 from .explain import Recorder
-from .fea import run_fea, FEAResult
+from .fem_checks import fem_checks
 
 
 @dataclass
@@ -20,9 +20,11 @@ class Results:
     treq: float = 0.0
     tdet: dict = field(default_factory=dict)
     checks: list = field(default_factory=list)
-    fea: FEAResult = None
+    fem: object = None              # fem_checks.Fem3D vigente (o None)
     warnings: list = field(default_factory=list)
     rec: Recorder = None
+    combo_rows: list = field(default_factory=list)   # resumen de todas las combinaciones (lo llena la UI)
+    combo_gov: int = 0
 
     @property
     def max_ratio(self) -> float:
@@ -39,17 +41,32 @@ class Results:
         return all(c.ok for c in self.checks if not c.skip) and not self.warnings_fatal
 
     @property
+    def pending(self) -> bool:
+        """True si falta el analisis 3D: el veredicto final lo da el 3D, no el calculo cerrado."""
+        return self.fem is None
+
+    @property
+    def verdict(self) -> str:
+        """'PENDIENTE' (realizar el analisis 3D), 'CUMPLE' o 'NO CUMPLE'."""
+        if self.pending:
+            return "PENDIENTE"
+        return "CUMPLE" if self.ok else "NO CUMPLE"
+
+    @property
     def warnings_fatal(self) -> bool:
         return any(w.startswith("**") for w in self.warnings)
 
 
-def solve(prj: Project, with_fea: bool = True, detail: bool = True) -> Results:
+def solve(prj: Project, detail: bool = True, fem=None) -> Results:
+    """`fem`: paquete Fem3D del analisis 3D hecho con ESTE proyecto (o None si no hay uno vigente)."""
     R = Results()
+    R.fem = fem
+    notes = prj.normalize()
     R.rec = Recorder(prj.units()) if detail else None
     rec = R.rec
+    u = prj.units()
     if rec:
         rec.section("DATOS DE PARTIDA")
-        u = prj.units()
         s_ = prj.section.shape()
         rec.add("Perfil", prj.section.label,
                 f"{prj.section.steel}, rotacion {prj.section.rotation:g}°", None)
@@ -57,12 +74,27 @@ def solve(prj: Project, with_fea: bool = True, detail: bool = True) -> Results:
                           if prj.plate.shape == "Circular"
                           else f"{rec.n('L', prj.plate.N)} × {rec.n('L', prj.plate.B)}")
                 + f" × {rec.n('L', prj.plate.tp)} {u.L}", prj.plate.steel, None)
-        rec.add("Pu", "axial factorizado (compresion +)", "", prj.loads.Pu, "F")
-        rec.add("Mux", "momento respecto al eje fuerte", "", prj.loads.Mux, "M")
-        rec.add("Muy", "momento respecto al eje debil", "", prj.loads.Muy, "M")
+        if abs(prj.section.cx) > 1e-9 or abs(prj.section.cy) > 1e-9:
+            rec.add("Columna descentrada",
+                    f"cx = {rec.n('L', prj.section.cx)} , cy = {rec.n('L', prj.section.cy)} {u.L} respecto al centro de la placa",
+                    "las cargas se ingresan en el eje de la columna; los momentos que siguen estan "
+                    "trasladados al centro de la placa:  Mux' = Mux − Pu·cy ,  Muy' = Muy + Pu·cx", None)
+        if prj.loads.tilted:
+            l0 = prj.loads
+            rec.add("Columna inclinada",
+                    f"giro X = {l0.tilt_x:g}°, giro Y = {l0.tilt_y:g}° respecto a la normal de la placa",
+                    "cargas ingresadas en el eje de la columna; a continuacion las "
+                    "componentes proyectadas a los ejes de la placa", None)
+            rec.add("Pu,col", "axial en el eje de la columna", "", l0.Pu, "F")
+            rec.add("Vu,col", "cortante transversal a la columna",
+                    f"√({rec.n('F', l0.Vux)}² + {rec.n('F', l0.Vuy)}²)", l0.Vu, "F")
+        rec.add("Pu", "axial factorizado (compresion +)"
+                + (" — normal a la placa" if prj.loads.tilted else ""), "", prj.eloads.Pu, "F")
+        rec.add("Mux", "momento respecto al eje fuerte", "", prj.eloads.Mux, "M")
+        rec.add("Muy", "momento respecto al eje debil", "", prj.eloads.Muy, "M")
         rec.add("Vu", "cortante resultante",
-                f"√({rec.n('F', prj.loads.Vux)}² + {rec.n('F', prj.loads.Vuy)}²)",
-                prj.loads.Vu, "F")
+                f"√({rec.n('F', prj.eloads.Vux)}² + {rec.n('F', prj.eloads.Vuy)}²)",
+                prj.eloads.Vu, "F")
         rec.add("f'c", "resistencia del concreto", "", prj.conc.fc, "S")
         rec.add("Fy placa", "", prj.plate.steel, prj.plate.mat().Fy, "S")
         rec.add("Anclajes", f"{prj.bolts.n_total} × Ø{prj.bolts.size} in",
@@ -70,9 +102,20 @@ def solve(prj: Project, with_fea: bool = True, detail: bool = True) -> Results:
                 f"{rec.f('L', prj.bolts.hef)}", None)
     R.br = D.bearing(prj, rec)
     br = R.br
-    p, b, c, L = prj.plate, prj.bolts, prj.conc, prj.loads
+    p, b, c, L = prj.plate, prj.bolts, prj.conc, prj.eloads
 
     # ------------------------------------------------------------ avisos
+    R.warnings += notes
+    if prj.loads.tilted:
+        if abs(prj.loads.tilt_x) > 60 or abs(prj.loads.tilt_y) > 60:
+            R.warnings.append("Inclinacion de columna mayor a 60°: verifique que las formulas de "
+                              "DG1 (columna cuasi-perpendicular a la placa) sigan siendo aplicables.")
+        if abs(L.Tz) > 1e-6:
+            R.warnings.append("La inclinacion genera un momento torsor alrededor de la normal de la "
+                              f"placa (Tz = {L.Tz:.1f} kip·in) que NO se verifica en los pernos "
+                              "ni en la soldadura.")
+        if L.Pu < 0 and prj.loads.Pu > 0:
+            R.warnings.append("La inclinacion convierte la compresion en traccion normal a la placa.")
     if not br.feasible:
         R.warnings.append("** El discriminante del equilibrio es negativo: la placa no puede "
                           "equilibrar Pu y Mu. Aumente N, B o f'c, o acerque los pernos al borde. **")
@@ -82,7 +125,7 @@ def solve(prj: Project, with_fea: bool = True, detail: bool = True) -> Results:
     if abs(prj.section.rotation) > 1e-6 and abs(abs(prj.section.rotation) - 90) > 1e-6:
         R.warnings.append("Rotacion del perfil distinta de 0° o 90°: las formulas cerradas de "
                           "DG1 usan el rectangulo envolvente del perfil (conservador). "
-                          "El modelo de elementos finitos si usa la geometria real.")
+                          "El modelo de elementos finitos 3D si usa la geometria real.")
     if p.shape == "Circular":
         R.warnings.append("Placa circular: las formulas cerradas usan el cuadrado equivalente de "
                           "igual area (Leq = 0.8862·Dp).")
@@ -96,12 +139,25 @@ def solve(prj: Project, with_fea: bool = True, detail: bool = True) -> Results:
         R.warnings.append(f"** {len(cl)} perno(s) interfieren con el perfil o no dejan holgura "
                           f"para tuerca/llave: {lst}. Cambie la rotacion, ex/ey o la disposicion. **")
     bw, bh = G.profile_bbox(prj)
-    if bw > p.Bc + 1e-6 or bh > p.Nc + 1e-6:
+    cdx, cdy = G.col_shift(prj)
+    if bw / 2 + abs(cdx) > p.Bc / 2 + 1e-6 or bh / 2 + abs(cdy) > p.Nc / 2 + 1e-6:
         R.warnings.append("** El perfil no cabe dentro de la placa. **")
+    if abs(cdx) > 1e-9 or abs(cdy) > 1e-9:
+        R.warnings.append("Columna descentrada respecto a la placa: el momento por la excentricidad de Pu se suma a "
+                          "los momentos aplicados; los voladizos de la placa se toman del lado mas largo y la torsion "
+                          f"(Tz = {prj.eloads.Tz:.1f} kip·in) no se verifica en pernos ni soldadura.")
     if c.seismic:
         R.warnings.append("Diseno sismico activo: se aplica el factor 0.75 a la resistencia del "
                           "concreto de los anclajes (ACI 17.10.5.2). Verifique ademas el requisito "
                           "de que el anclaje sea gobernado por la fluencia ductil del acero.")
+
+    zs = D.unwelded_zones(prj)
+    if zs:
+        R.warnings.append(
+            "La columna NO esta soldada en todo el contorno (sin soldar: " + ", ".join(zs) +
+            "). La compresion solo se transmite por contacto; la traccion, el cortante y el "
+            "momento los toman unicamente las zonas soldadas. Revise que el detalle sea "
+            "el intencionado.")
 
     # ------------------------------------------------------------ chequeos
     ck: list[Check] = []
@@ -132,46 +188,20 @@ def solve(prj: Project, with_fea: bool = True, detail: bool = True) -> Results:
     if rec:
         rec.check("Espesor de la placa", R.treq, p.tp, "L",
                   R.treq / max(p.tp, 1e-9), R.treq <= p.tp, "DG1 §3.1")
-    ck += A.anchor_checks(prj, br, rec)
+    ck += A.anchor_checks(prj, br, rec, fem)
     ck += D.welds(prj, br, rec)
     ck += D.shear_lug(prj, rec)
     ck += D.stiffeners(prj, br, rec)
     ck += D.column_base(prj)
     R.checks = ck
 
-    # ------------------------------------------------------------ FEA
-    if with_fea and prj.fea.enabled:
-        R.fea = run_fea(prj)
-        if R.fea.ok:
-            Fy = p.mat().Fy
-            R.checks.append(Check("fea_vm", "FEA — von Mises en la placa",
-                                  R.fea.vm_max, 0.90 * Fy, "ksi",
-                                  "AISC F11 / criterio de fluencia",
-                                  f"malla {prj.fea.nx}×{prj.fea.ny}, {R.fea.msg}"))
-            R.checks.append(Check("fea_press", "FEA — presion de contacto maxima",
-                                  R.fea.press_max, br.fp_max, "ksi", "AISC J8",
-                                  "Distribucion real obtenida del modelo, no el bloque rectangular."))
-            g = b.geom()
-            Tmax = max(R.fea.bolt_T) if R.fea.bolt_T else 0.0
-            R.checks.append(Check("fea_bolt", "FEA — traccion maxima en un perno",
-                                  Tmax, 0.75 * 0.75 * b.mat().Fu * g.Ab, "kip",
-                                  "AISC J3", "Reparto real segun la rigidez de la placa."))
-            if rec:
-                uu = prj.units()
-                rec.section("I.  ELEMENTOS FINITOS DE LA PLACA")
-                rec.text("Placa de Mindlin-Reissner, elemento MITC4, sobre resortes "
-                         "de Winkler solo a compresion; los pernos son resortes solo "
-                         "a traccion repartidos en el anillo de apoyo de la tuerca.")
-                rec.add("malla", f"{prj.fea.nx} × {prj.fea.ny}",
-                        ("agujeros de perno mallados" if R.fea.holes_meshed
-                         else "agujeros no mallados"), None)
-                rec.add("w max", "deflexion maxima", "", R.fea.w_max, "L")
-                rec.add("p max", "presion de contacto maxima", "", R.fea.press_max, "S")
-                rec.add("σ von Mises max", "6·M/t² en la superficie", "",
-                        R.fea.vm_max, "S")
-                rec.add("equilibrio", "R concreto − R pernos − ΣF",
-                        f"{rec.n('F', R.fea.R_found)} − {rec.n('F', R.fea.R_bolts)} − "
-                        f"{rec.n('F', R.fea.sumF)}",
-                        R.fea.R_found - R.fea.R_bolts - R.fea.sumF, "F",
-                        "", "residuo de equilibrio del modelo")
+    # ------------------------------------------------------------ FEM 3D
+    if fem is not None:
+        try:
+            R.checks += fem_checks(prj, br, fem, rec)
+        except Exception as e:                              # pragma: no cover
+            R.warnings.append(f"No se pudieron evaluar los resultados del FEM 3D: {e}")
+    else:
+        R.warnings.append("REALIZAR ANALISIS 3D (F8): el veredicto final y la fuerza de los pernos salen del "
+                          "analisis solido; hasta entonces solo se muestran las verificaciones de calculo cerrado.")
     return R

@@ -12,6 +12,7 @@ from . import geometry as G
 from . import materials as MAT
 from .explain import Recorder
 from .design import Check, Bearing
+from .ubar import ubar
 
 
 def _sqrt_fc_psi(fc_ksi: float) -> float:
@@ -19,8 +20,8 @@ def _sqrt_fc_psi(fc_ksi: float) -> float:
 
 
 def anchor_checks(prj: Project, br: Bearing,
-                  rec: Recorder | None = None) -> list[Check]:
-    b, c, L = prj.bolts, prj.conc, prj.loads
+                  rec: Recorder | None = None, fem=None) -> list[Check]:
+    b, c, L = prj.bolts, prj.conc, prj.eloads
     g = b.geom()
     mat = b.mat()
     u = prj.units()
@@ -50,23 +51,36 @@ def anchor_checks(prj: Project, br: Bearing,
         xs_ = [q[0] for q in grp]; ys_ = [q[1] for q in grp]
         xtmin, xtmax, ytmin, ytmax = min(xs_), max(xs_), min(ys_), max(ys_)
         elastic = True
-    Vua = 0.0 if prj.lug.enabled else prj.loads.Vu
-    if prj.loads.friction and not prj.lug.enabled and L.Pu > 0:
-        Vfric = prj.loads.mu_fric * L.Pu
+    linear_mode = False
+    if fem is not None and getattr(fem.post, "bolts", None):
+        # fuerza de cada perno del analisis solido 3D: el grupo traccionado son los pernos con T > 0
+        tb = {k - 1: T for (k, x, y, T) in fem.post.bolts}
+        Ts = [tb.get(i, 0.0) for i in range(len(pos))]
+        if max(Ts, default=0.0) > 1e-9:
+            grp = [q for q, t in zip(pos, Ts) if t > 1e-9]
+            n_t = len(grp)
+            Nua, Nua_b = sum(Ts), max(Ts)
+            xs_ = [q[0] for q in grp]; ys_ = [q[1] for q in grp]
+            xtmin, xtmax, ytmin, ytmax = min(xs_), max(xs_), min(ys_), max(ys_)
+            elastic = True
+            linear_mode = True
+    Vua = 0.0 if prj.lug.enabled else prj.eloads.Vu
+    if prj.eloads.friction and not prj.lug.enabled and L.Pu > 0:
+        Vfric = prj.eloads.mu_fric * L.Pu
         Vua = max(0.0, Vua - Vfric)
     Vua_b = Vua / n_tot
 
     futa = min(mat.Fu, 1.9 * mat.Fy, 125.0)      # ACI 17.6.1.2 / 17.7.1.2
     phi_s_t = 0.75 if mat.ductile else 0.65
     phi_s_v = 0.65 if mat.ductile else 0.60
-    phi_c = 0.75 if c.cond_A else 0.70
+    phi_c = 0.75 if c.cond_A_eff else 0.70
     k_seis = 0.75 if c.seismic else 1.0
 
     # ---- anclaje postinstalado con adhesivo (ACI 318-19 17.6.5)
     adh = b.adhesive
     if adh:
         cat = {"Categoria 1": 0, "Categoria 2": 1, "Categoria 3": 2}.get(b.adh_cat, 0)
-        phi_ct = ((0.75, 0.65), (0.65, 0.55), (0.55, 0.45))[cat][0 if c.cond_A else 1]
+        phi_ct = ((0.75, 0.65), (0.65, 0.55), (0.55, 0.45))[cat][0 if c.cond_A_eff else 1]
         lam_brk = 0.8 * c.lam if c.lam < 1.0 else 1.0      # ACI Tabla 17.2.4.1
         lam_bond = 0.6 * c.lam if c.lam < 1.0 else 1.0
     else:
@@ -86,14 +100,18 @@ def anchor_checks(prj: Project, br: Bearing,
         rec.section("D.  PERNOS DE ANCLAJE — ACERO  (AISC 360 Cap. J3)")
         rec.add("Nua", "Tu (del equilibrio)", "", Nua, "F", "",
                 "traccion total del grupo")
-        if elastic:
+        if linear_mode:
+            rec.add("Nua,perno", "Tmax del analisis solido 3D",
+                    "ver seccion I: reaccion en los resortes de los pernos",
+                    Nua_b, "F", "", "el grupo traccionado son los pernos con T > 0")
+        elif elastic:
             rec.add("Nua,perno", "max( |Pu|/n + Mux·yi/Σy² )",
                     "traccion neta: reparto elastico entre todos los pernos",
                     Nua_b, "F")
         else:
             rec.add("Nua,perno", "Nua / n_t",
                     f"{rec.n('F', Nua)} / {n_t}", Nua_b, "F")
-        rec.add("Vua", "Vu" + (" − μ·Pu (friccion)" if prj.loads.friction
+        rec.add("Vua", "Vu" + (" − μ·Pu (friccion)" if prj.eloads.friction
                                and not prj.lug.enabled else ""),
                 ("cortante tomado por la llave de corte" if prj.lug.enabled else ""),
                 Vua, "F")
@@ -139,6 +157,45 @@ def anchor_checks(prj: Project, br: Bearing,
                          Nua_b, 0.75 * Fnt_p * g.Ab, "kip", "AISC Ec. J3-3a",
                          f"F'nt = {u.q('S', Fnt_p)} con frv = {u.q('S', frv)}"))
 
+    # ===================== flexion del perno por separacion libre (stand-off, tuercas de nivelacion)
+    # El cortante que baja por el perno a traves de la separacion libre lo flexiona: voladizo desde la
+    # superficie del concreto hasta el centro del espesor de la placa (la placa queda sujeta por las dos
+    # tuercas).  Con doble empotramiento (placa que no gira) M = V·l/2; en voladizo M = V·l.
+    so = max(0.0, float(getattr(b, "standoff", 0.0)))
+    gr_t = max(0.0, float(getattr(prj.plate, "grout", 0.0)))
+    l_gap = so + gr_t                     # tramo del perno sin apoyo lateral del concreto: separacion + mortero
+    if l_gap > 0.5 * g.db and Vua_b > 1e-9:
+        # un mortero delgado (<= medio diametro) queda cubierto por el factor 0.80 de ACI 17.7.1.2.1;
+        # con mortero grueso o placa elevada se verifica la flexion del perno
+        l_b = l_gap + 0.5 * prj.plate.tp
+        k_fix = 0.5 if str(getattr(b, "fixity", "")).startswith("Doble") else 1.0
+        Mu_b = Vua_b * l_b * k_fix
+        d_e = (4.0 * g.Ase / 3.141592653589793) ** 0.5          # diametro de la seccion roscada
+        Zb = d_e ** 3 / 6.0
+        phiMn = 0.90 * mat.Fy * Zb                               # AISC F11 (seccion redonda, plastico)
+        out.append(Check("blt_m", "Perno — flexion por separacion libre (stand-off)", Mu_b, phiMn, "kip·in",
+                         "AISC F11 / DG1 §3.5",
+                         f"l = stand-off {u.q('L', so)} + mortero {u.q('L', gr_t)} + tp/2 = {u.q('L', l_b)}; "
+                         f"M = V·l·{k_fix:g}; Z = {Zb:.4g} in³, Fy = {u.q('S', mat.Fy)}"))
+        # interaccion traccion + flexion (+ cortante como tension combinada)
+        rt_m = Nua_b / phiRnt if phiRnt > 0 else 0.0
+        rm = Mu_b / phiMn if phiMn > 0 else 0.0
+        out.append(Check("blt_tm", "Perno — interaccion traccion-flexion", rt_m + rm, 1.0, "-",
+                         "AISC H1-1a",
+                         f"T/φTn = {rt_m:.3f} + M/φMn = {rm:.3f};  cortante Vb = {u.q('F', Vua_b)}"))
+        if rec:
+            rec.section("D2. FLEXION DEL PERNO (stand-off)")
+            rec.add("l", "stand-off + mortero + tp/2",
+                    f"{rec.n('L', so)} + {rec.n('L', gr_t)} + {rec.n('L', prj.plate.tp)}/2", l_b, "L",
+                    "", "brazo libre entre el concreto y el centro de la placa")
+            rec.add("Mu,perno", f"Vua,perno · l · {k_fix:g}", f"{rec.n('F', Vua_b)} · {rec.n('L', l_b)} · {k_fix:g}",
+                    Mu_b, "M", "", str(b.fixity))
+            rec.add("Z", "de³/6", f"({d_e:.4g})³/6", Zb, "-", "", "modulo plastico de la seccion roscada")
+            rec.add("φMn", "0.90·Fy·Z", f"0.90·{rec.n('S', mat.Fy)}·{Zb:.4g}", phiMn, "M", "AISC F11")
+            rec.check("Flexion del perno", Mu_b, phiMn, "M", rm, Mu_b <= phiMn, "AISC F11")
+            rec.check("Interaccion traccion-flexion", rt_m + rm, 1.0, "-", rt_m + rm, rt_m + rm <= 1.0,
+                      "AISC H1-1a")
+
     if rec:
         rec.section("E.  ANCLAJES AL CONCRETO  (ACI 318-19 Cap. 17)")
         rec.add("futa", "min( Fu ; 1.9·Fy ; 125 ksi )",
@@ -148,7 +205,7 @@ def anchor_checks(prj: Project, br: Bearing,
         rec.add("φ acero", "traccion / cortante",
                 f"{phi_s_t:.2f} / {phi_s_v:.2f}", None, "-", "ACI Tabla 17.5.3(a)",
                 "elemento " + ("ductil" if mat.ductile else "fragil"))
-        rec.add("φ concreto", "condicion " + ("A" if c.cond_A else "B"),
+        rec.add("φ concreto", "condicion " + ("A" if c.cond_A_eff else "B"),
                 f"{phi_c:.2f}", None, "-", "ACI Tabla 17.5.3(c)")
         if c.seismic:
             rec.add("factor sismico", "0.75 sobre la resistencia del concreto",
@@ -222,7 +279,7 @@ def anchor_checks(prj: Project, br: Bearing,
                     Nb, "F", "ACI Ec. 17.6.2.2.1",
                     "evaluada en unidades inglesas (psi, in) y convertida")
             rec.add("φ concreto (traccion)", f"{b.adh_cat}, condicion "
-                    + ("A" if c.cond_A else "B"), f"{phi_ct:.2f}", None, "-",
+                    + ("A" if c.cond_A_eff else "B"), f"{phi_ct:.2f}", None, "-",
                     "ACI Tabla 17.5.3(c)")
         else:
             rec.add("Nb", ("kc·λa·√f'c·hef^1.5" if hef <= 11 else
@@ -238,8 +295,33 @@ def anchor_checks(prj: Project, br: Bearing,
                   phi_ct * k_seis * Ncbg, "F",
                   Nua / (phi_ct * k_seis * Ncbg) if Ncbg > 0 else 0,
                   Nua <= phi_ct * k_seis * Ncbg, "ACI 17.6.2")
-    out.append(Check("aci_ncb", "Anclaje — arrancamiento del concreto en traccion",
-                     Nua, phi_ct * k_seis * Ncbg, "kip", "ACI 318-19 17.6.2",
+        _ub = ubar(prj)
+        if _ub is not None:
+            rec.section("E2. REFUERZO DEL ARRANCAMIENTO CON BARRAS "
+                        + ("OMEGA (PATAS CON GANCHO)" if _ub["kind"] == "OMEGA" else "U (PATAS RECTAS)") + "  (ACI 318-19 17.5.2)")
+            rec.add("barras " + _ub["kind"], f"{_ub['n']} {_ub['kind']} de {_ub['size']} (db = {_ub['db']:.3f} in, Ab = {_ub['Ab']:.2f} in²)",
+                    f"{_ub['n_legs']} patas, fy = {rec.n('S', _ub['fy'])}", None, "-")
+            rec.add("Nrs", "n_patas · Ab · fy", f"{_ub['n_legs']}·{_ub['Ab']:.2f}·{rec.n('S', _ub['fy'])}",
+                    _ub["Nrs"], "F", "ACI 17.5.2.1")
+            rec.check("Refuerzo U en traccion (φ = 0.75)", Nua, _ub["phi"] * _ub["Nrs"], "F",
+                      Nua / (_ub["phi"] * _ub["Nrs"]), Nua <= _ub["phi"] * _ub["Nrs"], "ACI 17.5.2.1")
+            rec.add("ld (pata recta)", "fy·ψt·ψe/(25 λ √f'c)·db  (20 si db > #6; min 12 in)", "", _ub["ld"], "L",
+                    "ACI 25.4.2.3")
+            rec.add("ldh (gancho)", "fy/(50 λ √f'c)·db  (min 8db, 6 in)", "", _ub["ldh"], "L", "ACI 25.4.3")
+            rec.add("pata", f"sobre la punta del anclaje {rec.n('L', _ub['above'])} / bajo la punta del anclaje {rec.n('L', _ub['below'])}",
+                    f"long. total = {rec.n('L', _ub['leg'])}", _ub["leg"], "L", "",
+                    "seccion critica en la punta del anclaje (z = hef bajo la superficie); ld / ldh se miden de ahi hacia abajo")
+            if _ub["kind"] == "OMEGA":
+                rec.add("gancho", f"cola de 12·db hacia afuera, radio de doblez al eje {rec.n('L', _ub['rb'])}",
+                        f"cola = {rec.n('L', _ub['tail'])}", _ub["tail"], "L", "ACI 25.3.1 / 25.4.3",
+                        "bajo la punta del anclaje se desarrolla ldh (gancho estandar de 90°)")
+    ub = ubar(prj)
+    cap_ncb = phi_ct * k_seis * Ncbg
+    if ub is not None:
+        cap_ncb = max(cap_ncb, ub["phi"] * ub["Nrs"])          # ACI 17.5.2.1: el refuerzo sustituye al concreto
+    out.append(Check("aci_ncb", "Anclaje — arrancamiento del concreto en traccion"
+                     + (" (con refuerzo U)" if ub is not None else ""),
+                     Nua, cap_ncb, "kip", "ACI 318-19 17.6.2" + (" / 17.5.2.1" if ub is not None else ""),
                      f"hef = {u.q('L', hef)}, ANc/ANco = {ANc/ANco:.2f}, ψed = {psi_ed:.2f}, "
                      f"ψc = {psi_c:.2f}, " + (f"ψcp = {psi_cp:.2f}, kc = 17, " if adh else "")
                      + f"Nb = {u.q('F', Nb)}"))
@@ -436,8 +518,12 @@ def anchor_checks(prj: Project, br: Bearing,
                   phi_c * k_seis * Vcbg, "F",
                   Vua / (phi_c * k_seis * Vcbg) if Vcbg > 0 else 0,
                   Vua <= phi_c * k_seis * Vcbg, "ACI 17.7.2")
-    out.append(Check("aci_vcb", "Anclaje — arrancamiento del concreto en cortante",
-                     Vua, phi_c * k_seis * Vcbg, "kip", "ACI 318-19 17.7.2",
+    cap_vcb = phi_c * k_seis * Vcbg
+    if ub is not None:
+        cap_vcb = max(cap_vcb, ub["phi"] * ub["Nrs"])           # ACI 17.7.2.5: refuerzo de anclaje en cortante
+    out.append(Check("aci_vcb", "Anclaje — arrancamiento del concreto en cortante"
+                     + (" (con refuerzo U)" if ub is not None else ""),
+                     Vua, cap_vcb, "kip", "ACI 318-19 17.7.2" + (" / 17.7.2.5" if ub is not None else ""),
                      ("Cortante tomado por la llave de corte." if prj.lug.enabled else
                       f"ca1 = {u.q('L', ca1)}, Avc/Avco = {Avc/Avco:.2f}, ψed,V = {psi_edV:.2f}")))
 
@@ -457,6 +543,35 @@ def anchor_checks(prj: Project, br: Bearing,
         rec.check("Pryout", Vua, phi_c * k_seis * Vcpg, "F",
                   Vua / (phi_c * k_seis * Vcpg) if Vcpg > 0 else 0,
                   Vua <= phi_c * k_seis * Vcpg, "ACI 17.7.3")
+
+    if ub is not None:
+        nm = "Omega" if ub["kind"] == "OMEGA" else "U"
+        dev = "ldh (gancho 90°)" if ub["kind"] == "OMEGA" else "ld (recta)"
+        desc = (f"{ub['n']} {nm} {ub['size']} ({ub['n_legs']} patas, fy = {u.q('S', ub['fy'])}); pata {u.q('L', ub['leg'])} "
+                f"(sobre la punta del anclaje {u.q('L', ub['above'])}, bajo la punta del anclaje {u.q('L', ub['below'])})")
+        # 1) resistencia del refuerzo a traccion (ACI 17.5.2.1, condicion A, φ = 0.75)
+        out.append(Check("aci_ubar_ten", f"Refuerzo {nm} — resistencia a traccion (φ·n·Ab·fy)", Nua, ub["phi"] * ub["Nrs"], "kip",
+                         "ACI 318-19 17.5.2.1", desc + f"; Nrs = {u.q('F', ub['Nrs'])}, φ = {ub['phi']:g}"))
+        # 2) desarrollo bajo la punta del anclaje (A: ld de barra recta, B: ldh del gancho)
+        out.append(Check("aci_ubar_dev", f"Refuerzo {nm} — desarrollo bajo la punta del anclaje: {dev}",
+                         ub["dev"], max(ub["below"], 0.0), "in",
+                         "ACI 318-19 17.5.2.1 / " + ("25.4.3" if ub["kind"] == "OMEGA" else "25.4.2"),
+                         desc + f"; se requiere {u.q('L', ub['dev'])}"
+                         + ("; la pata no cabe en el pedestal" if ub["depth"] + ub["leg"] > prj.conc.ha + 1e-6 else "")))
+        # 3) desarrollo sobre la punta del anclaje (el doblez superior / gancho)
+        out.append(Check("aci_ubar_hook", f"Refuerzo {nm} — desarrollo sobre la punta del anclaje: ldh",
+                         ub["ldh"], max(ub["above"], 0.0), "in", "ACI 318-19 25.4.3",
+                         f"ldh = {u.q('L', ub['ldh'])}; tramo horizontal a {u.q('L', ub['depth'])} de la superficie"))
+        # 4) cabe en el pedestal (profundidad + doblez) y la cola con su recubrimiento
+        need_h = ub["depth"] + ub["leg"] + (ub["rb"] + ub["db"] if ub["kind"] == "OMEGA" else 0.0)
+        out.append(Check("aci_ubar_fit", f"Refuerzo {nm} — cabe en la altura del pedestal", need_h, prj.conc.ha, "in",
+                         "ACI 318-19 20.5.1 (recubrimiento)", f"profundidad {u.q('L', ub['depth'])} + pata {u.q('L', ub['leg'])}"
+                         + (f" + doblez {u.q('L', ub['rb'] + ub['db'])}" if ub["kind"] == "OMEGA" else "")
+                         + f"; altura disponible {u.q('L', prj.conc.ha)}"))
+        if ub["kind"] == "OMEGA":
+            out.append(Check("aci_ubar_cover", "Refuerzo Omega — recubrimiento lateral de la cola del gancho", 1.5,
+                             max(ub["cover"], 0.0), "in", "ACI 318-19 20.5.1",
+                             f"cola {u.q('L', ub['tail'])} hacia afuera; recubrimiento que queda {u.q('L', ub['cover'])}, minimo 1.5 in"))
 
     # ============================================= ACI 17.8 interaccion
     rN = max([ch.ratio for ch in out if ch.key in ("aci_nsa", "aci_ncb", "aci_np", "aci_nsb", "aci_na")] + [0.0])

@@ -20,7 +20,7 @@ hidden = []
 hidden += collect_submodules("scipy.sparse")
 hidden += ["mpl_toolkits.mplot3d", "scipy.sparse.linalg", "scipy.sparse.csgraph",
            "matplotlib.backends.backend_qtagg", "matplotlib.backends.backend_agg",
-           "openpyxl", "docx", "pandas", "reportlab", "reportlab.platypus",
+           "openpyxl", "docx", "pandas", "reportlab", "reportlab.platypus", "PySide6.QtOpenGL", "PySide6.QtOpenGLWidgets",
            "reportlab.lib.styles", "PIL", "gmsh"]
 
 a = Analysis(
@@ -41,7 +41,7 @@ exe = EXE(
     exclude_binaries=True,
     name="PlacaBasePro",
     console=False,            # sin ventana de consola
-    icon=None,
+    icon="placabase/data/placabasepro.ico",
     upx=False,
 )
 coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name="PlacaBasePro")

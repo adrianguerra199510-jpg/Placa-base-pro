@@ -3,10 +3,12 @@
 from __future__ import annotations
 from PySide6.QtWidgets import (QWidget, QFormLayout, QDoubleSpinBox, QSpinBox,
                                QComboBox, QCheckBox, QLineEdit, QLabel, QGroupBox,
-                               QVBoxLayout, QScrollArea, QFrame)
-from PySide6.QtCore import Qt, Signal, QEvent, QObject
+                               QVBoxLayout, QScrollArea, QFrame, QTableWidget, QApplication, QAbstractButton,
+                               QTextBrowser)
+from PySide6.QtGui import QKeySequence, QPainter, QPen, QColor, QPainterPath
+from PySide6.QtCore import Qt, Signal, QEvent, QObject, QPointF
 
-from .units import UnitSet
+from .units import UnitSet, parse_xy_clipboard
 
 
 def _get(obj, path):
@@ -34,6 +36,7 @@ class Form(QWidget):
         self.us = UnitSet()       # la ventana principal la reemplaza
         self._lay = None
         self._help = {}           # widget -> descripcion
+        self.groups = {}          # titulo -> caja del grupo
         self.info = None          # panel de ayuda al pie del formulario
         self.group("")
 
@@ -53,7 +56,7 @@ class Form(QWidget):
         if ev.type() in (QEvent.FocusIn, QEvent.Enter, QEvent.HoverEnter):
             txt = self._help.get(obj)
             if txt and self.info is not None:
-                self.info.setText(txt)
+                self.info.setHtml(txt)
         return False
 
     def help_panel(self):
@@ -63,13 +66,13 @@ class Form(QWidget):
         fr.setStyleSheet("QFrame{background:#f4f7fb;border:1px solid #c8d6e8;}")
         lay = QVBoxLayout(fr)
         lay.setContentsMargins(8, 6, 8, 6)
-        self.info = QLabel("Pase el cursor sobre cualquier campo para ver su "
-                           "descripcion.")
-        self.info.setWordWrap(True)
-        self.info.setTextFormat(Qt.RichText)
-        self.info.setStyleSheet("color:#24405f; font-size:8.5pt;")
-        self.info.setMinimumHeight(52)
-        self.info.setAlignment(Qt.AlignTop)
+        # altura FIJA con su propio scroll: si el texto cambiara el alto del panel, aparecian/desaparecian las barras
+        # del formulario y todo se movia bajo el cursor (se notaba sobre todo en Pernos)
+        self.info = QTextBrowser()
+        self.info.setFrameShape(QFrame.NoFrame)
+        self.info.setStyleSheet("QTextBrowser{background:transparent;color:#24405f;font-size:8.5pt;border:0;}")
+        self.info.setFixedHeight(84)
+        self.info.setHtml("Pase el cursor sobre cualquier campo para ver su descripcion.")
         lay.addWidget(self.info)
         self.outer.addWidget(fr)
         return fr
@@ -77,12 +80,33 @@ class Form(QWidget):
     # ----------------------------------------------------------- estructura
     def group(self, title):
         box = QGroupBox(title) if title else QWidget()
+        self.groups[title] = box
         lay = QFormLayout(box)
         lay.setLabelAlignment(Qt.AlignRight)
         lay.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         self.outer.addWidget(box)
         self._lay = lay
         return box
+
+    def w(self, path):
+        """Widget del campo enlazado a `path` ('plate.N')."""
+        for f in self.fields:
+            if f[0] == path:
+                return f[1]
+        raise KeyError(path)
+
+    def show_field(self, path_or_widget, on):
+        """Muestra u oculta la fila completa (etiqueta + campo) de un campo."""
+        wd = self.w(path_or_widget) if isinstance(path_or_widget, str) else path_or_widget
+        par = wd.parentWidget()
+        lay = par.layout() if par is not None else None
+        if isinstance(lay, QFormLayout):
+            lay.setRowVisible(wd, bool(on))
+        else:
+            wd.setVisible(bool(on))
+
+    def show_group(self, title, on):
+        self.groups[title].setVisible(bool(on))
 
     def note(self, text):
         lb = QLabel(text)
@@ -200,4 +224,78 @@ def scroll(widget):
     sa.setWidget(widget)
     sa.setWidgetResizable(True)
     sa.setFrameShape(QScrollArea.NoFrame)
+    sa.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)      # el ancho no cambia al aparecer/desaparecer la barra
     return sa
+
+
+class PasteTable(QTableWidget):
+    """Tabla de coordenadas que acepta Ctrl+V desde Excel y Ctrl+C hacia Excel."""
+    pasted = Signal(list, int)          # filas [(x, y)], fila de inicio
+
+    def keyPressEvent(self, ev):
+        if ev.matches(QKeySequence.Paste):
+            rows = parse_xy_clipboard(QApplication.clipboard().text())
+            if rows:
+                r = self.currentRow()
+                self.pasted.emit(rows, max(0, r))
+            return
+        if ev.matches(QKeySequence.Copy):
+            sel = sorted({(i.row(), i.column()) for i in self.selectedIndexes()})
+            if sel:
+                r0, r1 = sel[0][0], sel[-1][0]
+                lines = []
+                for r in range(r0, r1 + 1):
+                    lines.append("\t".join(
+                        (self.item(r, c).text() if self.item(r, c) else "") for c in (0, 1)))
+                QApplication.clipboard().setText("\n".join(lines))
+            return
+        super().keyPressEvent(ev)
+
+
+class ThemeSwitch(QAbstractButton):
+    """Interruptor compacto claro/oscuro: solo un sol y una luna (sin texto); la mitad activa se resalta."""
+    def __init__(self, dark=False, parent=None):
+        super().__init__(parent)
+        self.setCheckable(True)
+        self.setChecked(bool(dark))
+        self.setFixedSize(54, 22)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip("Tema claro / oscuro (los graficos siempre van sobre fondo blanco)")
+
+    def paintEvent(self, ev):
+        import math
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        w, h = self.width(), self.height()
+        dark = self.isChecked()
+        p.setPen(QPen(QColor("#E85D0C" if self.underMouse() else "#8a929c"), 1.0))
+        p.setBrush(QColor("#2c3643" if dark else "#e4e7eb"))
+        p.drawRoundedRect(0.5, 0.5, w - 1, h - 1, 5, 5)
+        # perilla bajo la opcion activa
+        kx = w / 2 if dark else 1
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor("#E85D0C"))
+        p.drawRoundedRect(kx + 1, 2, w / 2 - 3, h - 4, 4, 4)
+        # sol (izquierda)
+        cx, cy = w * 0.25, h / 2
+        col = QColor("#ffffff" if not dark else "#f5b942")
+        p.setBrush(col)
+        p.drawEllipse(QPointF(cx, cy), 3.6, 3.6)
+        p.setPen(QPen(col, 1.3))
+        for i in range(8):
+            a = i * math.pi / 4
+            p.drawLine(QPointF(cx + 5.6 * math.cos(a), cy + 5.6 * math.sin(a)),
+                       QPointF(cx + 7.4 * math.cos(a), cy + 7.4 * math.sin(a)))
+        # luna (derecha): disco menos otro desplazado
+        mx, my = w * 0.75, h / 2
+        path = QPainterPath()
+        path.addEllipse(QPointF(mx, my), 6.0, 6.0)
+        cut = QPainterPath()
+        cut.addEllipse(QPointF(mx + 3.2, my - 2.2), 5.2, 5.2)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor("#ffffff" if dark else "#59626d"))
+        p.drawPath(path.subtracted(cut))
+        p.end()
+
+    def sizeHint(self):
+        return self.size()
